@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "malbox-config",
     "malbox-database",
@@ -19,7 +19,7 @@ members = [
     "malbox-resources",
     "malbox-packer",
     "malbox-ansible",
-    "malbox-io-utils", "malbox-hcl-utils",
+    "malbox-io-utils",
 ]
 [workspace.dependencies]
 tokio = { version = "1.37.0", features = ["full", "fs"] }
@@ -49,3 +49,4 @@ tonic = "0.13.0"
 semver = { version = "1.0.26", features = [ "serde" ] }
 uuid = { version = "1.8.0", features = ["fast-rng", "v4", "serde"] }
 iceoryx2 = { version = "0.5.0", features = [ "logger_tracing" ] }
+hcl-rs = "0.18.5"
