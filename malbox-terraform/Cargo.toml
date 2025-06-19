@@ -6,8 +6,9 @@ edition = "2024"
 [dependencies]
 malbox-database.path = "../malbox-database"
 malbox-io-utils.path = "../malbox-io-utils"
-malbox-hcl-utils.path = "../malbox-hcl-utils"
 malbox-config.path = "../malbox-config"
 tracing.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+hcl-rs.workspace = true
+serde_json.workspace = true
