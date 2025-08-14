@@ -181,9 +181,9 @@ impl SourceRegistry {
 
         if sources.is_empty() {
             return Err(Error::SourceNotFound(format!(
-            "No source found matching criteria: family={:?}, edition={:?}, version={:?}, variant={:?}",
-            family_id, edition_id, version, variant_id
-        )));
+                "No source found matching criteria: family={:?}, edition={:?}, version={:?}, variant={:?}",
+                family_id, edition_id, version, variant_id
+            )));
         }
 
         // Sort by recency and return the most recent one
@@ -250,9 +250,9 @@ impl SourceRegistry {
 
         if results.is_empty() {
             return Err(Error::SourceNotFound(format!(
-            "No sources matching criteria: family={:?}, edition={:?}, version={:?}, variant={:?}",
-            family_id, edition_id, version, variant_id
-        )));
+                "No sources matching criteria: family={:?}, edition={:?}, version={:?}, variant={:?}",
+                family_id, edition_id, version, variant_id
+            )));
         }
 
         Ok(results)

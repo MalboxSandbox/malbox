@@ -17,4 +17,4 @@ magic.workspace = true
 dialoguer.workspace = true
 reqwest = { version = "0.12.12", features = [ "stream" ] }
 tokio-stream = "0.1.17"
-clap = "4.5.28"
+clap = { version = "4.5.28", features = ["derive"] }

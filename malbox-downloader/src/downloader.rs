@@ -1,9 +1,9 @@
 use crate::error::{Error, Result};
 use crate::registry::{SourceRegistry, SourceType, SourceVariant};
 use bon::Builder;
-use dialoguer::{theme::ColorfulTheme, Confirm};
+use dialoguer::{Confirm, theme::ColorfulTheme};
 use indicatif::{ProgressBar, ProgressStyle};
-use magic::{cookie::DatabasePaths, cookie::Flags as CookieFlags, Cookie};
+use magic::{Cookie, cookie::DatabasePaths, cookie::Flags as CookieFlags};
 use malbox_hashing::get_sha256;
 use reqwest::Client;
 use std::path::{Path, PathBuf};
