@@ -23,11 +23,7 @@ pub enum TerraformError {
     BinaryNotFound { message: String },
     /// Workspace operation failed.
     #[error("Workspace operation failed: {operation}")]
-    WorkspaceError {
-        operation: String,
-        #[source]
-        source: Box<TerraformError>,
-    },
+    WorkspaceError { operation: String, message: String },
     /// State operation failed.
     #[error("State operation failed: {operation}")]
     StateError {
@@ -49,7 +45,7 @@ pub enum TerraformError {
     HclParsing {
         message: String,
         #[source]
-        source: malbox_hcl_utils::error::HclError,
+        source: hcl::Error,
     },
     /// File I/O error.
     #[error("File I/O error: {operation}")]
@@ -70,6 +66,16 @@ pub enum TerraformError {
     /// Resource operation failed.
     #[error("Resource operation failed for '{resource}': {message}")]
     ResourceOperation { resource: String, message: String },
+    /// Serialization failed.
+    #[error("JSON serialization error: {message}")]
+    JsonSerialization {
+        message: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// Parsing error.
+    #[error("Parsing error: {0}")]
+    Parsing(String),
 }
 
 pub type Result<T> = std::result::Result<T, TerraformError>;

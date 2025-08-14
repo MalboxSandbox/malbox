@@ -12,3 +12,4 @@ thiserror.workspace = true
 serde.workspace = true
 hcl-rs.workspace = true
 serde_json.workspace = true
+console = "0.15.10"
