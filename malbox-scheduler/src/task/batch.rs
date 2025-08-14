@@ -1,5 +1,5 @@
-use super::config::WorkerConfig;
-use crate::error::Result;
+use super::{ResourceAllocation, TaskResult};
+use crate::{error::Result, worker::config::WorkerConfig};
 use malbox_database::repositories::tasks::Task;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};

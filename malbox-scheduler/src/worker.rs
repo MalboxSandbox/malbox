@@ -187,13 +187,21 @@ impl Worker {
         let result = self.executor.execute(job.task, job.resources).await;
         let duration = start_time.elapsed();
 
+        // Create a copy of the result for notification
+        let result_for_notification = match &result {
+            Ok(task_result) => Ok(task_result.clone()),
+            Err(_) => Err(crate::error::SchedulerError::Internal(
+                "Job execution failed".to_string(),
+            )),
+        };
+
         // Send result back to caller
-        let _ = job.result_tx.send(result.clone());
+        let _ = job.result_tx.send(result);
 
         // Notify pool of completion
         let event = WorkerEvent::JobCompleted {
             worker_id: self.id.clone(),
-            job_result: result,
+            job_result: result_for_notification,
             duration,
         };
 
@@ -213,15 +221,22 @@ impl Worker {
             .await?;
         let duration = start_time.elapsed();
 
-        // Send individual results back
-        for (result, result_tx) in results.iter().zip(batch.result_channels.into_iter()) {
-            let _ = result_tx.send(result.clone());
+        // Count successful results and send individual results back
+        let batch_size = results.len();
+        let mut successful_count = 0;
+
+        for (result, result_tx) in results.into_iter().zip(batch.result_channels.into_iter()) {
+            if result.is_ok() {
+                successful_count += 1;
+            }
+            let _ = result_tx.send(result);
         }
 
         // Notify pool of batch completion
         let event = WorkerEvent::BatchCompleted {
             worker_id: self.id.clone(),
-            batch_results: results,
+            batch_size,
+            successful_count,
             duration,
         };
 

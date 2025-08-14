@@ -1,9 +1,8 @@
-use super::config::WorkerConfig;
-use super::handle::WorkerHandle;
-use super::WorkerEvent;
-use super::{Worker, WorkerId};
-use crate::error::Result;
-use crate::task::executor::TaskExecutor;
+use super::{Worker, WorkerConfig, WorkerEvent, WorkerHandle, WorkerId};
+use crate::{
+    error::{Result, WorkerError},
+    task::executor::TaskExecutor,
+};
 use malbox_database::repositories::tasks::Task;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
@@ -96,7 +95,7 @@ impl WorkerPool {
     /// Create a new worker with the given configuration.
     pub async fn create_worker(&self, config: WorkerConfig) -> Result<()> {
         if self.workers.read().await.len() >= self.max_workers {
-            return Err(Error::MaxWorkersReached);
+            return Err(WorkerError::MaxWorkersReached.into());
         }
 
         // Create worker

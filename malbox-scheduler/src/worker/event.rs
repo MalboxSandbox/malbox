@@ -1,6 +1,14 @@
 use super::WorkerId;
-use crate::error::Result;
+use crate::error::{Result, WorkerError};
+use crate::task::TaskResult;
 use tokio::time::Duration;
+
+#[derive(Debug)]
+pub enum ShutdownReason {
+    Requested,
+    IdleTimeout,
+    Error(String),
+}
 
 /// Events that workers send back to the pool for coordination.
 #[derive(Debug)]
@@ -14,7 +22,8 @@ pub enum WorkerEvent {
     /// Worker has processed a batch and is now idle.
     BatchCompleted {
         worker_id: WorkerId,
-        batch_results: Vec<Result<TaskResult>>,
+        batch_size: usize,
+        successful_count: usize,
         duration: Duration,
     },
     /// Worker is shutting down.
@@ -27,11 +36,4 @@ pub enum WorkerEvent {
         worker_id: WorkerId,
         error: WorkerError,
     },
-}
-
-#[derive(Debug)]
-pub enum ShutdownReason {
-    IdleTimeout,
-    Requested,
-    Error(String),
 }

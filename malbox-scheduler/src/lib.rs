@@ -4,11 +4,15 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-mod error;
-mod resource;
-mod scheduler;
-mod task;
-mod worker;
+pub mod error;
+pub mod resource;
+pub mod scheduler;
+pub mod task;
+pub mod worker;
+
+// Re-export common types
+pub use error::{Result, SchedulerError, TaskError, WorkerError};
+pub use task::{PluginContext, PluginResult, PluginStatus, ResourceAllocation, TaskResult};
 
 pub async fn init_scheduler() {
     todo!()

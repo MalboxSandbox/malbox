@@ -1,6 +1,6 @@
 use super::pool::WorkerPool;
 use crate::error::Result;
-use crate::task::executor::TaskExecutor;
+use crate::task::{ResourceAllocation, TaskResult, executor::TaskExecutor};
 use malbox_database::repositories::tasks::Task;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};

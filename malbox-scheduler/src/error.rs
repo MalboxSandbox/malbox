@@ -16,7 +16,7 @@ pub enum SchedulerError {
     Internal(String),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum WorkerError {
     #[error("Worker unavailable")]
     WorkerUnavailable,

@@ -2,6 +2,12 @@ use malbox_database::repositories::machinery::MachinePlatform;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ExecutionMode {
+    Single,
+    Batch,
+}
+
 /// Configuration for worker instances.
 ///
 /// Defines all aspects of worker behavior including task compatibility,

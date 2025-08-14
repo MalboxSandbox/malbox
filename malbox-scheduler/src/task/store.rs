@@ -1,10 +1,9 @@
-use super::Result;
-use super::TaskError;
-use malbox_database::repositories::machinery::update_machine;
-use malbox_database::repositories::tasks::{
-    fetch_pending_tasks, fetch_task, insert_task, update_task_status, Task, TaskState,
-};
+use crate::error::{Result, TaskError};
 use malbox_database::PgPool;
+use malbox_database::repositories::{
+    machinery::update_machine,
+    tasks::{Task, TaskState, fetch_pending_tasks, fetch_task, insert_task, update_task_status},
+};
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use time::PrimitiveDateTime;

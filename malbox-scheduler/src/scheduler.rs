@@ -1,10 +1,11 @@
 use super::error::Result;
 use crate::resource::ResourceManager;
-use crate::task::{queue::TaskQueue, store::TaskStore};
+use crate::task::{TaskResult, queue::TaskQueue, store::TaskStore};
 use crate::worker::event::WorkerEvent;
 use crate::worker::pool::WorkerPool;
-use malbox_database::repositories::tasks::{Task, TaskState};
 use malbox_database::PgPool;
+use malbox_database::repositories::tasks::{Task, TaskState};
+use malbox_plugin_internal::PluginRegistry;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
@@ -29,9 +30,15 @@ impl Scheduler {
         worker_events: mpsc::Receiver<WorkerEvent>,
         shutdown_notification: oneshot::Receiver<()>,
     ) -> Self {
-        let task_store = Arc::new(TaskStore::new(db_pool));
+        let task_store = Arc::new(TaskStore::new(db_pool.clone()));
         let task_queue = Arc::new(TaskQueue::new());
-        let worker_pool = Arc::new(WorkerPool::new(10, /* executor */ todo!()));
+        let plugin_registry = Arc::new(PluginRegistry::new());
+        let executor = Arc::new(crate::task::executor::TaskExecutor::new(
+            task_store.clone(),
+            plugin_registry,
+            resource_manager.clone(),
+        ));
+        let worker_pool = Arc::new(WorkerPool::new(10, executor));
 
         Self {
             task_store,
@@ -107,26 +114,18 @@ impl Scheduler {
 
             WorkerEvent::BatchCompleted {
                 worker_id,
-                batch_results,
+                batch_size,
+                successful_count,
                 duration,
             } => {
                 info!(
-                    "Worker {} completed batch of {} jobs in {:?}",
+                    "Worker {} completed batch of {} jobs ({} successful) in {:?}",
                     worker_id.as_string(),
-                    batch_results.len(),
+                    batch_size,
+                    successful_count,
                     duration
                 );
-
-                for result in batch_results {
-                    match result {
-                        Ok(task_result) => {
-                            self.handle_task_completion(task_result).await?;
-                        }
-                        Err(e) => {
-                            error!("Batch job failed: {}", e);
-                        }
-                    }
-                }
+                // Individual task completion is handled through their result channels
             }
 
             WorkerEvent::WorkerShutdown { worker_id, reason } => {

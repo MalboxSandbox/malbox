@@ -1,12 +1,73 @@
 use malbox_config::Config;
 use malbox_database::{
-    repositories::machinery::{
-        fetch_machine, fetch_machines, lock_machine, unlock_machine, Machine, MachineFilter,
-        MachinePlatform,
-    },
     PgPool,
+    repositories::machinery::{
+        Machine, MachineFilter, MachinePlatform, fetch_machine, fetch_machines, lock_machine,
+        unlock_machine,
+    },
 };
-use malbox_infra::terraform::manager::{TerraformManager, VmConfig};
+// TODO: Implement terraform integration
+// use malbox_infra::terraform::manager::{TerraformManager, VmConfig};
+
+// Stub types for now
+pub struct TerraformManager;
+pub struct VmConfig {
+    pub name: String,
+    pub platform: malbox_database::repositories::machinery::MachinePlatform,
+    pub memory: u32,
+    pub cpus: u32,
+    pub disk_size: u32,
+    pub snapshot: Option<String>,
+}
+
+impl TerraformManager {
+    pub fn builder() -> TerraformManagerBuilder {
+        TerraformManagerBuilder
+    }
+
+    pub async fn initialize(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    pub async fn provision_vm(
+        &self,
+        _config: &VmConfig,
+    ) -> std::result::Result<VmInstance, String> {
+        Ok(VmInstance {
+            id: "vm-stub".to_string(),
+            name: _config.name.clone(),
+            platform: _config.platform.clone(),
+            ip: "192.168.1.100".to_string(),
+            snapshot: _config.snapshot.clone(),
+            interface: None,
+        })
+    }
+}
+
+pub struct VmInstance {
+    pub id: String,
+    pub name: String,
+    pub platform: malbox_database::repositories::machinery::MachinePlatform,
+    pub ip: String,
+    pub snapshot: Option<String>,
+    pub interface: Option<String>,
+}
+
+pub struct TerraformManagerBuilder;
+
+impl TerraformManagerBuilder {
+    pub fn db_pool(self, _pool: PgPool) -> Self {
+        self
+    }
+
+    pub fn config(self, _config: Config) -> Self {
+        self
+    }
+
+    pub fn build(self) -> std::result::Result<TerraformManager, String> {
+        Ok(TerraformManager)
+    }
+}
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -110,7 +171,8 @@ impl ResourceManager {
             TerraformManager::builder()
                 .db_pool(db.clone())
                 .config(config.clone())
-                .build(),
+                .build()
+                .expect("Failed to build TerraformManager"),
         );
 
         Self {

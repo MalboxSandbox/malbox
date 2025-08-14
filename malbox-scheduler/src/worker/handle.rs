@@ -1,9 +1,10 @@
-use super::job::Job;
-use super::WorkerId;
-use crate::error::Result;
+use crate::{
+    error::{Result, WorkerError},
+    worker::{Job, WorkerId},
+};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
 use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot};
 
 /// Handle to a worker instance that allows control over the worker.
 ///
@@ -34,14 +35,14 @@ impl WorkerHandle {
         self.job_tx
             .send(job)
             .await
-            .map_err(|_| Error::WorkerUnavailable)
+            .map_err(|_| WorkerError::WorkerUnavailable.into())
     }
 
     /// Request worker shutdown.
     pub async fn shutdown(&self) -> Result<()> {
         let mut shutdown_opt = self.shutdown_tx.lock().await;
         if let Some(tx) = shutdown_opt.take() {
-            tx.send(()).map_err(|_| Error::WorkerUnavailable)?;
+            tx.send(()).map_err(|_| WorkerError::WorkerUnavailable)?;
         }
         Ok(())
     }
