@@ -10,7 +10,7 @@
 //! a plugin would contain extra logic and dependencies for generating such files.
 
 use crate::error::{PluginRegistryError, Result};
-use malbox_plugin_utils::interfaces::plugin::{ExecutionContext, ExecutionPolicy, GuestPlatform};
+use crate::plugin_types::{ExecutionContext, ExecutionPolicy, GuestPlatform};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

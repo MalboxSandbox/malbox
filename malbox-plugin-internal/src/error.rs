@@ -1,5 +1,13 @@
-use crate::errors::InternalError;
 use thiserror::Error;
+
+// TODO: Implement proper internal error handling
+#[derive(Error, Debug)]
+pub enum InternalError {
+    #[error("Internal error: {0}")]
+    Generic(String),
+    #[error("Communication error: {0}")]
+    Communication(#[from] malbox_communication::error::CommunicationError),
+}
 
 #[derive(Error, Debug)]
 pub enum PluginManagerError {

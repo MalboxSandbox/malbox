@@ -22,8 +22,8 @@ pub struct PluginManager {
 impl PluginManager {
     /// Create a new plugin manager.
     pub fn new(plugins_dir: PathBuf) -> Self {
-        let registry = Arc::new(PluginRegistry::new(plugins_dir));
-        let host_ipc = Arc::new(RwLock::new(HostIpc::new().unwrap()));
+        let registry = Arc::new(PluginRegistry::with_directory(plugins_dir));
+        let host_ipc = Arc::new(RwLock::new(HostChannel::new()));
 
         Self { registry, host_ipc }
     }
@@ -31,7 +31,11 @@ impl PluginManager {
     /// Initialize the plugin system.
     pub async fn initialize(&mut self) -> Result<()> {
         self.registry.initialize().await?;
-        self.host_ipc.write().unwrap().initialize()?;
+        self.host_ipc
+            .write()
+            .unwrap()
+            .initialize()
+            .map_err(|e| super::error::InternalError::Communication(e))?;
 
         Ok(())
     }

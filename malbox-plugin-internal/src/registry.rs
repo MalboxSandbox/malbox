@@ -6,9 +6,9 @@
 use malbox_communication::PluginChannel;
 
 use crate::error::{PluginRegistryError, Result};
+use crate::plugin_types::GuestPlatform;
 use discovery::PluginDiscovery;
 use instance::PluginInstance;
-use malbox_plugin_utils::interfaces::plugin::GuestPlatform;
 use metadata::PluginManifest;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -39,8 +39,13 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// Create a new plugin registry with default plugins directory.
+    pub fn new() -> Self {
+        Self::with_directory(PathBuf::from("./plugins"))
+    }
+
     /// Create a new plugin registry.
-    pub fn new(plugins_dir: PathBuf) -> Self {
+    pub fn with_directory(plugins_dir: PathBuf) -> Self {
         Self {
             plugins_dir: plugins_dir.clone(),
             plugins: RwLock::new(HashMap::new()),
