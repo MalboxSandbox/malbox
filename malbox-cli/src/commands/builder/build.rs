@@ -7,10 +7,10 @@ use crate::{
     },
 };
 use clap::Parser;
-use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Select};
+use dialoguer::{Confirm, FuzzySelect, Select, theme::ColorfulTheme};
 use malbox_config::Config;
 use malbox_downloader::{Downloader, SourceRegistry, SourceVariant};
-use malbox_infra::packer::{
+use malbox_packer::{
     build::{BuildConfig, BuildManager},
     templates::{Template, TemplateManager},
 };
@@ -48,6 +48,11 @@ pub struct BuildArgs {
     pub force_download: bool,
     #[arg(long, default_value = "false")]
     pub non_interactive: bool,
+    #[arg(
+        long,
+        help = "Build only the specified source (e.g., virtualbox-iso.windows_analyzer)"
+    )]
+    pub only: Option<String>,
 }
 
 impl Command for BuildArgs {
@@ -67,6 +72,7 @@ impl Command for BuildArgs {
             variables: vars,
             force_download,
             non_interactive,
+            only: only_opt,
         } = self;
 
         let platform = match platform_opt {
@@ -176,6 +182,52 @@ impl Command for BuildArgs {
             }
         }
 
+        // Handle source selection
+        let selected_source = if let Some(only) = only_opt.clone() {
+            // Validate the provided source exists
+            let source_exists = template
+                .sources
+                .iter()
+                .any(|s| format!("{}.{}", s.source_type, s.name) == only);
+
+            if !source_exists {
+                let available_sources: Vec<String> = template
+                    .sources
+                    .iter()
+                    .map(|s| format!("{}.{}", s.source_type, s.name))
+                    .collect();
+                return Err(CliError::InvalidArgument(format!(
+                    "Source '{}' not found. Available sources: {}",
+                    only,
+                    available_sources.join(", ")
+                )));
+            }
+            Some(only)
+        } else if template.sources.len() > 1 && !non_interactive {
+            // Prompt user to select a source
+            let source_names: Vec<String> = template
+                .sources
+                .iter()
+                .map(|s| format!("{}.{}", s.source_type, s.name))
+                .collect();
+
+            let selection = Select::with_theme(&ColorfulTheme::default())
+                .with_prompt("Select builder to use")
+                .items(&source_names)
+                .default(0)
+                .interact()?;
+
+            Some(source_names[selection].clone())
+        } else if template.sources.len() == 1 {
+            // If only one source, use it automatically
+            Some(format!(
+                "{}.{}",
+                template.sources[0].source_type, template.sources[0].name
+            ))
+        } else {
+            None
+        };
+
         let template_prompt = TemplatePrompt::default();
         template_prompt.display_template_info(&template)?;
 
@@ -201,6 +253,7 @@ impl Command for BuildArgs {
             working_dir: working_dir_opt,
             iso: iso_opt,
             variables,
+            only: selected_source,
         };
 
         let builder = BuildManager::new(config.paths.clone());
@@ -209,7 +262,7 @@ impl Command for BuildArgs {
                 builder
                     .build(build_config)
                     .await
-                    .map_err(|e| CliError::Infrastructure(e))
+                    .map_err(|e| CliError::Packer(e))
             })
             .await
     }

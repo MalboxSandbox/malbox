@@ -1,7 +1,7 @@
 use crate::{commands::Command, error::Result, utils::progress::Progress};
 use clap::Parser;
 use malbox_config::Config;
-use malbox_infra::packer::{
+use malbox_packer::{
     build::{BuildConfig, BuildManager},
     templates::TemplateManager,
 };
@@ -20,7 +20,19 @@ impl Command for InitArgs {
         let builder = BuildManager::new(config.paths.clone());
 
         Progress::new()
-            .run("Initializing builder environment...", async { todo!() })
-            .await
+            .run("Initializing builder environment...", async {
+                builder
+                    .initialize()
+                    .await
+                    .map_err(|e| crate::error::CliError::Packer(e))
+            })
+            .await?;
+
+        println!("Builder environment initialized successfully!");
+        println!("- Packer binary validated");
+        println!("- Required plugins downloaded and installed");
+        println!("- Templates ready for building");
+
+        Ok(())
     }
 }

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use console::style;
-use dialoguer::{theme::ColorfulTheme, Input, Select};
-use malbox_infra::packer::templates::{Template, Variable};
+use dialoguer::{Input, Select, theme::ColorfulTheme};
+use malbox_packer::templates::{Template, Variable};
 use std::collections::HashMap;
 
 pub struct TemplatePrompt {
@@ -56,17 +56,20 @@ impl TemplatePrompt {
                     .with_prompt(&prompt)
                     .items(enum_values)
                     .default(0)
-                    .interact()?;
+                    .interact()
+                    .map_err(|e| crate::error::CliError::Dialoguer(e))?;
                 enum_values[selection].clone()
             } else if var.sensitive {
                 dialoguer::Password::with_theme(&self.theme)
                     .with_prompt(&prompt)
-                    .interact()?
+                    .interact()
+                    .map_err(|e| crate::error::CliError::Dialoguer(e))?
             } else {
                 Input::with_theme(&self.theme)
                     .with_prompt(&prompt)
                     .default(var.default.clone().unwrap_or_default())
-                    .interact_text()?
+                    .interact_text()
+                    .map_err(|e| crate::error::CliError::Dialoguer(e))?
             };
 
             match var.validate_and_format(&value) {

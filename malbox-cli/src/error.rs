@@ -6,9 +6,11 @@ pub enum CliError {
     Config(#[from] malbox_config::ConfigError),
     #[error("Builder error: {0}")]
     Builder(String),
-    #[error("Infrastructure error: {0}")]
-    Infrastructure(#[from] malbox_infra::Error),
-    #[error("Deamon error: {0}")]
+    #[error("Packer error: {0}")]
+    Packer(#[from] malbox_packer::Error),
+    #[error("Terraform error: {0}")]
+    Terraform(#[from] malbox_terraform::Error),
+    #[error("Daemon error: {0}")]
     Daemon(#[from] malbox_daemon::DaemonError),
     #[error("Downloader error: {0}")]
     Downloader(#[from] malbox_downloader::Error),

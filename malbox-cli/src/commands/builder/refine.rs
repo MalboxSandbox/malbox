@@ -2,7 +2,7 @@ use crate::utils::validation;
 use crate::{commands::Command, error::Result, utils::progress::Progress};
 use clap::Parser;
 use malbox_config::Config;
-use malbox_infra::packer::{
+use malbox_packer::{
     build::{BuildConfig, BuildManager},
     templates::TemplateManager,
 };

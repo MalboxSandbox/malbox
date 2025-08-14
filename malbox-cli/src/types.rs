@@ -1,5 +1,5 @@
 use clap::ValueEnum;
-use malbox_infra::Platform as InfraPlatformType;
+use malbox_config::Platform as InfraPlatformType;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, ValueEnum, Debug, Serialize, Deserialize, PartialEq)]

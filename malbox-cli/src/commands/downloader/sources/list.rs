@@ -1,7 +1,7 @@
 use crate::{commands::Command, error::Result, types::OutputFormat};
 use byte_unit::{Byte, UnitType};
 use clap::Parser;
-use console::{style, Term};
+use console::{Term, style};
 use malbox_config::Config;
 use malbox_downloader::{
     SourceEdition, SourceFamily, SourceRegistry, SourceRelease, SourceVariant,

@@ -3,7 +3,7 @@ use crate::{
     error::{CliError, Result},
 };
 use clap::Parser;
-use dialoguer::{theme::ColorfulTheme, Select};
+use dialoguer::{Select, theme::ColorfulTheme};
 use malbox_config::Config;
 use malbox_downloader::{Downloader, SourceRegistry, SourceVariant};
 use std::path::PathBuf;
@@ -225,7 +225,7 @@ fn select_source_interactively(
                 return Err(CliError::InvalidArgument(format!(
                     "Variant '{}' not found in family '{}', edition '{}', version '{}'",
                     variant_id, selected_family_id, selected_edition_id, selected_release_version
-                )))
+                )));
             }
         }
     } else {

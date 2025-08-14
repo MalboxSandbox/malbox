@@ -4,11 +4,13 @@ use clap::{Parser, Subcommand};
 use malbox_config::Config;
 
 mod build;
+mod clean;
 mod init;
 mod refine;
 mod template;
 
 pub use build::BuildArgs;
+pub use clean::CleanArgs;
 pub use init::InitArgs;
 pub use refine::RefineArgs;
 pub use template::TemplateCommand;
@@ -25,6 +27,7 @@ pub enum BuilderCommands {
     Refine(RefineArgs),
     Template(TemplateCommand),
     Init(InitArgs),
+    Clean(CleanArgs),
 }
 
 impl Command for BuilderCommand {
@@ -34,6 +37,7 @@ impl Command for BuilderCommand {
             BuilderCommands::Refine(args) => args.execute(config).await,
             BuilderCommands::Template(cmd) => cmd.execute(config).await,
             BuilderCommands::Init(args) => args.execute(config).await,
+            BuilderCommands::Clean(args) => args.execute(config).await,
         }
     }
 }
