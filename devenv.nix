@@ -62,75 +62,10 @@ in {
     protobuf
   ];
 
-  processes = {
-    rust-test-watch.exec = "cargo watch -x test";
-    rust-check-watch.exec = "cargo watch -x check";
-    rust-build-watch.exec = "cargo watch -x build";
-  };
-
-  scripts = {
-    check.exec = "cargo check";
-    test.exec = "cargo test";
-    build.exec = "cargo build";
-    clean.exec = "cargo clean";
-    run.exec = "cargo run";
-    docs.exec = ''
-      echo "Building documentation..."
-      cargo doc --no-deps
-      python -m sphinx.cmd.build docs docs/_build
-    '';
-    fmt.exec = ''
-      echo "Formatting code..."
-      cargo fmt --all
-    '';
-    lint.exec = ''
-      echo "Running clippy..."
-      cargo clippy -- -D warnings
-    '';
-    db-setup.exec = ''
-      echo "Setting up database..."
-      sqlx database create
-      sqlx migrate run
-    '';
-    db-reset.exec = ''
-      echo "Resetting database..."
-      sqlx database reset
-    '';
-  };
-
   pre-commit.hooks = {
     clippy.enable = true;
     rustfmt.enable = true;
     cargo-check.enable = true;
     shellcheck.enable = true;
   };
-
-  enterTest = ''
-    echo "Running environment tests..."
-    cargo --version
-    rustc --version
-    python3 --version
-    perl --version
-    echo "Testing LLVM/Clang setup..."
-    echo $LIBCLANG_PATH | grep "${pkgs.libclang.lib}/lib"
-    echo $LD_LIBRARY_PATH | grep "${pkgs.llvm_18}/lib"
-  '';
-
-  enterShell = ''
-    echo "🦀 Rust development environment initialized"
-    echo "Available commands:"
-    echo " - check        : Run cargo check"
-    echo " - test         : Run cargo test"
-    echo " - build        : Run cargo build"
-    echo " - docs         : Build documentation"
-    echo " - fmt          : Format code"
-    echo " - lint         : Run clippy"
-    echo " - db-setup     : Create and setup database"
-    echo " - db-reset     : Reset database and run migrations"
-    echo ""
-    echo "Watching processes available:"
-    echo " - rust-test-watch"
-    echo " - rust-check-watch"
-    echo " - rust-build-watch"
-  '';
 }
