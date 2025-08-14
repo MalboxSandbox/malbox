@@ -1,6 +1,6 @@
 use crate::Provider;
 use crate::{
-    machinery::MachineryConfig, profiles::ProfileConfig, Environment, LogLevel, PathConfig,
+    Environment, LogLevel, PathConfig, machinery::MachineryConfig, profiles::ProfileConfig,
 };
 use bon::Builder;
 use serde::{Deserialize, Serialize};
