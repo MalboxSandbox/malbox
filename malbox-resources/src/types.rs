@@ -44,7 +44,7 @@ impl Default for ResourceId {
 }
 
 /// A type of resource.
-#[derive(Debug, CLone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceKind {
     /// Virtual machine resource.
     VirtualMachine,
@@ -90,6 +90,12 @@ pub enum ResourceState {
     Error(String),
 }
 
+impl ResourceState {
+    pub fn can_allocate(&self) -> bool {
+        matches!(self, ResourceState::Available | ResourceState::Stopped)
+    }
+}
+
 /// Resource status information.
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct ResourceStatus {
@@ -127,7 +133,7 @@ impl ResourceStatus {
 }
 
 /// Resource constraints and requirements.
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
 pub struct ResourceConstraints {
     /// Platform requirements.
     pub platform: Option<MachinePlatform>,
@@ -309,9 +315,9 @@ impl Resource {
     }
 
     /// Allocate resource to a task.
-    pub fn allocate_to(&mut self, task_id: &str) -> crate::Result<()> {
+    pub fn allocate_to(&mut self, task_id: &str) -> crate::error::Result<()> {
         if !self.is_available() {
-            return Err(crate::ResourceError::NotAvailable {
+            return Err(crate::error::ResourceError::NotAvailable {
                 reason: format!("Resource {} is not available", self.id),
             });
         }

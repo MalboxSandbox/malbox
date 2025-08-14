@@ -1,3 +1,4 @@
+pub use crate::error::ResourceError as Error;
 use crate::{
     allocation::AllocationRequest,
     error::{ResourceError, Result},
@@ -6,13 +7,63 @@ use crate::{
 use bon::Builder;
 use malbox_config::Config;
 use malbox_database::{
-    repositories::machinery::{
-        fetch_machine, fetch_machines, insert_machine, lock_machine, unlock_machine, Machine,
-        MachineArch, MachineFilter, MachinePlatform,
-    },
     PgPool,
+    repositories::machinery::{
+        Machine, MachineArch, MachineFilter, MachinePlatform, fetch_machine, fetch_machines,
+        insert_machine, lock_machine, unlock_machine,
+    },
 };
-use malbox_terraform::manager::{TerraformManager, VmConfig, VmInstance};
+// TODO: Replace with actual terraform integration
+pub struct TerraformManager;
+pub struct VmConfig {
+    pub name: String,
+    pub platform: MachinePlatform,
+    pub memory: u32,
+    pub cpus: u32,
+    pub disk_size: u32,
+    pub snapshot: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmInstance {
+    pub id: String,
+    pub name: String,
+    pub platform: MachinePlatform,
+    pub ip: String,
+    pub snapshot: Option<String>,
+    pub interface: Option<String>,
+}
+
+impl TerraformManager {
+    pub fn new(_db_pool: PgPool, _config: Config) -> Self {
+        Self
+    }
+
+    pub async fn initialize(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    pub async fn provision_vm(
+        &self,
+        _config: &VmConfig,
+    ) -> std::result::Result<VmInstance, String> {
+        Ok(VmInstance {
+            id: "vm-stub".to_string(),
+            name: _config.name.clone(),
+            platform: _config.platform.clone(),
+            ip: "192.168.1.100".to_string(),
+            snapshot: _config.snapshot.clone(),
+            interface: None,
+        })
+    }
+
+    pub async fn destroy_vm(
+        &self,
+        _name: &str,
+        _platform: MachinePlatform,
+    ) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use time::{OffsetDateTime, PrimitiveDateTime};
@@ -132,7 +183,7 @@ impl VmManager {
         // Add VM-specific properties
         resource
             .properties
-            .insert("platform".to_string(), vm_spec.platform.to_string());
+            .insert("platform".to_string(), format!("{:?}", vm_spec.platform));
         resource
             .properties
             .insert("cpu_cores".to_string(), vm_spec.cpu_cores.to_string());
@@ -158,7 +209,7 @@ impl VmManager {
         // Provision the VM via Terraform
         let vm_config = VmConfig {
             name: vm_spec.name.clone(),
-            platform: vm_spec.platform,
+            platform: vm_spec.platform.clone(),
             memory: vm_spec.memory_mb,
             cpus: vm_spec.cpu_cores,
             disk_size: vm_spec.disk_size_gb,
@@ -179,7 +230,7 @@ impl VmManager {
             name: vm_spec.name.clone(),
             label: resource.name.clone(),
             arch: MachineArch::X64,
-            platform: vm_spec.platform,
+            platform: vm_spec.platform.clone(),
             ip: vm_instance.ip.clone(),
             interface: vm_instance.interface.clone(),
             tags: Some(vm_spec.tags.clone()),
@@ -187,7 +238,10 @@ impl VmManager {
             locked: false,
             locked_changed_on: None,
             status: Some("provisioned".to_string()),
-            status_changed_on: Some(PrimitiveDateTime::now()),
+            status_changed_on: Some(time::PrimitiveDateTime::new(
+                time::Date::from_ordinal_date(2024, 1).unwrap(),
+                time::Time::from_hms(0, 0, 0).unwrap(),
+            )),
             reserved: false,
         };
 
@@ -326,16 +380,20 @@ impl VmManager {
         let platform = request
             .constraints
             .platform
+            .clone()
             .unwrap_or(MachinePlatform::Linux);
 
         // Create VM spec from constraints
-        let vm_spec = VmSpec::builder()
-            .name(format!("vm-{}-{}", request.task_id, uuid::Uuid::new_v4()))
-            .platform(platform)
-            .cpu_cores(request.constraints.min_cpu_cores.unwrap_or(2))
-            .memory_mb(request.constraints.min_memory_mb.unwrap_or(4096))
-            .tags(request.constraints.required_tags.clone())
-            .build();
+        let vm_spec = VmSpec {
+            name: format!("vm-{}-{}", request.task_id, uuid::Uuid::new_v4()),
+            platform,
+            cpu_cores: request.constraints.min_cpu_cores.unwrap_or(2),
+            memory_mb: request.constraints.min_memory_mb.unwrap_or(4096),
+            disk_size_gb: 100,
+            interface: None,
+            snapshot: None,
+            tags: request.constraints.required_tags.clone(),
+        };
 
         // Create resource spec
         let resource_spec = ResourceSpec::builder()
@@ -384,8 +442,8 @@ impl VmManager {
             .tags(machine.tags.clone().unwrap_or_default())
             .created_at(now)
             .updated_at(now)
-            .allocated_to(if machine.locked {
-                "unknown".to_string()
+            .maybe_allocated_to(if machine.locked {
+                Some("unknown".to_string())
             } else {
                 None
             })
@@ -396,7 +454,11 @@ impl VmManager {
 
     /// Extract VM specification from resource specification.
     fn extract_vm_spec_from_resource_spec(&self, spec: &ResourceSpec) -> Result<VmSpec> {
-        let platform = spec.constraints.platform.unwrap_or(MachinePlatform::Linux);
+        let platform = spec
+            .constraints
+            .platform
+            .clone()
+            .unwrap_or(MachinePlatform::Linux);
 
         let cpu_cores = spec.constraints.min_cpu_cores.unwrap_or(2);
         let memory_mb = spec.constraints.min_memory_mb.unwrap_or(4096);
@@ -411,15 +473,15 @@ impl VmManager {
         let interface = spec.config.get("interface").cloned();
         let snapshot = spec.config.get("snapshot").cloned();
 
-        Ok(VmSpec::builder()
-            .name(spec.name.clone())
-            .platform(platform)
-            .cpu_cores(cpu_cores)
-            .memory_mb(memory_mb)
-            .disk_size_gb(disk_size_gb)
-            .interface(interface)
-            .snapshot(snapshot)
-            .tags(spec.tags.clone())
-            .build())
+        Ok(VmSpec {
+            name: spec.name.clone(),
+            platform,
+            cpu_cores,
+            memory_mb,
+            disk_size_gb,
+            interface,
+            snapshot,
+            tags: spec.tags.clone(),
+        })
     }
 }

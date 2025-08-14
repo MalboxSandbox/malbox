@@ -24,8 +24,8 @@ pub enum ResourceError {
     ProvisioningFailed { details: String },
     #[error("Database operation failed")]
     Database(#[from] malbox_database::error::DatabaseError),
-    #[error("Terraform operation failed")]
-    Terraform(#[from] malbox_terraform::error::TerraformError),
+    #[error("Terraform operation failed: {0}")]
+    Terraform(String),
     #[error("Configuration error: {message}")]
     Configuration { message: String },
     #[error("Internal error: {message}")]

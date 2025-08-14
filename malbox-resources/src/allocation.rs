@@ -1,3 +1,4 @@
+use crate::error::Result;
 use crate::types::{Resource, ResourceConstraints, ResourceId, ResourceKind};
 use bon::Builder;
 use serde::{Deserialize, Serialize};
@@ -33,9 +34,9 @@ pub struct AllocationRequest {
 
 impl AllocationRequest {
     /// Create a new allocation request.
-    pub fn new(task_id: String, resource_kind: ResourceKind) -> Self {
+    pub fn new(task_id: i32, resource_kind: ResourceKind) -> Self {
         Self::builder()
-            .request_id(uuid::Uuid::new_v4().to_string())
+            .request_id(uuid::Uuid::new_v4())
             .task_id(task_id)
             .resource_kind(resource_kind)
             .build()
@@ -170,7 +171,7 @@ pub trait AllocationStrategy: Send + Sync {
         &self,
         request: &AllocationRequest,
         available_resources: &[Resource],
-    ) -> crate::Result<Option<Resource>>;
+    ) -> Result<Option<Resource>>;
 
     /// Calculate a score for how well a resource matches a request.
     fn calculate_match_score(&self, resource: &Resource, request: &AllocationRequest) -> f64;
@@ -197,7 +198,7 @@ impl AllocationStrategy for DefaultAllocationStrategy {
         &self,
         request: &AllocationRequest,
         available_resources: &[Resource],
-    ) -> crate::Result<Option<Resource>> {
+    ) -> Result<Option<Resource>> {
         let mut candidates: Vec<_> = available_resources
             .iter()
             .filter(|r| {
