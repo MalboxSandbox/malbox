@@ -1,7 +1,7 @@
 //! Generic IPC channel implementation using iceoryx2.
 
 use crate::error::{CommunicationError, Result};
-use crate::messages::{ChannelMessage, MessagePayload, MessageType};
+use crate::messages::MessagePayload;
 use iceoryx2::node::{Node, NodeBuilder};
 use iceoryx2::port::publisher::Publisher;
 use iceoryx2::port::subscriber::Subscriber;
@@ -94,6 +94,7 @@ impl<R> Channel<R> {
         let service = node
             .service_builder(
                 &format!("{}.{}", self.config.service_prefix, service_name)
+                    .as_str()
                     .try_into()
                     .unwrap(),
             )
@@ -123,6 +124,7 @@ impl<R> Channel<R> {
         let service = node
             .service_builder(
                 &format!("{}.{}", self.config.service_prefix, service_name)
+                    .as_str()
                     .try_into()
                     .unwrap(),
             )
@@ -168,8 +170,8 @@ impl<R> Channel<R> {
         for subscriber in subscribers.iter() {
             match subscriber.receive() {
                 Ok(Some(sample)) => {
-                    let payload = sample.payload().clone();
-                    return Ok(Some(payload));
+                    let payload = sample.payload();
+                    return Ok(Some(payload.clone()));
                 }
                 Ok(None) => continue,
                 Err(e) => {

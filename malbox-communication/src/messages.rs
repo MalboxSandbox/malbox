@@ -1,8 +1,6 @@
 //! Message types and payload definitions for IPC communication.
 
 use iceoryx2_bb_container::{byte_string::FixedSizeByteString, vec::FixedSizeVec};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{CommunicationError, Result};
@@ -44,7 +42,7 @@ pub enum CommandType {
 }
 
 /// Zero-copy message payload for IPC.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct MessagePayload {
     pub message_type: MessageType,
@@ -88,12 +86,7 @@ impl MessagePayload {
         self.content.task_priority = task.priority;
         self.content.task_timeout_ms = task.timeout_ms;
 
-        for (i, &byte) in task
-            .data
-            .iter()
-            .enumerate()
-            .take(self.content.task_data.capacity())
-        {
+        for &byte in task.data.iter().take(self.content.task_data.capacity()) {
             self.content.task_data.push(byte);
         }
 
@@ -101,18 +94,13 @@ impl MessagePayload {
     }
 
     pub fn with_result(mut self, result: &ResultMessage) -> Result<Self> {
-        self.content.result_plugin_id = result.plugin_id.clone();
+        self.content.result_plugin_id = result.plugin_id;
         self.content.result_success = result.success;
         self.content.result_has_error = result.has_error;
-        self.content.result_error_message = result.error_message.clone();
+        self.content.result_error_message = result.error_message;
         self.content.result_data_size = result.data_size;
 
-        for (i, &byte) in result
-            .data
-            .iter()
-            .enumerate()
-            .take(self.content.result_data.capacity())
-        {
+        for &byte in result.data.iter().take(self.content.result_data.capacity()) {
             self.content.result_data.push(byte);
         }
 
@@ -120,11 +108,11 @@ impl MessagePayload {
     }
 
     pub fn with_event(mut self, event: &EventMessage) -> Result<Self> {
-        self.content.event_plugin_id = event.plugin_id.clone();
+        self.content.event_plugin_id = event.plugin_id;
         self.content.event_type = event.event_type;
-        self.content.event_error_message = event.error_message.clone();
+        self.content.event_error_message = event.error_message;
         self.content.event_progress_percent = event.progress_percent;
-        self.content.event_progress_message = event.progress_message.clone();
+        self.content.event_progress_message = event.progress_message;
         self.content.event_success = event.success;
 
         Ok(self)
@@ -132,12 +120,12 @@ impl MessagePayload {
 
     pub fn with_command(mut self, command: &CommandMessage) -> Result<Self> {
         self.content.command_type = command.command_type;
-        self.content.command_custom = command.custom_command.clone();
+        self.content.command_custom = command.custom_command;
         self.content.command_param_count = command.param_count;
 
         for i in 0..command.param_count.min(16) as usize {
-            self.content.command_param_keys[i] = command.param_keys[i].clone();
-            self.content.command_param_values[i] = command.param_values[i].clone();
+            self.content.command_param_keys[i] = command.param_keys[i];
+            self.content.command_param_values[i] = command.param_values[i];
         }
 
         Ok(self)
@@ -153,9 +141,83 @@ impl MessagePayload {
 
         let mut task = TaskMessage::default();
         if self.has_task_id {
+            task.task_id = self.task_id;
+        }
+        task.data_size = self.content.task_data_size;
+        task.priority = self.content.task_priority;
+        task.timeout_ms = self.content.task_timeout_ms;
+
+        for &byte in self.content.task_data.iter() {
+            task.data.push(byte);
+        }
+
+        Ok(task)
+    }
+
+    pub fn to_result(&self) -> Result<ResultMessage> {
+        if self.message_type != MessageType::Result {
+            return Err(CommunicationError::InvalidMessageType {
+                expected: MessageType::Result,
+                actual: self.message_type,
+            });
+        }
+
+        let mut result = ResultMessage::default();
+        if self.has_task_id {
+            result.task_id = self.task_id;
+        }
+        result.plugin_id = self.content.result_plugin_id;
+        result.success = self.content.result_success;
+        result.has_error = self.content.result_has_error;
+        result.error_message = self.content.result_error_message;
+        result.data_size = self.content.result_data_size;
+
+        for &byte in self.content.result_data.iter() {
+            result.data.push(byte);
+        }
+
+        Ok(result)
+    }
+
+    pub fn to_event(&self) -> Result<EventMessage> {
+        if self.message_type != MessageType::Event {
+            return Err(CommunicationError::InvalidMessageType {
+                expected: MessageType::Event,
+                actual: self.message_type,
+            });
+        }
+
+        let mut event = EventMessage::default();
+        event.has_task_id = self.has_task_id;
+        if self.has_task_id {
+            event.task_id = self.task_id;
+        }
+        event.plugin_id = self.content.event_plugin_id;
+        event.event_type = self.content.event_type;
+        event.error_message = self.content.event_error_message;
+        event.progress_percent = self.content.event_progress_percent;
+        event.progress_message = self.content.event_progress_message;
+        event.success = self.content.event_success;
+
+        Ok(event)
+    }
+
+    pub fn to_command(&self) -> Result<CommandMessage> {
+        if self.message_type != MessageType::Command {
+            return Err(CommunicationError::InvalidMessageType {
+                expected: MessageType::Command,
+                actual: self.message_type,
+            });
+        }
+
+        let mut command = CommandMessage::default();
+        command.command_type = self.content.command_type;
+        command.custom_command = self.content.command_custom;
+        command.param_count = self.content.command_param_count;
+
         for i in 0..self.content.command_param_count.min(16) as usize {
-            command.param_keys[i] = self.content.command_param_keys[i].clone();
-            command.param_values[i] = self.content.command_param_values[i].clone();
+            command.param_keys[i] = self.content.command_param_keys[i];
+            command.param_values[i] = self.content.command_param_values[i];
         }
 
         Ok(command)
@@ -163,7 +225,7 @@ impl MessagePayload {
 }
 
 /// Union of all possible message contents for zero-copy IPC.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 #[repr(C)]
 pub struct MessageContent {
     // Task message fields

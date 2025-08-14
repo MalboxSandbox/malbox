@@ -1,7 +1,7 @@
 //! Plugin-side IPC channel implementation.
 
-use super::channel::{Channel, ChannelConfig, ChannelRole};
 use super::CommunicationChannel;
+use super::channel::{Channel, ChannelConfig, ChannelRole};
 use crate::error::Result;
 use crate::messages::{ChannelMessage, MessagePayload, MessageType};
 use uuid::Uuid;

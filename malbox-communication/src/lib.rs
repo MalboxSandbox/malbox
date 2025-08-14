@@ -9,7 +9,7 @@ pub mod ipc;
 pub mod messages;
 
 pub use error::{CommunicationError, Result};
-pub use ipc::{host::HostChannel, plugin::PluginChannel, Channel, ChannelConfig, ChannelRole};
+pub use ipc::{Channel, ChannelConfig, ChannelRole, host::HostChannel, plugin::PluginChannel};
 pub use messages::{
     ChannelMessage, CommandMessage, EventMessage, MessagePayload, MessageType, ResultMessage,
     TaskMessage,
