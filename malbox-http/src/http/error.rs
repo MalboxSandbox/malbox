@@ -1,8 +1,8 @@
 use axum::{
-    http::{header::WWW_AUTHENTICATE, HeaderMap, HeaderValue, StatusCode},
+    Json,
+    http::{HeaderMap, HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
     response::{IntoResponse, Response},
     routing::head,
-    Json,
 };
 use malbox_database::{DatabaseError, Error as SqlxError};
 use std::collections::HashMap;

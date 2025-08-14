@@ -1,18 +1,18 @@
-use crate::http::{error::Error, AppState, Result};
+use crate::http::{AppState, Result, error::Error};
 use anyhow::Context;
 use axum::body::Bytes;
 use axum::{
+    Json, Router,
     extract::{DefaultBodyLimit, State},
     routing::post,
-    Json, Router,
 };
 use axum_macros::debug_handler;
 use axum_typed_multipart::{FieldData, TryFromField, TryFromMultipart, TypedMultipart};
 use magic::cookie::DatabasePaths;
 use malbox_database::repositories::{
     machinery::MachinePlatform,
-    samples::{insert_sample, Sample, SampleEntity},
-    tasks::{insert_task, Task, TaskState},
+    samples::{Sample, SampleEntity, insert_sample},
+    tasks::{Task, TaskState, insert_task},
 };
 use malbox_hashing::*;
 use tempfile::Builder;
@@ -81,10 +81,6 @@ async fn create_task_from_file(
         .context("Failed to create task")?;
 
     let task_id = task.id.expect("Task must have an ID");
-
-    if let Err(e) = state.task_notification.notify_new_task(task_id).await {
-        warn!("Failed to notify scheduler about new task: {}", e);
-    };
 
     Ok(Json(TaskResponse {
         task_id: task.id.unwrap(),
