@@ -1,0 +1,192 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT into \"tasks\" (\n            target, plugins, profile, platform,\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status, sample_id, owner, tags\n        )\n        VALUES (\n            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17\n        )\n        RETURNING\n            id, target, plugins, profile, platform AS \"platform!: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "target",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "plugins",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "profile",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "platform!: MachinePlatform",
+        "type_info": {
+          "Custom": {
+            "name": "machine_platform",
+            "kind": {
+              "Enum": [
+                "windows",
+                "linux"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "timeout",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "enforce_timeout",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "priority",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "machine_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "machine_memory",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "machine_cpus",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_on",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 12,
+        "name": "started_on",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 13,
+        "name": "completed_on",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 14,
+        "name": "status!: TaskState",
+        "type_info": {
+          "Custom": {
+            "name": "task_state",
+            "kind": {
+              "Enum": [
+                "pending",
+                "initializing",
+                "preparing_resources",
+                "running",
+                "stopping",
+                "completed",
+                "failed",
+                "canceled"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "sample_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "owner",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "tags",
+        "type_info": "VarcharArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "VarcharArray",
+        "Varchar",
+        {
+          "Custom": {
+            "name": "machine_platform",
+            "kind": {
+              "Enum": [
+                "windows",
+                "linux"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Bool",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Timestamp",
+        "Timestamp",
+        "Timestamp",
+        {
+          "Custom": {
+            "name": "task_state",
+            "kind": {
+              "Enum": [
+                "pending",
+                "initializing",
+                "preparing_resources",
+                "running",
+                "stopping",
+                "completed",
+                "failed",
+                "canceled"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Varchar",
+        "VarcharArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2a099317b9bb9c44f96681bd4bccd7b9fedb559717dadde1b2f24c1a0cfb5281"
+}

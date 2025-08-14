@@ -1,0 +1,153 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE \"machines\"\n        SET\n            name = $1,\n            label = $2,\n            arch = $3,\n            platform = $4,\n            ip = $5,\n            interface = $6,\n            tags = $7,\n            snapshot = $8,\n            locked = $9,\n            locked_changed_on = $10,\n            status = $11,\n            status_changed_on = $12,\n            reserved = $13\n        WHERE id = $14\n        RETURNING\n            id, name, label, arch as \"arch!: MachineArch\", platform as \"platform!: MachinePlatform\",\n            ip, interface, tags, snapshot, locked, locked_changed_on, status,\n            status_changed_on, reserved\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "label",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "arch!: MachineArch",
+        "type_info": {
+          "Custom": {
+            "name": "machine_arch",
+            "kind": {
+              "Enum": [
+                "x86",
+                "x64"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "platform!: MachinePlatform",
+        "type_info": {
+          "Custom": {
+            "name": "machine_platform",
+            "kind": {
+              "Enum": [
+                "windows",
+                "linux"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "ip",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "interface",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "tags",
+        "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 8,
+        "name": "snapshot",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "locked",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "locked_changed_on",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 11,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "status_changed_on",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 13,
+        "name": "reserved",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        {
+          "Custom": {
+            "name": "machine_arch",
+            "kind": {
+              "Enum": [
+                "x86",
+                "x64"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "machine_platform",
+            "kind": {
+              "Enum": [
+                "windows",
+                "linux"
+              ]
+            }
+          }
+        },
+        "Varchar",
+        "Varchar",
+        "VarcharArray",
+        "Varchar",
+        "Bool",
+        "Timestamp",
+        "Varchar",
+        "Timestamp",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "638403d6962137916f5a13757b190dd0b3d36208feeea98518af91d752140280"
+}
