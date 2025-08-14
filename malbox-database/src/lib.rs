@@ -1,11 +1,11 @@
 use error::Result;
 use malbox_config::core::DatabaseConfig;
 use malbox_config::machinery::{MachineProvider, MachineryConfig, ProviderConfig};
-use repositories::machinery::{clean_machines, insert_machine, Machine};
-pub use sqlx::error::DatabaseError;
-use sqlx::postgres::PgPoolOptions;
+use repositories::machinery::{Machine, clean_machines, insert_machine};
 pub use sqlx::Error;
 pub use sqlx::PgPool;
+pub use sqlx::error::DatabaseError;
+use sqlx::postgres::PgPoolOptions;
 
 pub mod error;
 pub mod repositories;

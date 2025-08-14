@@ -3,7 +3,7 @@ use bon::Builder;
 use malbox_config::machinery::MachineArch as MachineArchConfig;
 use malbox_config::types::Platform as MachinePlatformConfig;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, FromRow, PgPool, Postgres, QueryBuilder};
+use sqlx::{FromRow, PgPool, Postgres, QueryBuilder, query, query_as};
 use time::PrimitiveDateTime;
 
 #[derive(sqlx::Type, Debug, Serialize, Deserialize, Default)]

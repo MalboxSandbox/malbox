@@ -1,5 +1,5 @@
 use crate::error::{Result, SampleError};
-use sqlx::{postgres::PgDatabaseError, query_as, FromRow, PgPool};
+use sqlx::{FromRow, PgPool, postgres::PgDatabaseError, query_as};
 
 #[derive(Debug, Clone)]
 pub struct Sample {
