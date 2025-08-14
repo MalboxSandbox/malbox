@@ -2,15 +2,15 @@ use ansi_term::Colour::{Blue, Cyan, Green, Red, Yellow};
 use ansi_term::Style;
 use std::fmt;
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{
+        FormatEvent, FormatFields, Layer,
         format::Writer,
         time::{FormatTime, SystemTime},
-        FormatEvent, FormatFields, Layer,
     },
     layer::SubscriberExt,
     registry::LookupSpan,
     util::SubscriberInitExt,
-    EnvFilter,
 };
 
 // NOTE: Using a custom format here, since we might want to display further
