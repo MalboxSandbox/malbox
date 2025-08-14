@@ -65,6 +65,10 @@ pub struct Template {
 }
 
 impl Template {
+    pub fn builder() -> TemplateBuilder {
+        TemplateBuilder::default()
+    }
+
     pub fn get_missing_variables(&self, provided: &HashMap<String, String>) -> Result<Vec<String>> {
         let mut missing = Vec::new();
         for (name, var) in &self.variables {
@@ -92,6 +96,73 @@ impl Template {
             Ok(())
         } else {
             Err(Error::Variable(errors.join("\n")))
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct TemplateBuilder {
+    name: Option<String>,
+    path: Option<PathBuf>,
+    variables: Option<HashMap<String, Variable>>,
+    sources: Option<Vec<Source>>,
+    provisioners: Option<Vec<Provisioner>>,
+    content: Option<String>,
+    dependencies: Option<TemplateDependencies>,
+    description: Option<String>,
+}
+
+impl TemplateBuilder {
+    pub fn name(mut self, name: String) -> Self {
+        self.name = Some(name);
+        self
+    }
+
+    pub fn path(mut self, path: PathBuf) -> Self {
+        self.path = Some(path);
+        self
+    }
+
+    pub fn variables(mut self, variables: HashMap<String, Variable>) -> Self {
+        self.variables = Some(variables);
+        self
+    }
+
+    pub fn sources(mut self, sources: Vec<Source>) -> Self {
+        self.sources = Some(sources);
+        self
+    }
+
+    pub fn provisioners(mut self, provisioners: Vec<Provisioner>) -> Self {
+        self.provisioners = Some(provisioners);
+        self
+    }
+
+    pub fn content(mut self, content: String) -> Self {
+        self.content = Some(content);
+        self
+    }
+
+    pub fn dependencies(mut self, dependencies: TemplateDependencies) -> Self {
+        self.dependencies = Some(dependencies);
+        self
+    }
+
+    pub fn maybe_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
+    }
+
+    pub fn build(self) -> Template {
+        Template {
+            name: self.name.unwrap_or_default(),
+            path: self.path,
+            variables: self.variables.unwrap_or_default(),
+            sources: self.sources.unwrap_or_default(),
+            provisioners: self.provisioners.unwrap_or_default(),
+            content: self.content.unwrap_or_default(),
+            dependencies: self.dependencies.unwrap_or_default(),
+            description: self.description,
         }
     }
 }

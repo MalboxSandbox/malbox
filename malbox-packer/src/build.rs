@@ -1,8 +1,9 @@
-use super::parser::{parse_packer_event, PackerBuildState};
+use super::parser::{PackerBuildState, parse_packer_event};
 use crate::error::{Error, Result};
 use crate::parser::log_packer_event;
 use crate::templates::{Template, TemplateManager};
-use malbox_config::PathConfig;
+use malbox_config::{PathConfig, Platform};
+use malbox_io_utils::process::{AsyncCommand, OutputSource};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -17,6 +18,7 @@ pub struct BuildConfig {
     pub force: bool,
     pub working_dir: Option<PathBuf>,
     pub variables: HashMap<String, String>,
+    pub only: Option<String>,
 }
 
 pub struct BuildManager {
@@ -60,13 +62,110 @@ impl BuildManager {
         Self { config }
     }
 
-    // TODO:
-    // Initialize method for checks, such as one to check if packer bin
-    // is in path / installed or not.
+    /// Initialize packer plugins for templates in the configured directory.
+    pub async fn initialize(&self) -> Result<()> {
+        self.validate_packer_binary().await?;
+        self.initialize_plugins().await?;
+        Ok(())
+    }
+
+    /// Validate that packer binary is available and executable.
+    pub async fn validate_packer_binary(&self) -> Result<()> {
+        info!("Validating packer installation");
+
+        let mut cmd = AsyncCommand::new("packer").args(&["version"]);
+
+        let output = cmd.run().await?;
+
+        if !output.success() {
+            return Err(Error::PackerExecution(
+                "Packer binary not found or not executable. Please install packer.".to_string(),
+            ));
+        }
+
+        info!("Packer binary validated successfully");
+        Ok(())
+    }
+
+    /// Initialize packer plugins for all templates.
+    pub async fn initialize_plugins(&self) -> Result<()> {
+        info!("Initializing packer plugins");
+
+        // Initialize plugins for the packer directory and common templates
+        let packer_dir = &self.config.packer_dir;
+        if packer_dir.exists() {
+            self.init_plugins_in_directory(packer_dir).await?;
+        }
+
+        // Initialize plugins for platform-specific templates
+        for platform in ["windows", "linux"] {
+            let platform_dir = packer_dir.join("templates").join(platform);
+            if platform_dir.exists() {
+                self.init_plugins_in_directory(&platform_dir).await?;
+            }
+        }
+
+        info!("Packer plugins initialized successfully");
+        Ok(())
+    }
+
+    /// Initialize plugins in a specific directory.
+    async fn init_plugins_in_directory(&self, dir: &Path) -> Result<()> {
+        debug!("Initializing plugins in directory: {:?}", dir);
+
+        let mut cmd = AsyncCommand::new("packer")
+            .args(&["init", "."])
+            .current_dir(dir);
+
+        let output = cmd.run().await?;
+
+        if !output.success() {
+            warn!("Failed to initialize plugins in directory: {:?}", dir);
+            debug!("Packer init output: {}", output.stdout());
+            debug!("Packer init stderr: {}", output.stderr());
+        } else {
+            debug!("Successfully initialized plugins in directory: {:?}", dir);
+        }
+
+        Ok(())
+    }
+
+    /// Clean all cached build directories.
+    pub async fn clean_cache(&self) -> Result<()> {
+        let cache_builds_dir = self.config.cache_dir.join("builds");
+
+        if !cache_builds_dir.exists() {
+            info!("No cache directory found, nothing to clean");
+            return Ok(());
+        }
+
+        info!("Cleaning cache directory: {:?}", cache_builds_dir);
+
+        let mut entries = fs::read_dir(&cache_builds_dir).await?;
+        let mut removed_count = 0;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Err(e) = fs::remove_dir_all(&path).await {
+                    warn!("Failed to remove directory {:?}: {}", path, e);
+                } else {
+                    debug!("Removed build cache directory: {:?}", path);
+                    removed_count += 1;
+                }
+            }
+        }
+
+        info!("Cleaned {} build cache directories", removed_count);
+        Ok(())
+    }
 
     pub async fn build(&self, config: BuildConfig) -> Result<()> {
         let build_dir = self.prepare_build_dir(&config).await?;
         debug!("Build dir prepared: {:#?}", build_dir);
+
+        // Initialize plugins in the build directory if needed
+        self.init_plugins_in_directory(&build_dir).await?;
 
         let template_file = self.find_template_file(&build_dir)?;
         debug!("Using template file: {:?}", template_file);
@@ -83,6 +182,12 @@ impl BuildManager {
 
         args.push("-on-error=cleanup");
 
+        // Add --only flag if specified
+        if let Some(only) = &config.only {
+            args.push("-only");
+            args.push(only);
+        }
+
         let vars_file = build_dir.join("variables.auto.pkrvars.hcl");
         if vars_file.exists() {
             args.push("-var-file");
@@ -92,27 +197,30 @@ impl BuildManager {
         let filename = template_file.file_name().unwrap().to_str().unwrap();
         args.push(filename);
 
-        let cmd = AsyncCommand::new("packer")
-            .args(args)
+        let mut cmd = AsyncCommand::new("packer")
+            .args(args.clone())
             .current_dir(&build_dir);
 
-        info!("Running packer build command: packer build {}", filename);
+        let args_str = args.join(" ");
+        info!("Running packer build command: packer {}", args_str);
 
         let mut build_state = PackerBuildState::default();
 
         let output = cmd
             .run_with_output_handler(|line| {
-                if line.source == OutputSource::Stderr {
-                    error!("[PACKER ERROR] {}", line.content);
-                    build_state.errors.push(line.content.clone());
-                    return;
-                }
-
-                if let Some(event) = parse_packer_event(&line.content) {
-                    log_packer_event(&event);
-                    build_state.add_event(&event);
-                } else {
-                    debug!("[PACKER RAW] {}", line.content);
+                // With -machine-readable flag, ALL output follows the format
+                match parse_packer_event(&line.content) {
+                    Ok(event) => {
+                        log_packer_event(&event);
+                        // Collect errors for build state tracking
+                        if matches!(event, crate::parser::PackerEvent::UiMessage { ui_type, .. } if ui_type == "error") {
+                            build_state.errors.push(line.content.clone());
+                        }
+                    }
+                    Err(_) => {
+                        // This shouldn't happen with -machine-readable, but just in case
+                        eprintln!("Failed to parse packer output: {}", line.content);
+                    }
                 }
             })
             .await?;
@@ -129,16 +237,6 @@ impl BuildManager {
             }
             Ok(())
         } else {
-            let error_detail = if !build_state.errors.is_empty() {
-                let mut unique_errors = build_state.errors.clone();
-                unique_errors.sort();
-                unique_errors.dedup();
-
-                unique_errors.join("\n")
-            } else {
-                "No specific error details available".to_string()
-            };
-
             let error_type = match output.exit_code {
                 1 => "Usage or validation error",
                 2 => "Error in configuration",
@@ -148,12 +246,14 @@ impl BuildManager {
 
             let duration_info = build_state
                 .build_duration
-                .map(|d| format!(" (build ran for {})", d))
+                .map(|d| format!(" (build ran for {:?})", d))
                 .unwrap_or_default();
 
+            // Since errors are already displayed during the build process,
+            // we don't need to include raw details in the final error message
             Err(Error::Packer(format!(
-                "Packer build failed: {} (exit code {}){}.\nDetails: {}",
-                error_type, output.exit_code, duration_info, error_detail
+                "Packer build failed: {} (exit code {}){}",
+                error_type, output.exit_code, duration_info
             )))
         }
     }
@@ -323,15 +423,31 @@ impl BuildManager {
         if !config.variables.is_empty() {
             let mut vars_content = String::new();
             for (key, value) in &config.variables {
-                let formatted_value = if value.starts_with('"') && value.ends_with('"') {
-                    value.clone()
-                } else if value == "true" || value == "false" {
-                    value.clone()
-                } else if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
-                    value.clone()
+                // Expand ~ in paths
+                let expanded_value = if value.starts_with("~/") || value.starts_with("~\\") {
+                    if let Ok(home) =
+                        std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+                    {
+                        value.replacen("~", &home, 1)
+                    } else {
+                        value.clone()
+                    }
                 } else {
-                    format!("\"{}\"", value.replace('\"', "\\\""))
+                    value.clone()
                 };
+
+                let formatted_value =
+                    if expanded_value.starts_with('"') && expanded_value.ends_with('"') {
+                        expanded_value.clone()
+                    } else if expanded_value == "true" || expanded_value == "false" {
+                        expanded_value.clone()
+                    } else if expanded_value.parse::<i64>().is_ok()
+                        || expanded_value.parse::<f64>().is_ok()
+                    {
+                        expanded_value.clone()
+                    } else {
+                        format!("\"{}\"", expanded_value.replace('\"', "\\\""))
+                    };
 
                 vars_content.push_str(&format!("{} = {}\n", key, formatted_value));
             }
@@ -398,13 +514,40 @@ impl BuildManager {
             }
 
             for file_name in floppy_files {
+                // First try the floppy directory
                 let source_path = floppy_dir.join(file_name);
                 if source_path.exists() {
                     let target_path = target_dir.join(file_name);
                     fs::copy(&source_path, &target_path).await?;
-                    debug!("Copied floppy file: {:?}", file_name);
+                    debug!("Copied floppy file from floppy dir: {:?}", file_name);
                 } else {
-                    warn!("Referenced floppy file not found: {:?}", source_path);
+                    // If not in floppy dir, check if it's a script file
+                    let script_dir = match platform {
+                        Platform::Windows => self
+                            .config
+                            .config_dir
+                            .join("infrastructure/scripts/windows"),
+                        Platform::Linux => {
+                            self.config.config_dir.join("infrastructure/scripts/linux")
+                        }
+                    };
+                    let script_path = script_dir.join(file_name);
+
+                    if script_path.exists() {
+                        // Copy the script to the build directory's scripts folder
+                        let scripts_dir = build_dir.join("scripts");
+                        if !scripts_dir.exists() {
+                            fs::create_dir_all(&scripts_dir).await?;
+                        }
+                        let target_path = scripts_dir.join(file_name);
+                        fs::copy(&script_path, &target_path).await?;
+                        debug!("Copied floppy file from scripts dir: {:?}", file_name);
+                    } else {
+                        warn!(
+                            "Referenced floppy file not found in floppy or scripts dir: {:?}",
+                            file_name
+                        );
+                    }
                 }
             }
         }

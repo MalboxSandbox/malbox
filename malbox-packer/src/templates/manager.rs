@@ -1,5 +1,6 @@
-use super::{vars::VarType, Provisioner, Source, Template, TemplateDependencies, Variable};
+use super::{Provisioner, Source, Template, TemplateDependencies, Variable, vars::VarType};
 use crate::error::{Error, Result};
+use hcl::{Block, Body};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::fs;
