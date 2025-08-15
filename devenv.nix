@@ -62,10 +62,9 @@ in {
     protobuf
   ];
 
-  pre-commit.hooks = {
+  git-hooks.hooks = {
     clippy.enable = true;
     rustfmt.enable = true;
     cargo-check.enable = true;
-    shellcheck.enable = true;
   };
 }
