@@ -1,10 +1,10 @@
-name: devenv - Rust CI
+name: devenv - rust build and test
 
 on:
   push:
-    branches: ["push", "pull_request"]
+    branches: ["main", "dev/*"]
   pull_request:
-    branches: ["push", "pull_request"]
+    branches: ["main", "dev/*"]
 
 jobs:
   build:
