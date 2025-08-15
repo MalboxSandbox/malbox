@@ -60,6 +60,7 @@ in {
     unstable.cocogitto
     protoc-gen-rust
     protobuf
+    cargo-nextest
   ];
 
   git-hooks.hooks = {

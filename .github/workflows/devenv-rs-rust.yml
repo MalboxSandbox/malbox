@@ -21,7 +21,7 @@ jobs:
       run: nix profile install nixpkgs#devenv
 
     - name: Run rustfmt
-      run: cargo fmt --all -- --check
+      run: devenv shell -- cargo fmt --all -- --check
 
     # - name: Run linter
     # run: devenv shell -- cargo clippy --all-targets --all -- -D warnings
@@ -30,4 +30,10 @@ jobs:
       run: SQLX_OFFLINE=true devenv shell -- cargo build --verbose
 
     - name: Tests
-      run: SQLX_OFFLINE=true devenv shell -- cargo test
+      run: SQLX_OFFLINE=true devenv shell -- cargo nextest run --all --no-tests pass
+
+    - name: Doctests
+      run: SQLX_OFFLINE=true devenv shell -- cargo test --doc
+
+    - name: Generate documentation
+      run: SQLX_OFFLINE=true devenv shell -- cargo doc --no-deps --document-private-items
