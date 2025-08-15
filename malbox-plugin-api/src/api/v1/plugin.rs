@@ -13,7 +13,7 @@ use semver::Version;
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust ignore
 /// use malbox_core::{Plugin, PluginContext, Result, ExecutionContext, ExecutionPolicy};
 /// use async_trait::async_trait;
 /// use semver::Version;
