@@ -1,6 +1,8 @@
+use color_eyre::Result;
 use malbox_config::Config;
 use malbox_database::{init_database, init_machines};
 use malbox_http::http;
+use malbox_tracing::init_tracing;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, subscriber};
@@ -38,4 +40,16 @@ pub async fn run(config: Config) -> error::Result<()> {
     http::serve(config.clone(), db)
         .await
         .map_err(|e| DaemonError::Internal(e.to_string()))
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    init_tracing("debug");
+    color_eyre::install()?;
+
+    let config = malbox_config::load_config().await?;
+
+    run(config.clone()).await?;
+
+    Ok(())
 }

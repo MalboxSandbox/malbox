@@ -8,4 +8,8 @@ inputs:
     inputs:
       nixpkgs:
         follows: nixpkgs
+imports:
+  - ./front-end
+  - ./back-end
+
 allowUnfree: true

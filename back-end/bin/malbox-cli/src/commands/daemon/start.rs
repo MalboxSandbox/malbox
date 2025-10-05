@@ -1,7 +1,6 @@
 use crate::{commands::Command, error::Result};
 use clap::Parser;
 use malbox_config::Config;
-use malbox_daemon::run;
 
 #[derive(Parser)]
 pub struct StartArgs {
@@ -15,8 +14,6 @@ pub struct StartArgs {
 // It's also worth to consider making a Daemon struct in malbox-daemon, and implement the different methods there, instead of a single `run` function.
 impl Command for StartArgs {
     async fn execute(self, config: &Config) -> Result<()> {
-        run(config.clone())
-            .await
-            .map_err(|e| crate::error::CliError::Daemon(e))
+        todo!()
     }
 }

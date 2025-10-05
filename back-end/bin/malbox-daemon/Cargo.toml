@@ -1,0 +1,17 @@
+[package]
+name = "malbox-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+malbox-database = { path = "../../crates/malbox-database" }
+malbox-hashing = { path = "../../crates/malbox-hashing" }
+malbox-tracing.path = "../../crates/malbox-tracing"
+malbox-config = { path = "../../crates/malbox-config" }
+malbox-scheduler = { path = "../../crates/malbox-scheduler" }
+malbox-http = { path = "../../crates/malbox-http" }
+anyhow = { workspace = true }
+color-eyre = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

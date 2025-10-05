@@ -10,8 +10,6 @@ pub enum CliError {
     Packer(#[from] malbox_packer::Error),
     #[error("Terraform error: {0}")]
     Terraform(#[from] malbox_terraform::Error),
-    #[error("Daemon error: {0}")]
-    Daemon(#[from] malbox_daemon::DaemonError),
     #[error("Downloader error: {0}")]
     Downloader(#[from] malbox_downloader::Error),
     #[error("Invalid argument: {0}")]

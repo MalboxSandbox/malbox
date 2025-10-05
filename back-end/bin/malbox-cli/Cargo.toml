@@ -4,12 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-malbox-daemon = { path = "../malbox-daemon" }
-malbox-config = { path = "../malbox-config" }
-malbox-tracing = { path = "../malbox-tracing" }
-malbox-downloader = { path = "../malbox-downloader" }
-malbox-terraform = { path = "../malbox-terraform" }
-malbox-packer = { path = "../malbox-packer" }
+malbox-config = { path = "../../crates/malbox-config" }
+malbox-tracing = { path = "../../crates/malbox-tracing" }
+malbox-downloader = { path = "../../crates/malbox-downloader" }
+malbox-terraform = { path = "../../crates/malbox-terraform" }
+malbox-packer = { path = "../../crates/malbox-packer" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 color-eyre = { workspace = true }

@@ -1,25 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
-    "malbox-config",
-    "malbox-database",
-    "malbox-hashing",
-    "malbox-scheduler",
-    "malbox-http",
-    "malbox-storage",
-    "malbox-tracing",
-    "malbox-daemon",
-    "malbox-cli",
-    "malbox-downloader",
-    "malbox-communication",
-    "malbox-plugin-api",
-    "malbox-plugin-internal",
-    "malbox-plugin-utils",
-    "malbox-terraform",
-    "malbox-resources",
-    "malbox-packer",
-    "malbox-ansible",
-    "malbox-io-utils",
+    "bin/*",
+    "crates/*",
 ]
 [workspace.dependencies]
 tokio = { version = "1.37.0", features = ["full", "fs"] }
