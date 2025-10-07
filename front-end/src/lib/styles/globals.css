@@ -1,1 +1,24 @@
 @import 'tailwindcss';
+@import '@fontsource/onest/400.css';
+@import '@fontsource/onest/500.css';
+@import '@fontsource/onest/600.css';
+@import '@fontsource/onest/700.css';
+
+@theme {
+	/* Color palette */
+	--color-bg-primary: #101013;
+	--color-bg-secondary: #18181b;
+	--color-bg-tertiary: #1e1f25;
+	--color-bg-card: #25272c;
+	--color-tab-active: #393b43;
+	--color-border: #393b43;
+	--color-text-primary: #f4f4ff;
+	--color-text-secondary: #8a8f94;
+	--color-accent: #516cf9;
+	--color-accent-hover: #6b82fb;
+	--color-success: #4ade80;
+	--color-error: #ef4444;
+
+	/* Font family */
+	--font-family-sans: 'Onest', ui-sans-serif, system-ui, sans-serif;
+}

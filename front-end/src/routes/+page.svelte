@@ -1,2 +1,5 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<div class="min-h-screen bg-[var(--color-bg-primary)] flex items-center justify-center">
+	<div class="text-center">
+		<div class="text-[var(--color-text-secondary)]">Redirecting...</div>
+	</div>
+</div>

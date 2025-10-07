@@ -34,8 +34,8 @@ declare module '$env/static/private' {
 	export const _PYTHON_HOST_PLATFORM: string;
 	export const hardeningDisable: string;
 	export const TERM_PROGRAM_VERSION: string;
-	export const configureFlags: string;
 	export const DATABASE_URL: string;
+	export const configureFlags: string;
 	export const PC_CONFIG_FILES: string;
 	export const mesonFlags: string;
 	export const PKG_CONFIG_PATH: string;
@@ -66,10 +66,10 @@ declare module '$env/static/private' {
 	export const XAUTHORITY: string;
 	export const system: string;
 	export const SIZE_FOR_BUILD: string;
-	export const PC_SOCKET_PATH: string;
 	export const _PYTHON_SYSCONFIGDATA_NAME: string;
-	export const LIBCLANG_PATH: string;
+	export const PC_SOCKET_PATH: string;
 	export const DEVENV_DOTFILE: string;
+	export const LIBCLANG_PATH: string;
 	export const WINDOWPATH: string;
 	export const GDM_LANG: string;
 	export const IN_NIX_SHELL: string;
@@ -100,8 +100,8 @@ declare module '$env/static/private' {
 	export const GHOSTTY_RESOURCES_DIR: string;
 	export const XDG_SESSION_CLASS: string;
 	export const PYTHONPATH: string;
-	export const TERMINFO: string;
 	export const TERM: string;
+	export const TERMINFO: string;
 	export const SIZE: string;
 	export const OBJCOPY_FOR_BUILD: string;
 	export const CC_FOR_BUILD: string;
@@ -113,8 +113,8 @@ declare module '$env/static/private' {
 	export const DISPLAY: string;
 	export const OBJDUMP_FOR_BUILD: string;
 	export const DEVENV_TASKS: string;
-	export const DEVENV_RUNTIME: string;
 	export const SHLVL: string;
+	export const DEVENV_RUNTIME: string;
 	export const AR_FOR_BUILD: string;
 	export const NM: string;
 	export const NIX_LDFLAGS_FOR_BUILD: string;
@@ -156,9 +156,9 @@ declare module '$env/static/private' {
 	export const NIX_HARDENING_ENABLE: string;
 	export const NIX_LDFLAGS: string;
 	export const name: string;
-	export const NIX_CC_FOR_BUILD: string;
-	export const PKG_CONFIG: string;
 	export const TERM_PROGRAM: string;
+	export const PKG_CONFIG: string;
+	export const NIX_CC_FOR_BUILD: string;
 	export const NODE_ENV: string;
 }
 
@@ -197,8 +197,8 @@ declare module '$env/dynamic/private' {
 		_PYTHON_HOST_PLATFORM: string;
 		hardeningDisable: string;
 		TERM_PROGRAM_VERSION: string;
-		configureFlags: string;
 		DATABASE_URL: string;
+		configureFlags: string;
 		PC_CONFIG_FILES: string;
 		mesonFlags: string;
 		PKG_CONFIG_PATH: string;
@@ -229,10 +229,10 @@ declare module '$env/dynamic/private' {
 		XAUTHORITY: string;
 		system: string;
 		SIZE_FOR_BUILD: string;
-		PC_SOCKET_PATH: string;
 		_PYTHON_SYSCONFIGDATA_NAME: string;
-		LIBCLANG_PATH: string;
+		PC_SOCKET_PATH: string;
 		DEVENV_DOTFILE: string;
+		LIBCLANG_PATH: string;
 		WINDOWPATH: string;
 		GDM_LANG: string;
 		IN_NIX_SHELL: string;
@@ -263,8 +263,8 @@ declare module '$env/dynamic/private' {
 		GHOSTTY_RESOURCES_DIR: string;
 		XDG_SESSION_CLASS: string;
 		PYTHONPATH: string;
-		TERMINFO: string;
 		TERM: string;
+		TERMINFO: string;
 		SIZE: string;
 		OBJCOPY_FOR_BUILD: string;
 		CC_FOR_BUILD: string;
@@ -276,8 +276,8 @@ declare module '$env/dynamic/private' {
 		DISPLAY: string;
 		OBJDUMP_FOR_BUILD: string;
 		DEVENV_TASKS: string;
-		DEVENV_RUNTIME: string;
 		SHLVL: string;
+		DEVENV_RUNTIME: string;
 		AR_FOR_BUILD: string;
 		NM: string;
 		NIX_LDFLAGS_FOR_BUILD: string;
@@ -319,9 +319,9 @@ declare module '$env/dynamic/private' {
 		NIX_HARDENING_ENABLE: string;
 		NIX_LDFLAGS: string;
 		name: string;
-		NIX_CC_FOR_BUILD: string;
-		PKG_CONFIG: string;
 		TERM_PROGRAM: string;
+		PKG_CONFIG: string;
+		NIX_CC_FOR_BUILD: string;
 		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;

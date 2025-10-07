@@ -27,14 +27,23 @@ export {};
 
 declare module "$app/types" {
 	export interface AppTypes {
-		RouteId(): "/";
+		RouteId(): "/(app)" | "/" | "/auth" | "/auth/login" | "/auth/register" | "/(app)/automation" | "/(app)/dashboard" | "/(app)/marketplace" | "/(app)/marketplace/[id]" | "/(app)/submissions";
 		RouteParams(): {
-			
+			"/(app)/marketplace/[id]": { id: string }
 		};
 		LayoutParams(): {
-			"/": Record<string, never>
+			"/(app)": { id?: string };
+			"/": { id?: string };
+			"/auth": Record<string, never>;
+			"/auth/login": Record<string, never>;
+			"/auth/register": Record<string, never>;
+			"/(app)/automation": Record<string, never>;
+			"/(app)/dashboard": Record<string, never>;
+			"/(app)/marketplace": { id?: string };
+			"/(app)/marketplace/[id]": { id: string };
+			"/(app)/submissions": Record<string, never>
 		};
-		Pathname(): "/";
+		Pathname(): "/" | "/auth" | "/auth/" | "/auth/login" | "/auth/login/" | "/auth/register" | "/auth/register/" | "/automation" | "/automation/" | "/dashboard" | "/dashboard/" | "/marketplace" | "/marketplace/" | `/marketplace/${string}` & {} | `/marketplace/${string}/` & {} | "/submissions" | "/submissions/";
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
 		Asset(): "/robots.txt" | string & {};
 	}
