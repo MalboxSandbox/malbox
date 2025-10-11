@@ -1,7 +1,5 @@
 ![malbox banner](assets/banner-1.png)
 
-
-
 <div align="center">
 
 [![Rust](https://img.shields.io/badge/Built%20with%20Rust-grey?style=for-the-badge&logo=rust&color=%23282828)](https://www.rust-lang.org/)
@@ -30,10 +28,8 @@ Malbox is an open-source malware analysis platform designed to provide security 
 
 ## Why Malbox?
 
-- **Plugin Architecture**: Extend functionality easily through plugins, which can be written in Rust, Javascript and Python. Malbox's plugin system lets you extend functionality as easily as installing a package, and discover them through the Malbox marketplace.
-- **High Performance**: Malbox does not compromise on performance despite its modular plugin system. It primarily uses [iceoryx2](https://docs.rs/iceoryx2/latest/iceoryx2/), a shared-memory IPC (Inter-Process-Communication) library that enables zero-copy and lock-free communication. In addition, plugin creators and users can declare and configure plugin specifics, often resulting in more optimized runtimes and adaptable use cases. 
-- **Completely Free and Self-Hostable**: Retain full control over your infrastructure—Malbox will remain open-source and free forever.
-- **User-friendly Ecosystem**: Malbox’s built-in marketplace makes it easy to install official and community verified plugins. Installation does not require rebuilding or restarting the Malbox service. Plugins and profiles follow strict standards to ensure a healthy, thriving ecosystem.
+- **Plugin Architecture**: Extend functionality easily through plugins, which can be written in Rust, Javascript and Python.
+- **User-friendly Ecosystem**: The Malbox built-in marketplace makes it easy to install official and community verified plugins. Installation does not require rebuilding or restarting Malbox. Plugins and profiles follow strict standards to ensure a healthy, thriving ecosystem.
 - **Cloud or On-Premise Storage and Deployment**: Malbox supports both cloud-based and on-premise solutions for your infrastructure and storage needs.
 - **Easy Setup**: Enjoy a user-friendly, minimal-overhead setup that is ready to use within minutes. Malbox emphasizes declarative configuration to reduce complexity and simplify the setup and configuration process.
 
@@ -68,34 +64,6 @@ Access community verified or official plugins through our [Marketplace](#) - als
 ### Analysis Capabilities
 
 Analysis capabilities depend on the plugins installed, hence, the capabilities will continue to grow as plugins are released, both from the community and maintainers.
-For good measure, you can find a couple of functionalities that will be available through official plugins.
-
-- **File Type Support**
-  - Windows Executables (PE32, PE32+)
-  - Linux Executables (ELF)
-  - Office Documents
-  - PDF Files
-  - Script Files (JS, VBS, PS1)
-  - Archive Files
-
-- **Analysis Features**
-  - Automated unpacking
-  - String extraction
-  - Entropy analysis
-  - Network analysis
-  - Memory inspection
-  - Behavioral analysis
-  - Custom scripting support
-
-![Analysis Result Popup](https://github.com/user-attachments/assets/1d25d9fc-291c-4cea-80bc-6c10e5ccff27)
-
-### [![TBD](https://img.shields.io/badge/TBD-red?style=flat-square)](#) Enterprise Features
-
-- Multi-user support with RBAC
-- Team management
-- API access and monitoring
-- Custom reporting
-- Integration capabilities
 
 ## Support & Community
 
