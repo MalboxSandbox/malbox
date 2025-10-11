@@ -159,69 +159,70 @@
 		</div>
 	</div>
 
-	<!-- Hero Section -->
-	<div class="bg-[var(--color-bg-card)] rounded-2xl px-16 py-12 space-y-6">
-		<!-- Hero Text -->
-		<div class="text-center space-y-4">
-			<h2 class="text-[var(--color-text-primary)] text-3xl font-semibold">
-				Discover a wide range of modules and plugins to suit all requirements
-			</h2>
-			<p class="text-[var(--color-text-secondary)] text-sm">
-				Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt
-				ut labore et dolore magna aliqua. Ut enim ad minim veniam.
-			</p>
+	<div class="bg-[var(--color-bg-secondary)] px-6 py-12 rounded-2xl flex flex-col gap-12">
+		<!-- Hero Section -->
+		<div class="space-y-12">
+			<!-- Hero Text -->
+			<div class="text-center max-w-3xl mx-auto space-y-6">
+				<h2 class="text-[var(--color-text-primary)] text-3xl font-semibold">
+					Discover a wide range of modules and plugins to suit all requirements
+				</h2>
+				<p class="text-[var(--color-text-secondary)] text-md max-w-2xl mx-auto">
+					Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt
+					ut labore et dolore magna aliqua. Ut enim ad minim veniam. aliqua.
+				</p>
+			</div>
+
+			<div class="relative max-w-3xl mx-auto">
+				<svg
+					class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+				>
+					<circle cx="11" cy="11" r="8" />
+					<path d="m21 21-4.35-4.35" />
+				</svg>
+				<input
+					type="text"
+					placeholder="Search"
+					bind:value={searchQuery}
+					class="w-full pl-12 pr-4 py-3 bg-[var(--color-bg-tertiary)] rounded-lg text-[var(--color-text-primary)] text-sm placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/30 transition-all"
+				/>
+			</div>
 		</div>
 
-		<!-- Search Bar -->
-		<div class="relative max-w-3xl mx-auto">
-			<svg
-				class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-			>
-				<circle cx="11" cy="11" r="8" />
-				<path d="m21 21-4.35-4.35" />
-			</svg>
-			<input
-				type="text"
-				placeholder="Search"
-				bind:value={searchQuery}
-				class="w-full pl-12 pr-4 py-3 bg-[var(--color-bg-tertiary)] rounded-lg text-[var(--color-text-primary)] text-sm placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/30 transition-all"
-			/>
-		</div>
-	</div>
+		<!-- Official Section -->
+		<div class="space-y-4">
+			<div>
+				<h2 class="text-[var(--color-text-primary)] text-2xl font-semibold">Official</h2>
+				<p class="text-[var(--color-text-secondary)] text-sm">
+					Official modules and plugins created by the team
+				</p>
+			</div>
 
-	<!-- Official Section -->
-	<div class="space-y-4">
-		<div>
-			<h2 class="text-[var(--color-text-primary)] text-xl font-semibold">Official</h2>
-			<p class="text-[var(--color-text-secondary)] text-sm">
-				Official modules and plugins created by the team
-			</p>
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				{#each filteredOfficial() as item}
+					<PluginCard {item} />
+				{/each}
+			</div>
 		</div>
 
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			{#each filteredOfficial() as item}
-				<PluginCard {item} />
-			{/each}
-		</div>
-	</div>
+		<!-- Community Section -->
+		<div class="space-y-4">
+			<div>
+				<h2 class="text-[var(--color-text-primary)] text-2xl font-semibold">Community</h2>
+				<p class="text-[var(--color-text-secondary)] text-sm">
+					Modules and plugins created by the community
+				</p>
+			</div>
 
-	<!-- Community Section -->
-	<div class="space-y-4">
-		<div>
-			<h2 class="text-[var(--color-text-primary)] text-xl font-semibold">Community</h2>
-			<p class="text-[var(--color-text-secondary)] text-sm">
-				Modules and plugins created by the community
-			</p>
-		</div>
-
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			{#each filteredCommunity() as item}
-				<PluginCard {item} />
-			{/each}
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				{#each filteredCommunity() as item}
+					<PluginCard {item} />
+				{/each}
+			</div>
 		</div>
 	</div>
 </div>
