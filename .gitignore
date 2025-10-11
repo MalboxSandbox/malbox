@@ -36,8 +36,8 @@ node_modules
 .vercel
 .netlify
 .wrangler
-/.svelte-kit
-/build
+./front-end/.svelte-kit
+./front-end/build
 
 # OS
 .DS_Store

@@ -31,11 +31,12 @@ declare module '$env/static/private' {
 	export const WINDOWID: string;
 	export const GHOSTTY_BIN_DIR: string;
 	export const COLORTERM: string;
+	export const PYENV_SHELL: string;
 	export const _PYTHON_HOST_PLATFORM: string;
 	export const hardeningDisable: string;
 	export const TERM_PROGRAM_VERSION: string;
-	export const DATABASE_URL: string;
 	export const configureFlags: string;
+	export const DATABASE_URL: string;
 	export const PC_CONFIG_FILES: string;
 	export const mesonFlags: string;
 	export const PKG_CONFIG_PATH: string;
@@ -66,10 +67,10 @@ declare module '$env/static/private' {
 	export const XAUTHORITY: string;
 	export const system: string;
 	export const SIZE_FOR_BUILD: string;
-	export const _PYTHON_SYSCONFIGDATA_NAME: string;
 	export const PC_SOCKET_PATH: string;
-	export const DEVENV_DOTFILE: string;
+	export const _PYTHON_SYSCONFIGDATA_NAME: string;
 	export const LIBCLANG_PATH: string;
+	export const DEVENV_DOTFILE: string;
 	export const WINDOWPATH: string;
 	export const GDM_LANG: string;
 	export const IN_NIX_SHELL: string;
@@ -130,8 +131,9 @@ declare module '$env/static/private' {
 	export const NIX_PKG_CONFIG_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu: string;
 	export const NODE_PATH: string;
 	export const OBJCOPY: string;
-	export const RANLIB_FOR_BUILD: string;
+	export const PYENV_ROOT: string;
 	export const DETERMINISTIC_BUILD: string;
+	export const RANLIB_FOR_BUILD: string;
 	export const DEBUGINFOD_URLS: string;
 	export const PGHOST: string;
 	export const DEBUGINFOD_IMA_CERT_PATH: string;
@@ -142,8 +144,8 @@ declare module '$env/static/private' {
 	export const OBJDUMP: string;
 	export const PATH: string;
 	export const READELF_FOR_BUILD: string;
-	export const CC: string;
 	export const GDMSESSION: string;
+	export const CC: string;
 	export const NIX_CC: string;
 	export const DBUS_SESSION_BUS_ADDRESS: string;
 	export const STRINGS_FOR_BUILD: string;
@@ -156,9 +158,9 @@ declare module '$env/static/private' {
 	export const NIX_HARDENING_ENABLE: string;
 	export const NIX_LDFLAGS: string;
 	export const name: string;
-	export const TERM_PROGRAM: string;
 	export const PKG_CONFIG: string;
 	export const NIX_CC_FOR_BUILD: string;
+	export const TERM_PROGRAM: string;
 	export const NODE_ENV: string;
 }
 
@@ -194,11 +196,12 @@ declare module '$env/dynamic/private' {
 		WINDOWID: string;
 		GHOSTTY_BIN_DIR: string;
 		COLORTERM: string;
+		PYENV_SHELL: string;
 		_PYTHON_HOST_PLATFORM: string;
 		hardeningDisable: string;
 		TERM_PROGRAM_VERSION: string;
-		DATABASE_URL: string;
 		configureFlags: string;
+		DATABASE_URL: string;
 		PC_CONFIG_FILES: string;
 		mesonFlags: string;
 		PKG_CONFIG_PATH: string;
@@ -229,10 +232,10 @@ declare module '$env/dynamic/private' {
 		XAUTHORITY: string;
 		system: string;
 		SIZE_FOR_BUILD: string;
-		_PYTHON_SYSCONFIGDATA_NAME: string;
 		PC_SOCKET_PATH: string;
-		DEVENV_DOTFILE: string;
+		_PYTHON_SYSCONFIGDATA_NAME: string;
 		LIBCLANG_PATH: string;
+		DEVENV_DOTFILE: string;
 		WINDOWPATH: string;
 		GDM_LANG: string;
 		IN_NIX_SHELL: string;
@@ -293,8 +296,9 @@ declare module '$env/dynamic/private' {
 		NIX_PKG_CONFIG_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu: string;
 		NODE_PATH: string;
 		OBJCOPY: string;
-		RANLIB_FOR_BUILD: string;
+		PYENV_ROOT: string;
 		DETERMINISTIC_BUILD: string;
+		RANLIB_FOR_BUILD: string;
 		DEBUGINFOD_URLS: string;
 		PGHOST: string;
 		DEBUGINFOD_IMA_CERT_PATH: string;
@@ -305,8 +309,8 @@ declare module '$env/dynamic/private' {
 		OBJDUMP: string;
 		PATH: string;
 		READELF_FOR_BUILD: string;
-		CC: string;
 		GDMSESSION: string;
+		CC: string;
 		NIX_CC: string;
 		DBUS_SESSION_BUS_ADDRESS: string;
 		STRINGS_FOR_BUILD: string;
@@ -319,9 +323,9 @@ declare module '$env/dynamic/private' {
 		NIX_HARDENING_ENABLE: string;
 		NIX_LDFLAGS: string;
 		name: string;
-		TERM_PROGRAM: string;
 		PKG_CONFIG: string;
 		NIX_CC_FOR_BUILD: string;
+		TERM_PROGRAM: string;
 		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;
