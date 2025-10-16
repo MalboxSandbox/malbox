@@ -1,5 +1,9 @@
 <div class="bg-[var(--color-bg-secondary)] rounded-2xl p-6">
-	<h2 class="text-xl font-semibold text-[var(--color-text-primary)] mb-6 pb-6 border-b border-[var(--color-border)]">System Statistics</h2>
+	<h2
+		class="text-xl font-semibold text-[var(--color-text-primary)] mb-6 pb-6 border-b border-[var(--color-border)]"
+	>
+		System Statistics
+	</h2>
 
 	<div class="space-y-10">
 		<!-- Site Version -->

@@ -78,13 +78,7 @@
 	</div>
 
 	<form onsubmit={handleRegister} class="space-y-6">
-		<Input
-			type="text"
-			label="Full Name"
-			placeholder="John Doe"
-			bind:value={fullName}
-			required
-		/>
+		<Input type="text" label="Full Name" placeholder="John Doe" bind:value={fullName} required />
 
 		<Input
 			type="email"

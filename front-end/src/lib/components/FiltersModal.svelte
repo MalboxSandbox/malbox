@@ -45,12 +45,7 @@
 
 {#if isOpen}
 	<!-- Backdrop -->
-	<div
-		class="fixed inset-0 bg-black/50 z-40"
-		onclick={onClose}
-		role="button"
-		tabindex="-1"
-	></div>
+	<div class="fixed inset-0 bg-black/50 z-40" onclick={onClose} role="button" tabindex="-1"></div>
 
 	<!-- Modal -->
 	<div class="fixed top-24 right-8 z-50 w-full max-w-md">

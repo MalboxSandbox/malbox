@@ -135,9 +135,7 @@
 			>
 				Description
 				{#if activeTab === 'description'}
-					<div
-						class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"
-					></div>
+					<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"></div>
 				{/if}
 			</button>
 			<button
@@ -148,9 +146,7 @@
 			>
 				Demo
 				{#if activeTab === 'demo'}
-					<div
-						class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"
-					></div>
+					<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"></div>
 				{/if}
 			</button>
 			<button
@@ -161,9 +157,7 @@
 			>
 				Changelog
 				{#if activeTab === 'changelog'}
-					<div
-						class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"
-					></div>
+					<div class="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-text-primary)]"></div>
 				{/if}
 			</button>
 		</div>
@@ -215,11 +209,11 @@
 						incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud
 						exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.Lorem ipsum dolor
 						sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et
-						dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco
-						laboris nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet,
-						consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore
-						magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi
-						ut aliquip ex ea commodo consequat.
+						dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris
+						nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet, consectetur
+						adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut
+						enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea
+						commodo consequat.
 					</p>
 				</div>
 
@@ -245,9 +239,7 @@
 		{:else if activeTab === 'demo'}
 			<div class="text-[var(--color-text-secondary)] text-sm">Demo content coming soon...</div>
 		{:else}
-			<div class="text-[var(--color-text-secondary)] text-sm">
-				Changelog content coming soon...
-			</div>
+			<div class="text-[var(--color-text-secondary)] text-sm">Changelog content coming soon...</div>
 		{/if}
 	</div>
 </div>

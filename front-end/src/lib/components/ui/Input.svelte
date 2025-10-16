@@ -45,7 +45,9 @@
                focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]
                transition-all duration-200
                disabled:opacity-50 disabled:cursor-not-allowed
-               {error ? 'border-[var(--color-error)] focus:border-[var(--color-error)] focus:ring-[var(--color-error)]' : ''}"
+               {error
+			? 'border-[var(--color-error)] focus:border-[var(--color-error)] focus:ring-[var(--color-error)]'
+			: ''}"
 	/>
 
 	{#if error}

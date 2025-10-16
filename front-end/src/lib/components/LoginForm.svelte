@@ -47,9 +47,7 @@
 <div class="space-y-8">
 	<div class="space-y-2 text-center">
 		<h2 class="text-3xl font-semibold text-[var(--color-text-primary)]">Sign In</h2>
-		<p class="text-[var(--color-text-secondary)]">
-			Enter your credentials to access your account
-		</p>
+		<p class="text-[var(--color-text-secondary)]">Enter your credentials to access your account</p>
 	</div>
 
 	<form onsubmit={handleLogin} class="space-y-6">
