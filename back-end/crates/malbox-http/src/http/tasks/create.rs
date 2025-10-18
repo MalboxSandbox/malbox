@@ -43,8 +43,6 @@ struct FileInfo {
     ssdeep: String,
 }
 
-//yo bg, petite question, t'aurais de quoi me dépanner un peu de :herb: ? Je te paye la somme bien-sur cash ou liquide comme tu veux, juste histoire d'en faire un ou deux. Pas trop envie de commander car j'ai pas besoin d'autant c'est juste pour sortir avec des amis ce soir sur paris
-
 #[derive(TryFromMultipart)]
 struct CreateTaskRequest {
     #[form_data(limit = "unlimited")]
