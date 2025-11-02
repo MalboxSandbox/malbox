@@ -33,4 +33,4 @@ semver = { version = "1.0.26", features = [ "serde" ] }
 uuid = { version = "1.8.0", features = ["fast-rng", "v4", "serde"] }
 iceoryx2 = { version = "0.5.0", features = [ "logger_tracing" ] }
 hcl-rs = "0.18.5"
-async-trait = "0.1.83"
+async-trait = "0.1.89"
