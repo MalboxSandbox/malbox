@@ -1,0 +1,13 @@
+[package]
+name = "malbox-provider-kvm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+malbox-machinery.path = "../malbox-machinery"
+tracing.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+virt = "0.4.3"
