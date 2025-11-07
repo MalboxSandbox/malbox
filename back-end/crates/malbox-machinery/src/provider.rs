@@ -19,7 +19,7 @@ pub trait Provider: Sized + Send + Sync + 'static {
     /// Allocate a machine.
     async fn allocate(&self, spec: MachineSpec) -> Result<Self::Machine, Self::Error>;
     /// List machines.
-    async fn list(&self) -> Result<Vec<Self::Machine>, Self::Error>;
+    async fn list(&self) -> Result<Option<Vec<Self::Machine>>, Self::Error>;
 }
 
 #[derive(Debug, Clone)]
