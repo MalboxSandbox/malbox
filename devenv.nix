@@ -12,8 +12,12 @@
   };
 
   git-hooks.hooks = {
+    cargo-check.enable = true;
     clippy.enable = true;
     rustfmt.enable = true;
-    cargo-check.enable = true;
+  };
+
+  git-hooks.settings = {
+    rust.cargoManifestPath = "./back-end/Cargo.toml";
   };
 }
