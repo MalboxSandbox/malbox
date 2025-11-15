@@ -1,5 +1,5 @@
 [package]
-name = "malbox-provider-kvm"
+name = "malbox-provider-libvirt"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,5 +9,9 @@ tracing.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 tokio.workspace = true
 virt = "0.4.3"
+uuid = { version = "1.11", features = ["v4"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+chrono = "0.4"
