@@ -1,97 +1,57 @@
 ---
 title: "Introduction"
-description: "Welcome to the new home for your documentation"
+description: "Learn about Malbox and what it offers for file analysis."
 ---
 
-## Setting up
+## Overview
 
-Get your documentation site up and running in minutes.
+Malbox is an open-source malware analysis platform that provides security researchers and cybersecurity teams with a powerful, extensible environment for analyzing files and understanding malicious behavior.
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
 
-## Make it yours
+## Why Malbox
 
-Design a docs site that looks great and empowers your users.
+Malbox delivers a modern alternative to existing open-source solutions with enhanced extensibility, streamlined workflows, and superior usability.
 
 <Columns cols={2}>
   <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
+    title="Plugin-based Architecture"
+    icon="blocks"
   >
-    Edit your docs locally and preview them in real time.
+    Extend Malbox's analysis capabilities through plugins, allowing you to tailor the platform to your specific workflow and requirements.
   </Card>
   <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
+    title="User-friendly Ecosystem"
+    icon="User"
   >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+    From installation to configuration, Malbox reduces complexity while preserving advanced capabilities and customization options.
   </Card>
   <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
+    title="Machinery Flexibility"
+    icon="layers"
   >
-    Auto-generate API documentation from OpenAPI specifications.
+    Deploy on-premise or in the cloud with support for multiple VM providers. Easily extend support through provider and provisioner interfaces.
+  </Card>
+  <Card
+    title="Well Documented"
+    icon="book-open-text"
+  >
+    Comprehensive, up-to-date documentation helps you understand and work effectively with the platform.
   </Card>
 </Columns>
 
-## Create beautiful pages
+## Comparisons
 
-Everything you need to create world-class documentation.
+Malbox stands alongside other open-source malware analysis platforms, each with distinct strengths and trade-offs.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+| Feature | Malbox | Cuckoo Sandbox | CAPE Sandbox | Drakvuf | Thorium |
+|---------|--------|----------------|--------------|---------|---------|
+| **Architecture** | Rust microservices with zero-copy IPC | Python monolithic | Python monolithic (Cuckoo fork) | Agentless Xen-based hypervisor tracing | Containerized, Kubernetes orchestrated |
+| **Plugin System** | Versioned plugin API, host/guest contexts | Module-based | Enhanced modules | C++ kernel/user-space plugins | Modular pipeline with Docker images |
+| **VM Providers** | VMware, KVM, VirtualBox + extensible | VMware, KVM, VirtualBox, others | VMware, KVM, VirtualBox, others | Xen primary, some KVM, VMware Player | Docker containers, Kubernetes cluster |
+| **Infrastructure as Code** | Packer, Ansible integration + extensible | Manual setup | Manual setup | Scripted setup, no IaC | Kubernetes manifests, Helm charts |
+| **Performance** | High-performance IPC, concurrent tasks | Standard Python | Standard Python | High throughput via hypervisor tracing | Scalable for large workflows |
+| **Development Status** | Active | Inactive | Active | Actively maintained | Actively developed by CISA |
+| **Web Interface** | Modern SvelteKit UI | Django UI | Enhanced Django UI | Basic React-based UI | Modern UI, REST API, RBAC |
+| **Configuration Extraction** | Plugin dependent | Basic support | Advanced built-in | Kernel/user tracing, memory dumps | Integrated tool results, tagging |
+| **License** | GPL v3 | GPL v3 | GPL v3 | GPL v3 | Apache 2.0 |
 
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
