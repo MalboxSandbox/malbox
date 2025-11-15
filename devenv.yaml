@@ -11,5 +11,6 @@ inputs:
 imports:
   - ./front-end
   - ./back-end
+  - ./docs
 
 allowUnfree: true
