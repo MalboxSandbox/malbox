@@ -46,12 +46,12 @@ Malbox stands alongside other open-source malware analysis platforms, each with 
 | Feature | Malbox | Cuckoo Sandbox | CAPE Sandbox | Drakvuf | Thorium |
 |---------|--------|----------------|--------------|---------|---------|
 | **Architecture** | Rust microservices with zero-copy IPC | Python monolithic | Python monolithic (Cuckoo fork) | Agentless Xen-based hypervisor tracing | Containerized, Kubernetes orchestrated |
-| **Plugin System** | Versioned plugin API, host/guest contexts | Module-based | Enhanced modules | C++ kernel/user-space plugins | Modular pipeline with Docker images |
-| **VM Providers** | VMware, KVM, VirtualBox + extensible | VMware, KVM, VirtualBox, others | VMware, KVM, VirtualBox, others | Xen primary, some KVM, VMware Player | Docker containers, Kubernetes cluster |
+| **Plugin System** | Versioned plugin API, host/guest contexts | Module-based plugins | Enhanced module-based plugins | C++ kernel/user-space plugins | Modular pipeline with Docker images |
+| **Providers** | VMware, KVM, VirtualBox + extensible | VMware, KVM, VirtualBox, others | VMware, KVM, VirtualBox, others | Xen primary, some KVM, VMware Player | Docker containers, Kubernetes cluster |
 | **Infrastructure as Code** | Packer, Ansible integration + extensible | Manual setup | Manual setup | Scripted setup, no IaC | Kubernetes manifests, Helm charts |
-| **Performance** | High-performance IPC, concurrent tasks | Standard Python | Standard Python | High throughput via hypervisor tracing | Scalable for large workflows |
-| **Development Status** | Active | Inactive | Active | Actively maintained | Actively developed by CISA |
-| **Web Interface** | Modern SvelteKit UI | Django UI | Enhanced Django UI | Basic React-based UI | Modern UI, REST API, RBAC |
-| **Configuration Extraction** | Plugin dependent | Basic support | Advanced built-in | Kernel/user tracing, memory dumps | Integrated tool results, tagging |
+| **Performance** | High-performance IPC, concurrent tasks | Python performance, single-threaded | Python performance, single-threaded | Efficient hypervisor tracing | Scalable for large workflows |
+| **Development Status** | Active | Inactive since ~2023 | Active, forked Cuckoo | Active | Active |
+| **Web Interface** | SvelteKit | Django-based | Django-based | React (separate project) | React |
+| **Configuration Extraction** | Plugin dependent | Basic dynamic config extraction | Automated and detailed config extraction | Kernel/user tracing, memory dumps | Integrated tool results, tagging |
 | **License** | GPL v3 | GPL v3 | GPL v3 | GPL v3 | Apache 2.0 |
 
