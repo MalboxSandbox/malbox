@@ -1,10 +1,36 @@
 ---
 title: "Providers"
-description: "A list for providers"
+description: "Infrastructure providers for creating and managing machines"
 ---
 
+## What are Providers?
 
+Providers are the foundation of Malbox's machinery system. They handle the creation and allocation of compute infrastructure where analysis takes place.
 
+Technically, a provider is a component that implements the `Provider` interface to interact with different infrastructure platforms. Providers abstract away the complexity of different technologies, giving you a consistent interface regardless of your underlying infrastructure. 
+
+The `Provider` and related interfaces are generic enough so that users can develop providers independently of Malbox's code-base. Resulting in a more-or-less "provider-agnostic" platform.
+
+## Architecture
+
+Malbox's provider system is built on two core traits/interfaces:
+
+- The `Provider` trait, defines the contract that all infrastructure providers must implement.
+- The `Machine` trait, which providers must implement in the machines that they return.
+
+### Provider Extensions
+
+TODO
+
+## Supported Providers
+
+TODO
+
+## Next Steps
+
+- Take a look at the [Provider SDK Reference](/api-reference/provider-sdk)
+- Read a guide on how to [Implement your own Provider](/guides/development/provider-creation)
+- Read about [Provisioners](/machinery/provisioners)
 
 
 

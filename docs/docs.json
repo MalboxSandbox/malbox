@@ -8,8 +8,8 @@
     "dark": "#516cf9"
   },
   "banner": {
-  "content": "Documentation is still a work-in-progress! Some parts may be missing or uncomplete.",
-  "dismissible": true 
+    "content": "Documentation is still a work-in-progress! Some parts may be missing or uncomplete.",
+    "dismissible": true
   },
   "icons": { "library": "lucide" },
   "favicon": "/favicon.svg",
@@ -20,59 +20,45 @@
         "groups": [
           {
             "group": "Getting started",
-            "pages": [
-              "index",
-              "quickstart"
-            ]
+            "pages": ["index", "quickstart"]
           },
           {
-            "group": "Plugin System",
-            "pages": [
-              "plugin-system/plugin-types"
-            ]
+            "group": "Plugin system",
+            "pages": ["plugin-system/plugin-types"]
           },
           {
             "group": "Machinery",
-            "pages": [
-              "machinery/providers",
-              "machinery/provisioners"
-            ]
+            "pages": ["machinery/providers", "machinery/provisioners"]
+          },
+          {
+            "group": "Task Management",
+            "pages": ["task-management/scheduler"]
           },
           {
             "group": "Contributing",
-            "pages": [
-              "contributing/guidelines"
-            ]
+            "pages": ["contributing/guidelines"]
           }
         ]
       },
       {
         "tab": "Guides",
         "groups": [
-          
           {
             "group": "Installation",
-            "pages": [
-                "installation/automatic",
-                "installation/manual"
-            ]
+            "pages": ["installation/automatic", "installation/manual"]
           },
           {
             "group": "Contributing",
-            "pages": [
-              "contributing/first-contribution"
-            ]
+            "pages": ["contributing/first-contribution"]
           }
-         ]
+        ]
       },
       {
         "tab": "API reference",
         "groups": [
           {
             "group": "Malbox API",
-            "pages": [
-              "api-reference/introduction"
-            ]
+            "pages": ["api-reference/introduction"]
           },
           {
             "group": "Plugin SDK",
@@ -113,11 +99,7 @@
     }
   },
   "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "mcp"
-   ]
+    "options": ["copy", "view", "mcp"]
   },
   "footer": {
     "socials": {
