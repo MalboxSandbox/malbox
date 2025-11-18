@@ -1,110 +1,118 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Malbox Docs",
-  "colors": {
-    "primary": "#516cf9",
-    "light": "#516cf9",
-    "dark": "#516cf9"
-  },
-  "banner": {
-    "content": "Documentation is still a work-in-progress! Some parts may be missing or uncomplete.",
-    "dismissible": true
-  },
-  "icons": { "library": "lucide" },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "tabs": [
-      {
-        "tab": "Documentation",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": ["index", "quickstart"]
-          },
-          {
-            "group": "Plugin system",
-            "pages": ["plugin-system/plugin-types"]
-          },
-          {
-            "group": "Machinery",
-            "pages": ["machinery/providers", "machinery/provisioners"]
-          },
-          {
-            "group": "Task Management",
-            "pages": ["task-management/scheduler"]
-          },
-          {
-            "group": "Contributing",
-            "pages": ["contributing/guidelines"]
-          }
-        ]
-      },
-      {
-        "tab": "Guides",
-        "groups": [
-          {
-            "group": "Installation",
-            "pages": ["installation/automatic", "installation/manual"]
-          },
-          {
-            "group": "Contributing",
-            "pages": ["contributing/first-contribution"]
-          }
-        ]
-      },
-      {
-        "tab": "API reference",
-        "groups": [
-          {
-            "group": "Malbox API",
-            "pages": ["api-reference/introduction"]
-          },
-          {
-            "group": "Plugin SDK",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+    "$schema": "https://mintlify.com/docs.json",
+    "theme": "mint",
+    "name": "Malbox Docs",
+    "colors": {
+        "primary": "#516cf9",
+        "light": "#516cf9",
+        "dark": "#516cf9"
+    },
+    "banner": {
+        "content": "Documentation is still a work-in-progress! Some parts may be missing or uncomplete.",
+        "dismissible": true
+    },
+    "icons": { "library": "lucide" },
+    "favicon": "/favicon.svg",
+    "navigation": {
+        "tabs": [
+            {
+                "tab": "Documentation",
+                "groups": [
+                    {
+                        "group": "Getting started",
+                        "pages": ["index", "quickstart"]
+                    },
+                    {
+                        "group": "Plugin system",
+                        "pages": ["plugin-system/plugin-types"]
+                    },
+                    {
+                        "group": "Machinery",
+                        "pages": [
+                            "machinery/providers",
+                            "machinery/provisioners"
+                        ]
+                    },
+                    {
+                        "group": "Task Management",
+                        "pages": [
+                            "task-management/scheduling",
+                            "task-management/workers"
+                        ]
+                    },
+                    {
+                        "group": "Contributing",
+                        "pages": ["contributing/guidelines"]
+                    }
+                ]
+            },
+            {
+                "tab": "Guides",
+                "groups": [
+                    {
+                        "group": "Installation",
+                        "pages": [
+                            "installation/automatic",
+                            "installation/manual"
+                        ]
+                    },
+                    {
+                        "group": "Contributing",
+                        "pages": ["contributing/first-contribution"]
+                    }
+                ]
+            },
+            {
+                "tab": "Reference",
+                "groups": [
+                    {
+                        "group": "Configuration",
+                        "pages": ["reference/configuration/workers"]
+                    },
+                    {
+                        "group": "REST API",
+                        "pages": ["reference/rest-api/introduction"]
+                    },
+                    {
+                        "group": "Plugin SDK",
+                        "pages": ["reference/plugin-sdk/introduction"]
+                    }
+                ]
+            }
+        ],
+        "global": {
+            "anchors": [
+                {
+                    "anchor": "Blog",
+                    "href": "https://blog.malbox.app",
+                    "icon": "newspaper"
+                },
+                {
+                    "anchor": "Roadmap",
+                    "href": "https://roadmap.malbox.app",
+                    "icon": "map"
+                }
             ]
-          }
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Blog",
-          "href": "https://blog.malbox.app",
-          "icon": "newspaper"
-        },
-        {
-          "anchor": "Roadmap",
-          "href": "https://roadmap.malbox.app",
-          "icon": "map"
         }
-      ]
+    },
+    "logo": {
+        "light": "/logo/light.svg",
+        "dark": "/logo/dark.svg"
+    },
+    "navbar": {
+        "primary": {
+            "type": "github",
+            "label": "Malbox Repository",
+            "href": "https://github.com/DualHorizon/malbox/"
+        }
+    },
+    "contextual": {
+        "options": ["copy", "view", "mcp"]
+    },
+    "footer": {
+        "socials": {
+            "x": "https://x.com/malbox_sandbox",
+            "github": "https://github.com/DualHorizon/malbox/"
+        }
     }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "label": "Malbox Repository",
-      "href": "https://github.com/DualHorizon/malbox/"
-    }
-  },
-  "contextual": {
-    "options": ["copy", "view", "mcp"]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/malbox_sandbox",
-      "github": "https://github.com/DualHorizon/malbox/"
-    }
-  }
 }

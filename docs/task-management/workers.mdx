@@ -1,0 +1,32 @@
+---
+title: "Workers"
+description: "How Malbox workers execute tasks and report results"
+---
+
+## Overview
+
+Workers are the execution engines of the task management system. Each worker operates as an independent async task, receiving jobs through channels, executing them via the task executor, and reporting results back to the pool. Workers are managed through the [worker pool](/task-management/scheduling#worker-pool).
+
+## Architecture
+
+A worker is fundamentally an async event loop that processes jobs until shutdown. Each worker has a UUID-based worker ID, holds a reference to the shared `TaskExecutor`, and communicates through three distinct channels:
+
+- **Job reception** - Receives new jobs via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Completion reporting** - Reports results back to the pool via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Shutdown signal** - Receives termination requests via a [oneshot channel](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html)
+
+The worker's execution loop multiplexes these channels using `tokio::select!`, processing whichever event arrives first. When a job arrives, the worker executes it and reports the result. When a shutdown signal arrives, the worker terminates gracefully.
+
+### Configuration
+
+Worker behavior is controlled through configuration options:
+
+- Compatible task types (enabling worker specialization)
+- Execution mode (single or batch processing)
+- Batch size limits
+- Timeout values for batch collection and idle shutdown
+
+See the complete [configuration reference](/reference/configuration/workers).
+
+### Job Processing
+

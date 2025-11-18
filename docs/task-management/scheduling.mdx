@@ -1,0 +1,43 @@
+---
+title: "Scheduler"
+description: "How the Malbox scheduler coordinates task execution and resource allocation"
+---
+
+## Overview
+
+The Malbox scheduler is a multi-tier asynchronous scheduling system that coordinates task queuing, worker pool allocation, resource provisioning, and plugin execution lifecycle.
+
+Think of the scheduler as the central event loop that orchestrates the entire task management system.
+
+## Architecture
+
+The scheduler implements an event-driven architecture built on Tokio's asynchronous runtime. At its core is a `tokio::select!` loop that multiplexes four distinct event streams:
+
+- New task submission notifications
+- Worker completion events
+- Queued task signals
+- Shutdown requests
+
+The scheduler maintains references to three subsystems: the task store, task queue, and worker pool.
+
+### Task Store
+
+The task store provides persistent database storage combined with an in-memory cache for efficient retrieval of recent submissions.
+
+### Task Queue
+
+The task queue implements priority-based ordering using a [binary heap](https://doc.rust-lang.org/std/collections/struct.BinaryHeap.html). Task priority determines processing order when resources become available.
+
+<Note>The task queue stores only task IDs, actual task contents are retrieved from the task store.</Note>
+
+### Worker Pool
+
+The worker pool manages the lifecycle of worker instances, tracking which workers are idle and available for new tasks. See [Workers](/task-management/workers) for more details.
+
+### Communication
+
+Components communicate exclusively through typed channels:
+
+- **Task submissions** - External systems submit tasks via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Worker events** - Workers report status through a dedicated [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Shutdown coordination** - A [oneshot channel](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html) enables graceful termination of the scheduler event loop
