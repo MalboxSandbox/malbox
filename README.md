@@ -6,9 +6,8 @@
 [![License](https://img.shields.io/github/license/DualHorizon/malbox?style=for-the-badge&color=%23282828)](LICENSE)
 [![Plugins](https://img.shields.io/badge/plugins-WIP-blue?style=for-the-badge&color=%23282828)](#)
 
-Malbox is an open-source malware analysis platform designed to provide security researchers, malware analysts, and cybersecurity teams with a powerful, extensible environment for analyzing files and understanding their behavior. 
+Malbox is an open-source malware analysis platform designed to provide security researchers, malware analysts, and cybersecurity teams with a powerful, extensible environment for analyzing files and understanding their behavior.
 
-[Documentation](https://docs.malbox.app/) • [Installation](https://docs.malbox.app/quickstart) • [Reference](https://docs.malbox.app/reference) 
+[Documentation](https://docs.malbox.app/) • [Installation](https://docs.malbox.app/quickstart) • [Reference](https://docs.malbox.app/reference)
 
 </div>
-
