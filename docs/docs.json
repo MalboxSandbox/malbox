@@ -19,18 +19,30 @@
                 "tab": "Documentation",
                 "groups": [
                     {
-                        "group": "Getting started",
+                        "group": "Getting Started",
                         "pages": ["index", "quickstart"]
                     },
                     {
-                        "group": "Plugin system",
-                        "pages": ["plugin-system/plugin-types"]
+                        "group": "Plugin System",
+                        "pages": [
+                            "plugin-system/overview",
+                            {
+                                "group": "Configuration",
+                                "expanded": false,
+                                "pages": [
+                                    "plugin-system/configuration/plugin-types",
+                                    "plugin-system/configuration/execution-contexts",
+                                    "plugin-system/configuration/state-management"
+                                ]
+                            }
+                        ]
                     },
                     {
                         "group": "Machinery",
                         "pages": [
                             "machinery/providers",
-                            "machinery/provisioners"
+                            "machinery/provisioners",
+                            "machinery/packer"
                         ]
                     },
                     {
@@ -67,7 +79,7 @@
                 "groups": [
                     {
                         "group": "Configuration",
-                        "pages": ["reference/configuration/workers"]
+                        "pages": ["reference/configuration/workers", "reference/configuration/plugins"]
                     },
                     {
                         "group": "REST API",
