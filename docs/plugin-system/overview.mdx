@@ -1,0 +1,33 @@
+---
+title: "Overview"
+description: "An overview of the plugin system"
+---
+
+## Purpose and Scope
+
+The Malbox plugin system provides a robust, extensible framework for implementing and executing analysis plugins. Plugins can be configured with different [plugin types](/plugin-system/configuration/plugin-types), [execution contexts](/plugin-system/configuration/execution-contexts), [state management](/plugin-system/configuration/state-management) modes, and more, while maintaining a consistent API and communication model across all configurations.
+
+Malbox aims to provide a comprehensive [plugin SDK](/reference/plugin-sdk/introduction) that facilitates analysis development through a sane, stable API. The library provides enough abstraction to allow developers to focus exclusively on analysis logic, while maintaining backward compatibility and long-term stability.
+
+## Configuration
+
+Both the plugin system and individual plugins can be configured to fit specific use cases and requirements. Malbox provides an extensive set of configuration options to facilitate adaptation and granular control.
+
+Plugin developers can expose custom settings specific to their plugins, in addition to the generic settings that apply to all plugins.
+
+Explore the available configuration options in the [plugin configuration pages](/plugin-system/configuration). For technical details and schema definitions, see the [configuration reference](/reference/configuration/plugins).
+
+## Behind the Scenes
+
+Malbox's plugin system uses [iceoryx2](https://github.com/eclipse-iceoryx/iceoryx2), an inter-process communication (IPC) library with notable features such as zero-copy and lock-free communication. Each plugin runs as a dedicated process that communicates with the core system and other plugins through iceoryx2.
+
+<Note>Depending on the plugin type and other factors, the communication stack might slightly change.</Note>
+
+### Why IPC?
+
+We chose the IPC approach over more traditional approaches for several reasons:
+
+- **Unstable Rust ABI**: The Rust Abstract Binary Interface (ABI) is not stable, making it significantly harder to achieve a good developer experience with dynamic linking
+- **Process Isolation**: A dedicated process architecture provides better control and guarantees over system behavior, resulting in more robust and reliable operation
+- **Future Flexibility**: This architecture enables experimentation with new features such as decentralized analysis
+- **Performance**: iceoryx2 is highly efficient and provides excellent support for Linux, the primary platform for Malbox

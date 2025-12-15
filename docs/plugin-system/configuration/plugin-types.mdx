@@ -1,0 +1,48 @@
+---
+title: "Plugin Types"
+description: "Plugin deployment models and communication mechanisms"
+---
+
+## Overview
+
+Malbox supports two plugin types that determine where plugins execute and how they can communicate with the host system. 
+
+## Plugin Types
+
+### Guest Plugins
+
+Guest plugins are meant to be executed within a sandboxed environment (containers, virtual machines, etc.), providing isolated analysis.
+
+<AccordionGroup>
+  <Accordion title="Characteristics">
+  - Execute within sandboxed environments (VMs, containers, etc.)
+  - Terminated with sandbox after task completion
+  </Accordion>
+
+  <Accordion title="Use cases">
+  - Dynamic malware analysis
+  - Behavioral monitoring in sandbox
+  - File execution and observation
+  </Accordion>
+</AccordionGroup>
+
+
+### Host Plugins
+
+Host plugins execute directly on the host system.
+
+<AccordionGroup>
+  <Accordion title="Characteristics">
+  - Execute directly on the host system
+  - Full access to host resources and capabilities
+  - Higher performance without sandbox overhead
+  - Can be persistent across multiple tasks
+  </Accordion>
+
+  <Accordion title="Use cases">
+  - Statical file analysis
+  - Fast preprocessing tasks
+  - Virtual machine introspection
+  - Emulation-related plugins
+  </Accordion>
+</AccordionGroup>
