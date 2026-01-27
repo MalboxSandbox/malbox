@@ -1,0 +1,35 @@
+---
+title: "Event Hooks"
+description: "How plugins respond to system events through hooks"
+---
+
+Malbox's plugin system is event-driven. Rather than polling for changes or running on fixed schedules, plugins subscribe to specific events and respond when those events occur. This approach enables efficient, reactive analysis workflows where plugins only activate when relevant activity happens.
+
+## How Event Hooks Work
+
+When you register a plugin with Malbox, you declare which events your plugin should respond to. The system then notifies your plugin whenever those events fire, passing along relevant context and data.
+
+## Event Categories
+
+Events are grouped into four categories based on what triggers them:
+
+| Category | Description |
+|----------|-------------|
+| **Task Events** | Fired during task lifecycle stages |
+| **Plugin Events** | Fired when plugin processes start, stop, or produce results |
+| **Sample Events** | Fired when samples are received or finish processing |
+| **System Events** | Fired for system-wide occurrences like shutdown or configuration changes |
+
+## Subscribing to Events
+
+Plugins can subscribe to multiple events simultaneously. The subscription model is declarative, you specify which events matter to your plugin, and the system handles routing.
+
+<Note>
+Event hooks execute asynchronously. If your plugin needs to ensure ordering between events, use the task context to coordinate.
+</Note>
+
+## Reference
+
+For the complete list of available events and their parameters, see the [Events Reference](/reference/plugin-sdk/events).
+
+

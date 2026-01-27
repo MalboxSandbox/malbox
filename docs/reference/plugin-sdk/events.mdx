@@ -1,0 +1,45 @@
+---
+title: "Event Hooks"
+description: "Complete reference for all plugin event hooks"
+---
+
+This page documents all events that plugins can subscribe to through the hook system. For conceptual information about how event hooks work, see [Event Hooks](/plugin-system/event-hooks).
+
+## Task Events
+
+Events fired during the task lifecycle.
+
+| Event | Description |
+|-------|-------------|
+| TaskCreated | A new analysis task has been created and queued |
+| TaskStarting | A task is about to begin execution |
+| TaskCompleted | A task finished successfully |
+| TaskFailed | A task failed during execution |
+
+## Plugin Events
+
+Events related to plugin process lifecycle and output.
+
+| Event | Description |
+|-------|-------------|
+| PluginStarted | A plugin process has started |
+| PluginStopped | A plugin process has stopped |
+| PluginResultAvailable | A plugin produced an analysis result |
+
+## Sample Events
+
+Events fired during sample processing.
+
+| Event | Description |
+|-------|-------------|
+| SampleReceived | A new sample has been received for analysis |
+| SampleProcessed | Sample processing is complete |
+
+## System Events
+
+Events for system-wide occurrences.
+
+| Event | Description |
+|-------|-------------|
+| SystemShutdown | The daemon is shutting down |
+| ConfigReloaded | System configuration has been reloaded |

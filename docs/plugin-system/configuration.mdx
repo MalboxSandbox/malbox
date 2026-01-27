@@ -1,0 +1,26 @@
+---
+title: "Configuration"
+description: "How to configure plugin behavior and execution"
+---
+
+Malbox provides extensive configuration options for controlling how plugins operate. Both the plugin system itself and individual plugins can be configured to fit specific use cases and requirements.
+
+## Plugin Types
+
+Plugins can run either on the host system or inside a sandboxed (guest) environment. This choice affects isolation, performance, and what resources the plugin can access.
+
+## Execution Contexts
+
+Execution contexts define how plugins coordinate with each other during task execution. Some plugins need exclusive access to resources, others can run alongside compatible plugins, and some have no coordination requirements at all. Choosing the right execution context balances isolation needs against throughput.
+
+## State Management
+
+State management controls how plugins maintain data across their lifecycle. Plugins can be completely isolated between tasks, share state globally, or selectively share context with specific plugins or tasks. The right choice depends on whether your plugin benefits from persistence (like keeping ML models loaded) or requires clean state for each execution.
+
+## Custom Plugin Settings
+
+Beyond system-level configuration, plugin developers can expose custom settings specific to their plugins. Users can adjust these settings to customize plugin behavior without modifying the plugin itself.
+
+## Reference
+
+For complete specifications and all available options, see the [Plugin Configuration Reference](/reference/configuration/plugins).

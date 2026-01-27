@@ -5,9 +5,9 @@ description: "An overview of the plugin system"
 
 ## Purpose and Scope
 
-The Malbox plugin system provides a robust, extensible framework for implementing and executing analysis plugins. Plugins can be configured with different [plugin types](/plugin-system/configuration/plugin-types), [execution contexts](/plugin-system/configuration/execution-contexts), [state management](/plugin-system/configuration/state-management) modes, and more, while maintaining a consistent API and communication model across all configurations.
+The Malbox plugin system provides a robust, [event-driven](/plugin-system/event-hooks), extensible framework for implementing and executing analysis plugins. Plugins can be configured with different system and plugin-defined fields, while maintaining a consistent API and communication model across all configurations.
 
-Malbox aims to provide a comprehensive [plugin SDK](/reference/plugin-sdk/introduction) that facilitates analysis development through a sane, stable API. The library provides enough abstraction to allow developers to focus exclusively on analysis logic, while maintaining backward compatibility and long-term stability.
+Malbox aims to provide a comprehensive plugin SDK that facilitates analysis development through a sane, stable API. The library provides enough abstraction to allow developers to focus exclusively on analysis logic, while maintaining backward compatibility and long-term stability.
 
 ## Configuration
 
@@ -15,7 +15,7 @@ Both the plugin system and individual plugins can be configured to fit specific 
 
 Plugin developers can expose custom settings specific to their plugins, in addition to the generic settings that apply to all plugins.
 
-Explore the available configuration options in the [plugin configuration pages](/plugin-system/configuration). For technical details and schema definitions, see the [configuration reference](/reference/configuration/plugins).
+Explore the available configurations in the [plugin configuration pages](/plugin-system/configuration). For technical details and schema definitions, see the [configuration reference](/reference/configuration/plugins).
 
 ## Behind the Scenes
 

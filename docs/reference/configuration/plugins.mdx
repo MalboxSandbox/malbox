@@ -3,4 +3,29 @@ title: "Plugins"
 description: "Plugin configuration reference"
 ---
 
+This page documents all plugin configuration options. For conceptual information, see [Plugin Configuration](/plugin-system/configuration).
+
+## Plugin Types
+
+| Type | Description |
+|------|-------------|
+| Guest | Executes within sandboxed environments (VMs, containers). Terminated with sandbox after task completion. |
+| Host | Executes directly on the host system with full resource access. Can persist across multiple tasks. |
+
+## Execution Contexts
+
+| Context | Description |
+|---------|-------------|
+| Exclusive | Plugin runs alone, no other plugins execute simultaneously |
+| Sequential | Plugins run one at a time in defined order |
+| Parallel | Compatible plugins run concurrently |
+| Unrestricted | No coordination required, can run alongside any plugin |
+
+## State Management
+
+| Mode | Description |
+|------|-------------|
+| Global | Persists across tasks, host plugins only |
+| Isolated | Fresh state per task, no persistence |
+| ContextAware | Selective sharing with specific plugins or tasks |
 

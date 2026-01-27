@@ -26,15 +26,8 @@
                         "group": "Plugin System",
                         "pages": [
                             "plugin-system/overview",
-                            {
-                                "group": "Configuration",
-                                "expanded": false,
-                                "pages": [
-                                    "plugin-system/configuration/plugin-types",
-                                    "plugin-system/configuration/execution-contexts",
-                                    "plugin-system/configuration/state-management"
-                                ]
-                            }
+                            "plugin-system/event-hooks",
+                            "plugin-system/configuration"
                         ]
                     },
                     {
@@ -79,15 +72,14 @@
                 "groups": [
                     {
                         "group": "Configuration",
-                        "pages": ["reference/configuration/workers", "reference/configuration/plugins"]
-                    },
-                    {
-                        "group": "REST API",
-                        "pages": ["reference/rest-api/introduction"]
+                        "pages": [
+                            "reference/configuration/workers",
+                            "reference/configuration/plugins"
+                        ]
                     },
                     {
                         "group": "Plugin SDK",
-                        "pages": ["reference/plugin-sdk/introduction"]
+                        "pages": ["reference/plugin-sdk/events"]
                     }
                 ]
             }
@@ -101,7 +93,7 @@
                 },
                 {
                     "anchor": "Roadmap",
-                    "href": "https://github.com/orgs/DualHorizon/projects/4",
+                    "href": "https://github.com/DualHorizon/malbox",
                     "icon": "map"
                 }
             ]
