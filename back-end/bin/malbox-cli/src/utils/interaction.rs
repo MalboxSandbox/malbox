@@ -1,1 +1,1 @@
-pub mod templates;
+// Interaction utilities (stub)

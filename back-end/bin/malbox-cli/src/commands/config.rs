@@ -3,12 +3,9 @@ use crate::error::Result;
 use clap::{Parser, Subcommand};
 use malbox_config::Config;
 
+mod init;
 mod playbook;
-mod validate;
-mod vars;
-
-pub use validate::ValidateArgs;
-pub use vars::VarsCommand;
+pub use init::InitArgs;
 
 #[derive(Parser)]
 pub struct ConfigCommand {
@@ -18,15 +15,14 @@ pub struct ConfigCommand {
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
-    Vars(VarsCommand),
-    Validate(ValidateArgs),
+    /// Initialize a new configuration file with defaults
+    Init(InitArgs),
 }
 
 impl Command for ConfigCommand {
     async fn execute(self, config: &Config) -> Result<()> {
         match self.command {
-            ConfigCommands::Vars(cmd) => cmd.execute(config).await,
-            ConfigCommands::Validate(args) => args.execute(config).await,
+            ConfigCommands::Init(args) => args.execute(config).await,
         }
     }
 }

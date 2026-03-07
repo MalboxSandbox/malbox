@@ -2,12 +2,10 @@ use crate::error::Result;
 use clap::{Parser, Subcommand};
 use malbox_config::Config;
 
-pub mod builder;
 pub mod completion;
 pub mod config;
 pub mod daemon;
-pub mod downloader;
-pub mod infra;
+pub mod provider;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -18,23 +16,19 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Builder(builder::BuilderCommand),
-    Infra(infra::InfraCommand),
     Config(config::ConfigCommand),
     Daemon(daemon::DaemonCommand),
-    Downloader(downloader::DownloaderCommand),
     Completion(completion::CompletionCommand),
+    Provider(provider::ProviderCommand),
 }
 
 impl Command for Cli {
     async fn execute(self, config: &Config) -> Result<()> {
         match self.command {
-            Commands::Builder(cmd) => cmd.execute(config).await,
-            Commands::Infra(cmd) => cmd.execute(config).await,
             Commands::Config(cmd) => cmd.execute(config).await,
             Commands::Daemon(cmd) => cmd.execute(config).await,
-            Commands::Downloader(cmd) => cmd.execute(config).await,
             Commands::Completion(cmd) => cmd.execute(config).await,
+            Commands::Provider(cmd) => cmd.execute(config).await,
         }
     }
 }

@@ -4,24 +4,20 @@ use thiserror::Error;
 pub enum CliError {
     #[error("Configuration error: {0}")]
     Config(#[from] malbox_config::ConfigError),
-    #[error("Builder error: {0}")]
-    Builder(String),
-    #[error("Packer error: {0}")]
-    Packer(#[from] malbox_packer::Error),
-    #[error("Terraform error: {0}")]
-    Terraform(#[from] malbox_terraform::Error),
-    #[error("Downloader error: {0}")]
-    Downloader(#[from] malbox_downloader::Error),
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Command failed: {0}")]
     CommandFailed(String),
-    #[error("Serde JSON error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("Serde YAML error: {0}")]
-    SerdeYaml(#[from] serde_yaml::Error),
+    #[error("JSON (de)serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("YAML (de)serialization error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("TOML deserialization error: {0}")]
+    TomlDe(#[from] toml::de::Error),
+    #[error("TOML serialization error: {0}")]
+    TomlSer(#[from] toml::ser::Error),
     #[error("Dialoguer error: {0}")]
     Dialoguer(#[from] dialoguer::Error),
 }

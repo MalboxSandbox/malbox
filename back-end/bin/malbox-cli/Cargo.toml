@@ -6,19 +6,15 @@ edition = "2024"
 [dependencies]
 malbox-config = { path = "../../crates/malbox-config" }
 malbox-tracing = { path = "../../crates/malbox-tracing" }
-malbox-downloader = { path = "../../crates/malbox-downloader" }
-malbox-terraform = { path = "../../crates/malbox-terraform" }
-malbox-packer = { path = "../../crates/malbox-packer" }
-anyhow = { workspace = true }
 tokio = { workspace = true }
 color-eyre = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
-bon = { workspace = true }
 tracing = { workspace = true }
 dialoguer = { workspace = true }
 indicatif = { workspace = true }
 chrono.workspace = true
+toml.workspace = true
 clap = { version = "4.5.26", features = ["derive"] }
 clap_complete = "4.5.42"
 serde_yaml = "0.9.34"
