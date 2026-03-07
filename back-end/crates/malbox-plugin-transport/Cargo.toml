@@ -1,0 +1,18 @@
+[package]
+name = "malbox-plugin-transport"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iceoryx2 = { version = "0.8.1", default-features = false }
+
+tonic = "0.14.5"
+prost = "0.14.3"
+tonic-prost = "0.14.5"
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+
+thiserror.workspace = true
+
+[build-dependencies]
+tonic-prost-build = "0.14.5"

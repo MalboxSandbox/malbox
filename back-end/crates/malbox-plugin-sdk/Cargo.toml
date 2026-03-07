@@ -1,0 +1,26 @@
+[package]
+name = "malbox-plugin-sdk"
+version = "0.1.0"
+edition = "2024"
+description = "SDK for building Malbox analysis plugins"
+
+[features]
+default = []
+guest = ["dep:tokio", "dep:tonic"]
+
+[dependencies]
+malbox-plugin-transport = { path = "../malbox-plugin-transport" }
+
+tokio = { workspace = true, optional = true }
+tonic = { version = "0.14", optional = true }
+
+tracing.workspace = true
+thiserror.workspace = true
+
+[[example]]
+name = "guest_echo_plugin"
+required-features = ["guest"]
+
+[dev-dependencies]
+malbox-tracing = { path = "../malbox-tracing" }
+tempfile = "3"

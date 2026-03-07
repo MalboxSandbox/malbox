@@ -1,153 +1,208 @@
-//! Plugin registry system.
-//!
-//! This module manages the registry of available plugins
-//! and their instances.
+pub mod error;
+pub mod manifest;
+pub mod scanner;
+pub mod snapshot;
+pub mod types;
+pub mod watcher;
 
-use malbox_communication::PluginChannel;
-
-use crate::error::{PluginRegistryError, Result};
-use crate::plugin_types::GuestPlatform;
-use discovery::PluginDiscovery;
-use instance::PluginInstance;
-use metadata::PluginManifest;
-use std::collections::{HashMap, HashSet};
+use arc_swap::ArcSwap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use tokio::sync::RwLock as AsyncRwLock;
-use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+use std::sync::Arc;
 
-mod discovery;
-mod instance;
-mod metadata;
+use error::RegistryError;
+use scanner::Scanner;
+use snapshot::{PluginSnapshot, PluginSnapshotInner};
+use types::PluginId;
+use watcher::{PendingChange, Watcher};
 
-/// Registry of all available plugins in the system.
-///
-/// The plugin registry maintains information about all plugins that
-/// have been discovered, as well as which ones are currently loaded.
+/// Tracks what changed during an `apply_pending()` call.
+#[derive(Debug, Default)]
+pub struct RegistryDiff {
+    pub added: Vec<PluginId>,
+    pub updated: Vec<PluginId>,
+    pub removed: Vec<PluginId>,
+    pub errors: Vec<(PathBuf, String)>,
+}
+
+impl RegistryDiff {
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty()
+            && self.updated.is_empty()
+            && self.removed.is_empty()
+            && self.errors.is_empty()
+    }
+}
+
+/// The plugin registry: discovers, tracks, and provides access to plugins.
 pub struct PluginRegistry {
-    /// Path to the plugins directory.
-    plugins_dir: PathBuf,
-
-    /// Service for discovering plugins.
-    discovery: PluginDiscovery,
-
-    /// All discovered plugins mapped by ID.
-    plugins: RwLock<HashMap<String, PluginManifest>>,
-
-    instances: Arc<AsyncRwLock<HashMap<Uuid, PluginInstance>>>,
+    scanner: Scanner,
+    watcher: Watcher,
+    current: ArcSwap<PluginSnapshotInner>,
 }
 
 impl PluginRegistry {
-    /// Create a new plugin registry with default plugins directory.
-    pub fn new() -> Self {
-        Self::with_directory(PathBuf::from("./plugins"))
+    /// Create the registry, scan for existing plugins, and start watching for changes.
+    pub fn new(plugin_dir: PathBuf) -> Result<Self, RegistryError> {
+        let scanner = Scanner::new(plugin_dir.clone());
+        let entries = scanner.scan_all()?;
+
+        tracing::info!(
+            count = entries.len(),
+            dir = %plugin_dir.display(),
+            "Initial plugin scan complete"
+        );
+
+        let plugins = entries
+            .into_iter()
+            .map(|e| (e.id.clone(), Arc::new(e)))
+            .collect();
+        let snapshot = PluginSnapshotInner::new(plugins);
+
+        let watcher = Watcher::start(&plugin_dir)?;
+
+        Ok(Self {
+            scanner,
+            watcher,
+            current: ArcSwap::from_pointee(snapshot),
+        })
     }
 
-    /// Create a new plugin registry.
-    pub fn with_directory(plugins_dir: PathBuf) -> Self {
-        Self {
-            plugins_dir: plugins_dir.clone(),
-            plugins: RwLock::new(HashMap::new()),
-            discovery: PluginDiscovery::new(plugins_dir),
-            instances: Arc::new(AsyncRwLock::new(HashMap::new())),
+    /// Get the current plugin snapshot. Cheap (Arc clone).
+    pub fn snapshot(&self) -> PluginSnapshot {
+        PluginSnapshot::from_inner(self.current.load_full())
+    }
+
+    /// Apply any pending filesystem changes. Returns a diff of what changed.
+    pub fn apply_pending(&self) -> RegistryDiff {
+        let changes = self.watcher.drain_pending();
+        if changes.is_empty() {
+            return RegistryDiff::default();
         }
-    }
 
-    /// Initialize the registry by discovering available plugins.
-    pub async fn initialize(&self) -> Result<()> {
-        let discovered = self.discovery.discover_plugins().await?;
+        let mut plugins = self.current.load().plugins.clone();
+        let mut diff = RegistryDiff::default();
 
-        {
-            let mut plugins = self.plugins.write().unwrap();
-            for manifest in discovered {
-                plugins.insert(manifest.id.clone(), manifest);
+        for change in changes {
+            match change {
+                PendingChange::Added(path) | PendingChange::Modified(path) => {
+                    match self.scanner.scan_one(&path) {
+                        Ok(entry) => {
+                            let id = entry.id.clone();
+                            if plugins.contains_key(&id) {
+                                diff.updated.push(id.clone());
+                            } else {
+                                diff.added.push(id.clone());
+                            }
+                            plugins.insert(id, Arc::new(entry));
+                        }
+                        Err(e) => {
+                            diff.errors.push((path, e.to_string()));
+                        }
+                    }
+                }
+                PendingChange::Removed(id) => {
+                    if plugins.remove(&id).is_some() {
+                        diff.removed.push(id);
+                    }
+                }
             }
         }
 
-        tracing::info!(
-            "Initialized plugin registry with {} plugins",
-            self.plugins.read().unwrap().len()
-        );
-        Ok(())
+        self.current
+            .store(Arc::new(PluginSnapshotInner::new(plugins)));
+        diff
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn create_plugin(parent: &Path, name: &str) {
+        let dir = parent.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.toml"),
+            format!(
+                r#"
+[plugin]
+name = "{name}"
+version = "1.0.0"
+type = "host"
+state = "ephemeral"
+execution = "parallel"
+"#
+            ),
+        )
+        .unwrap();
+        let binary = dir.join(name);
+        std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    /// Get all available plugins.
-    pub fn get_plugins(&self) -> Vec<PluginManifest> {
-        let plugins = self.plugins.read().unwrap();
-        plugins.values().cloned().collect()
+    #[test]
+    fn new_discovers_existing_plugins() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin(tmp.path(), "plugin-a");
+        create_plugin(tmp.path(), "plugin-b");
+
+        let registry = PluginRegistry::new(tmp.path().to_path_buf()).unwrap();
+        let snapshot = registry.snapshot();
+
+        assert_eq!(snapshot.len(), 2);
     }
 
-    /// Find plugins that support a specific platform.
-    pub fn find_plugins_for_platform(&self, platform: &GuestPlatform) -> Vec<PluginManifest> {
-        let plugins = self.plugins.read().unwrap();
-        plugins
-            .values()
-            .filter(|p| p.supports_platform(platform))
-            .cloned()
-            .collect()
+    #[test]
+    fn snapshot_is_consistent() {
+        let tmp = TempDir::new().unwrap();
+        create_plugin(tmp.path(), "my-plugin");
+
+        let registry = PluginRegistry::new(tmp.path().to_path_buf()).unwrap();
+        let snap1 = registry.snapshot();
+        let snap2 = registry.snapshot();
+
+        assert_eq!(snap1.len(), snap2.len());
+        assert_eq!(snap1.len(), 1);
     }
 
-    /// Create a new plugin instance.
-    pub async fn create_instance(&self, plugin_id: &str) -> Result<Uuid> {
-        let manifest = {
-            let plugins = self.plugins.read().unwrap();
-            plugins
-                .get(plugin_id)
-                .cloned()
-                .ok_or_else(|| PluginRegistryError::DiscoveryError(plugin_id.to_string()))?
-        };
-
-        let instance_id = Uuid::new_v4();
-
-        let instance = PluginInstance::new(instance_id, manifest);
-
-        {
-            let mut instances = self.instances.write().await;
-            instances.insert(instance_id, instance);
-        }
-
-        debug!(
-            "Created plugin instance {} for plugin {}",
-            instance_id, plugin_id
-        );
-
-        Ok(instance_id)
+    #[test]
+    fn apply_pending_no_changes() {
+        let tmp = TempDir::new().unwrap();
+        let registry = PluginRegistry::new(tmp.path().to_path_buf()).unwrap();
+        let diff = registry.apply_pending();
+        assert!(diff.is_empty());
     }
 
-    /// Get a plugin instance by ID.
-    pub async fn get_instance(&self, id: Uuid) -> Option<PluginInstance> {
-        let instances = self.instances.read().await;
-        instances.get(&id).cloned()
+    #[test]
+    fn apply_pending_picks_up_new_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let registry = PluginRegistry::new(tmp.path().to_path_buf()).unwrap();
+
+        assert_eq!(registry.snapshot().len(), 0);
+
+        create_plugin(tmp.path(), "new-plugin");
+        thread::sleep(Duration::from_millis(800));
+
+        let diff = registry.apply_pending();
+        assert!(!diff.is_empty());
+        assert_eq!(registry.snapshot().len(), 1);
     }
 
-    /// Start a plugin instance.
-    pub async fn start_instance(&self, id: Uuid) -> Result<()> {
-        let mut instances = self.instances.write().await;
-
-        if let Some(instance) = instances.get_mut(&id) {
-            instance.start().await?;
-            Ok(())
-        } else {
-            Err(PluginRegistryError::DiscoveryError(format!(
-                "Instance {} not found",
-                id
-            )))?
-        }
+    #[test]
+    fn new_with_nonexistent_dir_fails() {
+        let result = PluginRegistry::new(PathBuf::from("/nonexistent/plugins"));
+        assert!(result.is_err());
     }
 
-    /// Stop a plugin instance.
-    pub async fn stop_instance(&self, id: Uuid) -> Result<()> {
-        let mut instances = self.instances.write().await;
-
-        if let Some(instance) = instances.get_mut(&id) {
-            instance.stop().await?;
-            Ok(())
-        } else {
-            Err(PluginRegistryError::DiscoveryError(format!(
-                "Instance {} not found",
-                id
-            )))?
-        }
+    #[test]
+    fn empty_dir_creates_empty_registry() {
+        let tmp = TempDir::new().unwrap();
+        let registry = PluginRegistry::new(tmp.path().to_path_buf()).unwrap();
+        assert!(registry.snapshot().is_empty());
     }
 }

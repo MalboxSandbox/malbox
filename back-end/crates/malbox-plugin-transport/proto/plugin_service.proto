@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package malbox.plugin;
+
+// Guest plugin service — implemented by the plugin inside the VM,
+// called by the daemon from the host.
+service GuestPluginService {
+  // Lifecycle management
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // Task execution — daemon sends task, guest streams results back
+  rpc ExecuteTask(TaskRequest) returns (stream TaskResult);
+
+  // Event notification — daemon pushes events to guest plugin
+  rpc NotifyEvent(EventNotification) returns (EventAck);
+
+  // Guest access — file transfer and command execution on guest OS
+  rpc PushFile(stream FileChunk) returns (FileTransferResponse);
+  rpc PullFile(PullFileRequest) returns (stream FileChunk);
+  rpc ExecuteCommand(ExecRequest) returns (ExecResponse);
+}
+
+// --- Lifecycle messages ---
+
+message InitializeRequest {
+  int32 plugin_id = 1;
+  map<string, string> config = 2;
+}
+
+message InitializeResponse {
+  bool success = 1;
+  string error_message = 2;
+  repeated string capabilities = 3;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool ready = 1;
+  string reason = 2;
+}
+
+message ShutdownRequest {
+  bool graceful = 1;
+}
+
+message ShutdownResponse {
+  bool acknowledged = 1;
+}
+
+// --- Task execution messages ---
+
+message TaskRequest {
+  int32 task_id = 1;
+  string sample_path = 2;
+  map<string, string> config = 3;
+}
+
+message TaskResult {
+  int32 task_id = 1;
+  string result_name = 2;
+  bytes data = 3;
+  ResultFormat format = 4;
+  bool is_final = 5;
+}
+
+enum ResultFormat {
+  RESULT_FORMAT_UNSPECIFIED = 0;
+  RESULT_FORMAT_JSON = 1;
+  RESULT_FORMAT_BYTES = 2;
+}
+
+// --- Event messages ---
+
+message EventNotification {
+  oneof event {
+    TaskEventProto task = 1;
+    PluginEventProto plugin = 2;
+    SampleEventProto sample = 3;
+    DaemonEventProto daemon = 4;
+  }
+}
+
+message TaskEventProto {
+  TaskEventType event_type = 1;
+  int32 task_id = 2;
+}
+
+enum TaskEventType {
+  TASK_EVENT_TYPE_UNSPECIFIED = 0;
+  TASK_EVENT_TYPE_CREATED = 1;
+  TASK_EVENT_TYPE_STARTING = 2;
+  TASK_EVENT_TYPE_COMPLETED = 3;
+  TASK_EVENT_TYPE_FAILED = 4;
+}
+
+message PluginEventProto {
+  PluginEventType event_type = 1;
+  int32 plugin_id = 2;
+}
+
+enum PluginEventType {
+  PLUGIN_EVENT_TYPE_UNSPECIFIED = 0;
+  PLUGIN_EVENT_TYPE_STARTED = 1;
+  PLUGIN_EVENT_TYPE_STOPPED = 2;
+  PLUGIN_EVENT_TYPE_RESULT_PRODUCED = 3;
+}
+
+message SampleEventProto {
+  SampleEventType event_type = 1;
+  int32 sample_id = 2;
+}
+
+enum SampleEventType {
+  SAMPLE_EVENT_TYPE_UNSPECIFIED = 0;
+  SAMPLE_EVENT_TYPE_STARTED = 1;
+  SAMPLE_EVENT_TYPE_STOPPED = 2;
+  SAMPLE_EVENT_TYPE_RESULT_PRODUCED = 3;
+}
+
+message DaemonEventProto {
+  DaemonEventType event_type = 1;
+}
+
+enum DaemonEventType {
+  DAEMON_EVENT_TYPE_UNSPECIFIED = 0;
+  DAEMON_EVENT_TYPE_SHUTDOWN = 1;
+  DAEMON_EVENT_TYPE_CONFIG_RELOADED = 2;
+}
+
+message EventAck {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// --- Guest access messages ---
+
+message FileChunk {
+  string path = 1;
+  bytes data = 2;
+  bool is_last = 3;
+}
+
+message FileTransferResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message PullFileRequest {
+  string path = 1;
+}
+
+message ExecRequest {
+  string command = 1;
+  repeated string args = 2;
+  optional string cwd = 3;
+  map<string, string> env = 4;
+  optional uint64 timeout_ms = 5;
+  bool background = 6;
+}
+
+message ExecResponse {
+  optional int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+}
