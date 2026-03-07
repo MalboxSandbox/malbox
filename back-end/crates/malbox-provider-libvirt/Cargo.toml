@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 malbox-machinery.path = "../malbox-machinery"
+malbox-machinery-macros.path = "../malbox-machinery-macros"
+inventory.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true

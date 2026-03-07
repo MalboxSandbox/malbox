@@ -208,7 +208,8 @@ pub struct Graphics {
     pub autoport: String,
     #[serde(rename = "@listen")]
     pub listen: String,
-    pub listen_element: ListenElement,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_element: Option<ListenElement>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -247,10 +248,9 @@ impl Domain {
             Platform::Linux => ("hvm", "x86_64", "pc-q35-5.2"),
         };
 
-        let disk_bus = match spec.platform {
-            Platform::Linux => "virtio",
-            Platform::Windows => "sata",
-        };
+        // TODO: Make disk bus configurable to support images built with different
+        // disk interfaces (virtio, sata, ide) depending on how the base image was built.
+        let (disk_bus, disk_dev) = ("virtio", "vda");
 
         let disk_format = match spec.storage.disk_type {
             DiskType::Qcow2 => "qcow2",
@@ -321,7 +321,7 @@ impl Domain {
                     },
                     source: DiskSource { file: disk_path },
                     target: DiskTarget {
-                        dev: "vda".to_string(),
+                        dev: disk_dev.to_string(),
                         bus: disk_bus.to_string(),
                     },
                 },
@@ -345,10 +345,10 @@ impl Domain {
                     port: "-1".to_string(),
                     autoport: "yes".to_string(),
                     listen: "127.0.0.1".to_string(),
-                    listen_element: ListenElement {
+                    listen_element: Some(ListenElement {
                         listen_type: "address".to_string(),
                         address: "127.0.0.1".to_string(),
-                    },
+                    }),
                 },
                 video: Video {
                     model: VideoModel {
@@ -395,8 +395,9 @@ impl Domain {
                 .as_ref()
                 .map(|m| MacAddress { address: m.clone() }),
             source,
+            // TODO: Make NIC model configurable to match how the base image was built.
             model: InterfaceModel {
-                model_type: "virtio".to_string(),
+                model_type: "e1000".to_string(),
             },
         }
     }
@@ -414,5 +415,10 @@ impl Domain {
     /// Extract disk file path from domain.
     pub fn disk_path(&self) -> Option<String> {
         Some(self.devices.disk.source.file.clone())
+    }
+
+    /// Update the disk file path in domain.
+    pub fn update_disk_path(&mut self, new_path: &str) {
+        self.devices.disk.source.file = new_path.to_string();
     }
 }
