@@ -202,9 +202,9 @@ pub async fn run(config: &Config) -> error::Result<()> {
     }
 
     let registry = Arc::new(
-        malbox_plugin_internal::registry::PluginRegistry::new(plugin_dir.clone()).map_err(
-            |e| DaemonError::Internal(format!("Failed to initialize plugin registry: {}", e)),
-        )?,
+        malbox_plugin_internal::registry::PluginRegistry::new(plugin_dir.clone()).map_err(|e| {
+            DaemonError::Internal(format!("Failed to initialize plugin registry: {}", e))
+        })?,
     );
 
     let initial_snapshot = registry.snapshot();

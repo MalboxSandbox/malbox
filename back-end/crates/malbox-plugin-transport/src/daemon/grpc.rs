@@ -3,10 +3,10 @@
 //! The daemon uses `GrpcClient` to call RPC methods on the plugin's gRPC server.
 //! All methods are async.
 
+use crate::error::{Result, TransportError};
 use crate::grpc::conversions;
 use crate::grpc::proto;
 use crate::grpc::proto::guest_plugin_service_client::GuestPluginServiceClient;
-use crate::error::{Result, TransportError};
 use crate::messages::events::{Event, Payload};
 use std::collections::HashMap;
 
@@ -136,11 +136,7 @@ impl GrpcClient {
             .into_inner();
 
         let mut buf = Vec::new();
-        while let Some(chunk) = stream
-            .message()
-            .await
-            .map_err(TransportError::GrpcStatus)?
-        {
+        while let Some(chunk) = stream.message().await.map_err(TransportError::GrpcStatus)? {
             buf.extend_from_slice(&chunk.data);
         }
         Ok(buf)

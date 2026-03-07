@@ -32,7 +32,9 @@ pub enum ResourceError {
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("Unknown transport '{name}': not supported by provider '{provider}'. Available: {available:?}")]
+    #[error(
+        "Unknown transport '{name}': not supported by provider '{provider}'. Available: {available:?}"
+    )]
     UnknownTransport {
         name: String,
         provider: String,

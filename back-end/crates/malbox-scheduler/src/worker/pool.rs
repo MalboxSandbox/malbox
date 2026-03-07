@@ -3,9 +3,9 @@
 //! Spawns and manages a pool of Worker actors as tokio tasks.
 
 use super::Worker;
-use crate::worker::event::WorkerEvent;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
+use crate::worker::event::WorkerEvent;
 use malbox_config::MachineryConfig;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachineryManager, ResolvedTransport};

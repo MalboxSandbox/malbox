@@ -1,4 +1,4 @@
-use crate::{domain_xml::Domain as XmlDomain, LibvirtError, LibvirtProvider};
+use crate::{LibvirtError, LibvirtProvider, domain_xml::Domain as XmlDomain};
 use async_trait::async_trait;
 use malbox_machinery::{Allocate, Machine, MachineEndpoint, MachineId, MachineSpec, MachineState};
 use std::error::Error;
@@ -6,10 +6,7 @@ use virt::domain::Domain;
 
 #[async_trait]
 impl Allocate for LibvirtProvider {
-    async fn allocate(
-        &self,
-        spec: &MachineSpec,
-    ) -> Result<Machine, Box<dyn Error + Send + Sync>> {
+    async fn allocate(&self, spec: &MachineSpec) -> Result<Machine, Box<dyn Error + Send + Sync>> {
         let id = uuid::Uuid::new_v4().to_string();
         let domain_name = format!("malbox-{}", id);
 
@@ -30,8 +27,8 @@ impl Allocate for LibvirtProvider {
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Store machine spec as domain metadata
-        let metadata = serde_json::to_string(spec)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let metadata =
+            serde_json::to_string(spec).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         domain
             .set_metadata(
@@ -72,10 +69,7 @@ impl Allocate for LibvirtProvider {
         Ok(machine)
     }
 
-    async fn deallocate(
-        &self,
-        machine: &Machine,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn deallocate(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>> {
         let domain_name = format!("malbox-{}", machine.id());
 
         let domain = Domain::lookup_by_name(self.connection(), &domain_name)
@@ -109,8 +103,10 @@ impl Allocate for LibvirtProvider {
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         let domain_info = XmlDomain::from_xml(&xml_desc).map_err(|e| {
-            Box::new(LibvirtError::Libvirt(format!("Failed to parse domain XML: {}", e)))
-                as Box<dyn Error + Send + Sync>
+            Box::new(LibvirtError::Libvirt(format!(
+                "Failed to parse domain XML: {}",
+                e
+            ))) as Box<dyn Error + Send + Sync>
         })?;
         let disk_path = domain_info.disk_path();
 

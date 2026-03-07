@@ -30,50 +30,49 @@ impl Watcher {
             Arc::new(Mutex::new(std::collections::HashMap::new()));
         let debounce_window = Duration::from_millis(500);
 
-        let mut watcher =
-            notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-                let event = match res {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::error!(error = %e, "Filesystem watcher error");
-                        return;
-                    }
+        let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::error!(error = %e, "Filesystem watcher error");
+                    return;
+                }
+            };
+
+            for path in &event.paths {
+                let plugin_subdir = match resolve_plugin_dir(path, &plugin_dir_owned) {
+                    Some(d) => d,
+                    None => continue,
                 };
 
-                for path in &event.paths {
-                    let plugin_subdir = match resolve_plugin_dir(path, &plugin_dir_owned) {
-                        Some(d) => d,
-                        None => continue,
-                    };
-
-                    {
-                        let mut state = debounce_state.lock().unwrap();
-                        let now = Instant::now();
-                        if let Some(last) = state.get(&plugin_subdir) {
-                            if now.duration_since(*last) < debounce_window {
-                                continue;
-                            }
+                {
+                    let mut state = debounce_state.lock().unwrap();
+                    let now = Instant::now();
+                    if let Some(last) = state.get(&plugin_subdir) {
+                        if now.duration_since(*last) < debounce_window {
+                            continue;
                         }
-                        state.insert(plugin_subdir.clone(), now);
                     }
-
-                    let change = match event.kind {
-                        EventKind::Create(_) => PendingChange::Added(plugin_subdir),
-                        EventKind::Modify(_) => PendingChange::Modified(plugin_subdir),
-                        EventKind::Remove(_) => {
-                            let name = path
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_default();
-                            PendingChange::Removed(PluginId::new(name))
-                        }
-                        _ => continue,
-                    };
-
-                    let mut pending = pending_clone.lock().unwrap();
-                    pending.push(change);
+                    state.insert(plugin_subdir.clone(), now);
                 }
-            })?;
+
+                let change = match event.kind {
+                    EventKind::Create(_) => PendingChange::Added(plugin_subdir),
+                    EventKind::Modify(_) => PendingChange::Modified(plugin_subdir),
+                    EventKind::Remove(_) => {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        PendingChange::Removed(PluginId::new(name))
+                    }
+                    _ => continue,
+                };
+
+                let mut pending = pending_clone.lock().unwrap();
+                pending.push(change);
+            }
+        })?;
 
         watcher.watch(plugin_dir, RecursiveMode::Recursive)?;
 

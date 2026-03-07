@@ -146,11 +146,12 @@ impl PooledManager {
 
             // Provision if configured
             if let Some(ref provisioner) = self.provisioner {
-                let endpoint = machine.endpoint().ok_or_else(|| {
-                    ResourceError::MachineNotReady {
-                        reason: "No endpoint available after readiness check".to_string(),
-                    }
-                })?;
+                let endpoint =
+                    machine
+                        .endpoint()
+                        .ok_or_else(|| ResourceError::MachineNotReady {
+                            reason: "No endpoint available after readiness check".to_string(),
+                        })?;
 
                 let context = ProvisionContext {
                     endpoint: endpoint.clone(),
@@ -224,7 +225,10 @@ impl OnDemandManager {
     /// Create a new on-demand manager.
     pub fn new(provider: Arc<ProviderHandle>, provisioner: Option<Arc<dyn Provisioner>>) -> Self {
         info!("Creating on-demand machinery manager");
-        Self { provider, provisioner }
+        Self {
+            provider,
+            provisioner,
+        }
     }
 }
 
@@ -251,11 +255,11 @@ impl MachineryManager for OnDemandManager {
 
         // Provision if configured
         if let Some(ref provisioner) = self.provisioner {
-            let endpoint = machine.endpoint().ok_or_else(|| {
-                ResourceError::MachineNotReady {
+            let endpoint = machine
+                .endpoint()
+                .ok_or_else(|| ResourceError::MachineNotReady {
                     reason: "No endpoint available after readiness check".to_string(),
-                }
-            })?;
+                })?;
 
             let context = ProvisionContext {
                 endpoint: endpoint.clone(),
@@ -267,7 +271,10 @@ impl MachineryManager for OnDemandManager {
                     .unwrap_or(toml::Value::Table(toml::map::Map::new())),
             };
 
-            info!("Provisioning on-demand machine with '{}'", provisioner.name());
+            info!(
+                "Provisioning on-demand machine with '{}'",
+                provisioner.name()
+            );
             let result = provisioner
                 .provision(&context)
                 .await

@@ -67,10 +67,17 @@ impl MachinePool {
 
     /// Add a pre-allocated and provisioned machine to the pool.
     /// The caller is responsible for allocation and provisioning.
-    pub async fn add_machine(&self, machine: Machine, clean_snapshot: SnapshotId) -> Result<MachineId> {
+    pub async fn add_machine(
+        &self,
+        machine: Machine,
+        clean_snapshot: SnapshotId,
+    ) -> Result<MachineId> {
         let machine_id = machine.id.clone();
 
-        info!("Adding machine {:?} to pool with clean snapshot", machine_id);
+        info!(
+            "Adding machine {:?} to pool with clean snapshot",
+            machine_id
+        );
 
         let pooled = PooledMachine {
             machine,
@@ -119,11 +126,12 @@ impl MachinePool {
         drop(available);
 
         let mut machines = self.machines.write().await;
-        let mut pooled = machines
-            .remove(&machine_id)
-            .ok_or_else(|| ResourceError::MachineNotFound {
-                id: format!("{:?}", machine_id),
-            })?;
+        let mut pooled =
+            machines
+                .remove(&machine_id)
+                .ok_or_else(|| ResourceError::MachineNotFound {
+                    id: format!("{:?}", machine_id),
+                })?;
 
         // Restore to clean snapshot before returning
         debug!("Restoring machine {:?} to clean snapshot", machine_id);

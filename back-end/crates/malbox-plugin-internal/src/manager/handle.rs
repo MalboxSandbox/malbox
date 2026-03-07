@@ -95,24 +95,19 @@ impl PluginHandle {
         use crate::transport::messages::events::TaskEventPayload;
 
         let mut instance = self.instance.lock().await;
-        let client = instance
-            .grpc_client
-            .as_mut()
-            .ok_or_else(|| {
-                ManagerError::ExecutionFailed(
-                    self.plugin_id.clone(),
-                    "guest plugin has no gRPC client".into(),
-                )
-            })?;
+        let client = instance.grpc_client.as_mut().ok_or_else(|| {
+            ManagerError::ExecutionFailed(
+                self.plugin_id.clone(),
+                "guest plugin has no gRPC client".into(),
+            )
+        })?;
 
         debug!(plugin = %self.plugin_id, task_id, "executing task on guest plugin via gRPC");
 
         let mut stream = client
             .execute_task(task_id, sample_path.to_string(), config)
             .await
-            .map_err(|e| {
-                ManagerError::ExecutionFailed(self.plugin_id.clone(), e.to_string())
-            })?;
+            .map_err(|e| ManagerError::ExecutionFailed(self.plugin_id.clone(), e.to_string()))?;
 
         let mut payloads = Vec::new();
 

@@ -159,14 +159,18 @@ impl Provisioner for AnsibleProvisioner {
                 // Read captured output after process exits.
                 let stdout = if let Some(mut h) = stdout_handle {
                     let mut buf = Vec::new();
-                    tokio::io::AsyncReadExt::read_to_end(&mut h, &mut buf).await.ok();
+                    tokio::io::AsyncReadExt::read_to_end(&mut h, &mut buf)
+                        .await
+                        .ok();
                     String::from_utf8_lossy(&buf).into_owned()
                 } else {
                     String::new()
                 };
                 let stderr = if let Some(mut h) = stderr_handle {
                     let mut buf = Vec::new();
-                    tokio::io::AsyncReadExt::read_to_end(&mut h, &mut buf).await.ok();
+                    tokio::io::AsyncReadExt::read_to_end(&mut h, &mut buf)
+                        .await
+                        .ok();
                     String::from_utf8_lossy(&buf).into_owned()
                 } else {
                     String::new()

@@ -34,9 +34,7 @@ pub fn event_to_proto(event: &Event, payload: &Payload) -> Result<proto::EventNo
             let event_type: i32 = match plugin_evt {
                 PluginEvent::PluginStarted => proto::PluginEventType::Started.into(),
                 PluginEvent::PluginStopped => proto::PluginEventType::Stopped.into(),
-                PluginEvent::PluginResultProduced => {
-                    proto::PluginEventType::ResultProduced.into()
-                }
+                PluginEvent::PluginResultProduced => proto::PluginEventType::ResultProduced.into(),
             };
             proto::event_notification::Event::Plugin(proto::PluginEventProto {
                 event_type,
@@ -51,9 +49,7 @@ pub fn event_to_proto(event: &Event, payload: &Payload) -> Result<proto::EventNo
             let event_type: i32 = match sample_evt {
                 SampleEvent::PluginStarted => proto::SampleEventType::Started.into(),
                 SampleEvent::PluginStopped => proto::SampleEventType::Stopped.into(),
-                SampleEvent::PluginResultProduced => {
-                    proto::SampleEventType::ResultProduced.into()
-                }
+                SampleEvent::PluginResultProduced => proto::SampleEventType::ResultProduced.into(),
             };
             proto::event_notification::Event::Sample(proto::SampleEventProto {
                 event_type,
@@ -102,20 +98,17 @@ pub fn proto_to_event(notification: proto::EventNotification) -> Result<(Event, 
             ))
         }
         proto::event_notification::Event::Plugin(plugin_proto) => {
-            let plugin_event =
-                match proto::PluginEventType::try_from(plugin_proto.event_type) {
-                    Ok(proto::PluginEventType::Started) => PluginEvent::PluginStarted,
-                    Ok(proto::PluginEventType::Stopped) => PluginEvent::PluginStopped,
-                    Ok(proto::PluginEventType::ResultProduced) => {
-                        PluginEvent::PluginResultProduced
-                    }
-                    Ok(proto::PluginEventType::Unspecified) | Err(_) => {
-                        return Err(TransportError::Grpc(format!(
-                            "unknown PluginEventType value: {}",
-                            plugin_proto.event_type
-                        )));
-                    }
-                };
+            let plugin_event = match proto::PluginEventType::try_from(plugin_proto.event_type) {
+                Ok(proto::PluginEventType::Started) => PluginEvent::PluginStarted,
+                Ok(proto::PluginEventType::Stopped) => PluginEvent::PluginStopped,
+                Ok(proto::PluginEventType::ResultProduced) => PluginEvent::PluginResultProduced,
+                Ok(proto::PluginEventType::Unspecified) | Err(_) => {
+                    return Err(TransportError::Grpc(format!(
+                        "unknown PluginEventType value: {}",
+                        plugin_proto.event_type
+                    )));
+                }
+            };
             Ok((
                 Event::Plugin(plugin_event),
                 Payload::Plugin(PluginEventPayload {
@@ -124,20 +117,17 @@ pub fn proto_to_event(notification: proto::EventNotification) -> Result<(Event, 
             ))
         }
         proto::event_notification::Event::Sample(sample_proto) => {
-            let sample_event =
-                match proto::SampleEventType::try_from(sample_proto.event_type) {
-                    Ok(proto::SampleEventType::Started) => SampleEvent::PluginStarted,
-                    Ok(proto::SampleEventType::Stopped) => SampleEvent::PluginStopped,
-                    Ok(proto::SampleEventType::ResultProduced) => {
-                        SampleEvent::PluginResultProduced
-                    }
-                    Ok(proto::SampleEventType::Unspecified) | Err(_) => {
-                        return Err(TransportError::Grpc(format!(
-                            "unknown SampleEventType value: {}",
-                            sample_proto.event_type
-                        )));
-                    }
-                };
+            let sample_event = match proto::SampleEventType::try_from(sample_proto.event_type) {
+                Ok(proto::SampleEventType::Started) => SampleEvent::PluginStarted,
+                Ok(proto::SampleEventType::Stopped) => SampleEvent::PluginStopped,
+                Ok(proto::SampleEventType::ResultProduced) => SampleEvent::PluginResultProduced,
+                Ok(proto::SampleEventType::Unspecified) | Err(_) => {
+                    return Err(TransportError::Grpc(format!(
+                        "unknown SampleEventType value: {}",
+                        sample_proto.event_type
+                    )));
+                }
+            };
             Ok((
                 Event::Sample(sample_event),
                 Payload::Sample(SampleEventPayload {
@@ -146,17 +136,16 @@ pub fn proto_to_event(notification: proto::EventNotification) -> Result<(Event, 
             ))
         }
         proto::event_notification::Event::Daemon(daemon_proto) => {
-            let daemon_event =
-                match proto::DaemonEventType::try_from(daemon_proto.event_type) {
-                    Ok(proto::DaemonEventType::Shutdown) => DaemonEvent::DaemonShutdown,
-                    Ok(proto::DaemonEventType::ConfigReloaded) => DaemonEvent::ConfigReloaded,
-                    Ok(proto::DaemonEventType::Unspecified) | Err(_) => {
-                        return Err(TransportError::Grpc(format!(
-                            "unknown DaemonEventType value: {}",
-                            daemon_proto.event_type
-                        )));
-                    }
-                };
+            let daemon_event = match proto::DaemonEventType::try_from(daemon_proto.event_type) {
+                Ok(proto::DaemonEventType::Shutdown) => DaemonEvent::DaemonShutdown,
+                Ok(proto::DaemonEventType::ConfigReloaded) => DaemonEvent::ConfigReloaded,
+                Ok(proto::DaemonEventType::Unspecified) | Err(_) => {
+                    return Err(TransportError::Grpc(format!(
+                        "unknown DaemonEventType value: {}",
+                        daemon_proto.event_type
+                    )));
+                }
+            };
             // Daemon events have no matching payload enum -- use Task placeholder
             Ok((
                 Event::Daemon(daemon_event),
@@ -203,8 +192,7 @@ mod tests {
         let event = Event::Task(TaskEvent::TaskCreated);
         let payload = Payload::Task(TaskEventPayload { task_id: 42 });
 
-        let proto_notif =
-            event_to_proto(&event, &payload).expect("event_to_proto should succeed");
+        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
         let (event_back, payload_back) =
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
@@ -223,8 +211,7 @@ mod tests {
         let event = Event::Task(TaskEvent::TaskFailed);
         let payload = Payload::Task(TaskEventPayload { task_id: 7 });
 
-        let proto_notif =
-            event_to_proto(&event, &payload).expect("event_to_proto should succeed");
+        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
         let (event_back, payload_back) =
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
@@ -243,8 +230,7 @@ mod tests {
         let event = Event::Plugin(PluginEvent::PluginStarted);
         let payload = Payload::Plugin(PluginEventPayload { plugin_id: 3 });
 
-        let proto_notif =
-            event_to_proto(&event, &payload).expect("event_to_proto should succeed");
+        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
         let (event_back, payload_back) =
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
@@ -264,8 +250,7 @@ mod tests {
         let event = Event::Daemon(DaemonEvent::DaemonShutdown);
         let payload = Payload::Task(TaskEventPayload { task_id: 0 });
 
-        let proto_notif =
-            event_to_proto(&event, &payload).expect("event_to_proto should succeed");
+        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
         let (event_back, payload_back) =
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
@@ -285,8 +270,7 @@ mod tests {
         let event = Event::Sample(SampleEvent::PluginStarted);
         let payload = Payload::Sample(SampleEventPayload { sample_id: 99 });
 
-        let proto_notif =
-            event_to_proto(&event, &payload).expect("event_to_proto should succeed");
+        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
         let (event_back, payload_back) =
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
@@ -304,6 +288,9 @@ mod tests {
     fn test_empty_notification_fails() {
         let notification = proto::EventNotification { event: None };
         let result = proto_to_event(notification);
-        assert!(result.is_err(), "empty notification should produce an error");
+        assert!(
+            result.is_err(),
+            "empty notification should produce an error"
+        );
     }
 }

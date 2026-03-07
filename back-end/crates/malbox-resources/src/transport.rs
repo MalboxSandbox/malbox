@@ -5,8 +5,8 @@
 
 use crate::error::{ResourceError, Result};
 use malbox_config::GuestAccessConfig;
-use malbox_machinery::{ExecOptions, ExecResult, GuestSession, GuestStatus};
 use malbox_machinery::machine::Machine;
+use malbox_machinery::{ExecOptions, ExecResult, GuestSession, GuestStatus};
 use malbox_machinery::{GuestAccess, NetworkMode, ProviderHandle};
 use malbox_plugin_transport::daemon::GrpcClient;
 use std::sync::Arc;

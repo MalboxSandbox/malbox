@@ -7,7 +7,9 @@
 
 use crate::grpc::conversions;
 use crate::grpc::proto;
-use crate::grpc::proto::guest_plugin_service_server::{GuestPluginService, GuestPluginServiceServer};
+use crate::grpc::proto::guest_plugin_service_server::{
+    GuestPluginService, GuestPluginServiceServer,
+};
 use crate::messages::events::{Event, Payload};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -142,11 +144,7 @@ impl<H: GuestPluginHandler> GuestPluginService for GrpcServer<H> {
     ) -> Result<Response<proto::InitializeResponse>, Status> {
         let req = request.into_inner();
 
-        match self
-            .handler
-            .on_initialize(req.plugin_id, req.config)
-            .await
-        {
+        match self.handler.on_initialize(req.plugin_id, req.config).await {
             Ok(capabilities) => Ok(Response::new(proto::InitializeResponse {
                 success: true,
                 error_message: String::new(),
@@ -243,8 +241,10 @@ impl<H: GuestPluginHandler> GuestPluginService for GrpcServer<H> {
         let mut dest = String::new();
         let mut data = Vec::new();
 
-        while let Some(chunk) =
-            stream.message().await.map_err(|e| Status::internal(format!("stream error: {}", e)))?
+        while let Some(chunk) = stream
+            .message()
+            .await
+            .map_err(|e| Status::internal(format!("stream error: {}", e)))?
         {
             if dest.is_empty() {
                 dest.clone_from(&chunk.path);

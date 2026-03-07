@@ -14,11 +14,11 @@ pub mod types;
 
 pub use core::Config;
 pub use error::ConfigError;
+pub use guest_access::GuestAccessConfig;
 pub use machinery::{MachineryConfig, ManagerType};
+pub use plugins::PluginsConfig;
 pub use providers::ProvidersConfig;
 pub use provisioning::ProvisioningConfig;
-pub use guest_access::GuestAccessConfig;
-pub use plugins::PluginsConfig;
 pub use storage::PathConfig;
 pub use types::*;
 

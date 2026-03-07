@@ -65,7 +65,8 @@ async fn create_task_from_file(
     State(state): State<AppState>,
     TypedMultipart(request): TypedMultipart<CreateTaskRequest>,
 ) -> Result<Json<TaskResponse>> {
-    let file_info = get_file_info(&request.file).map_err(|e| Error::Internal(format!("Failed to get file information: {}", e)))?;
+    let file_info = get_file_info(&request.file)
+        .map_err(|e| Error::Internal(format!("Failed to get file information: {}", e)))?;
 
     state
         .sample_store
@@ -73,10 +74,8 @@ async fn create_task_from_file(
         .await
         .map_err(|e| Error::Internal(format!("Failed to store sample file: {}", e)))?;
 
-    let sample = create_sample(&state, &file_info)
-        .await?;
-    let task = create_task(&state, &request, &file_info, sample.id)
-        .await?;
+    let sample = create_sample(&state, &file_info).await?;
+    let task = create_task(&state, &request, &file_info, sample.id).await?;
 
     let task_id = task.id.expect("Task must have an ID");
 
@@ -94,7 +93,9 @@ async fn create_task_from_file(
     }))
 }
 
-fn get_file_info(file: &FieldData<Bytes>) -> std::result::Result<FileInfo, Box<dyn std::error::Error + Send + Sync>> {
+fn get_file_info(
+    file: &FieldData<Bytes>,
+) -> std::result::Result<FileInfo, Box<dyn std::error::Error + Send + Sync>> {
     let file_type = {
         let cookie = magic::Cookie::open(magic::cookie::Flags::default())
             .map_err(|e| format!("Failed to open magic cookie: {}", e))?;

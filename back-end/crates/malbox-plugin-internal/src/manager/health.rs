@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dashmap::DashMap;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{debug, warn};
@@ -72,7 +72,10 @@ pub fn spawn_health_check_loop(
                 instance.last_health_check = Some(Instant::now());
             }
 
-            debug!("health check cycle complete for {} plugin(s)", instances.len());
+            debug!(
+                "health check cycle complete for {} plugin(s)",
+                instances.len()
+            );
         }
     })
 }

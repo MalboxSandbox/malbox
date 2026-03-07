@@ -1,7 +1,7 @@
 //! Plugin type definitions and their associated transports.
 
-use crate::transport::plugin::{GrpcEmitter, GrpcReceiver};
 use crate::transport::ipc::{EventEmitter, EventReceiver};
+use crate::transport::plugin::{GrpcEmitter, GrpcReceiver};
 use crate::transport::traits::{TransportEmitter, TransportReceiver};
 
 /// Marker trait linking plugin type to its transport emitter and receiver.

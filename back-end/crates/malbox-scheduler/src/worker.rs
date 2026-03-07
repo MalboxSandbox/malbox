@@ -151,8 +151,7 @@ impl Worker {
 
             // Execute with timeout
             let start = std::time::Instant::now();
-            let result =
-                tokio::time::timeout(timeout_duration, self.execute_task(task_id)).await;
+            let result = tokio::time::timeout(timeout_duration, self.execute_task(task_id)).await;
 
             let duration = start.elapsed();
 
@@ -244,33 +243,50 @@ impl Worker {
                 Ok(session) => {
                     // Push sample file to guest if task has a sample
                     if let Some(sample_id) = task.sample_id {
-                        let sample = fetch_sample_by_id(
-                            self.task_store.pool(),
-                            sample_id,
-                        )
-                        .await
-                        .map_err(|e| SchedulerError::Internal(
-                            format!("Failed to fetch sample {}: {}", sample_id, e),
-                        ))?
-                        .ok_or_else(|| SchedulerError::Internal(
-                            format!("Sample {} not found in database", sample_id),
-                        ))?;
+                        let sample = fetch_sample_by_id(self.task_store.pool(), sample_id)
+                            .await
+                            .map_err(|e| {
+                                SchedulerError::Internal(format!(
+                                    "Failed to fetch sample {}: {}",
+                                    sample_id, e
+                                ))
+                            })?
+                            .ok_or_else(|| {
+                                SchedulerError::Internal(format!(
+                                    "Sample {} not found in database",
+                                    sample_id
+                                ))
+                            })?;
 
-                        let host_path = self.sample_store.path(&sample.sha256)
-                            .map_err(|e| SchedulerError::Internal(
-                                format!("Failed to resolve sample path: {}", e),
-                            ))?;
+                        let host_path = self.sample_store.path(&sample.sha256).map_err(|e| {
+                            SchedulerError::Internal(format!(
+                                "Failed to resolve sample path: {}",
+                                e
+                            ))
+                        })?;
 
                         info!(task_id, sample_id, path = %host_path.display(), "Pushing sample to guest");
 
-                        session.push_file(&host_path, &task.target).await
-                            .map_err(|e| SchedulerError::Internal(
-                                format!("Failed to push sample to guest: {}", e),
-                            ))?;
+                        session
+                            .push_file(&host_path, &task.target)
+                            .await
+                            .map_err(|e| {
+                                SchedulerError::Internal(format!(
+                                    "Failed to push sample to guest: {}",
+                                    e
+                                ))
+                            })?;
 
-                        info!(task_id, dest = task.target.as_str(), "Sample transferred to guest");
+                        info!(
+                            task_id,
+                            dest = task.target.as_str(),
+                            "Sample transferred to guest"
+                        );
                     } else {
-                        warn!(task_id, "Task has no sample_id, skipping guest file transfer");
+                        warn!(
+                            task_id,
+                            "Task has no sample_id, skipping guest file transfer"
+                        );
                     }
 
                     if let Err(e) = session.close().await {
@@ -308,7 +324,11 @@ impl Worker {
                     let config = std::collections::HashMap::new(); // TODO: build from task config
                     match handle.execute_task(task_id, "", config).await {
                         Ok(_results) => {
-                            info!(task_id, plugin_id = plugin_id.as_str(), "Plugin execution completed");
+                            info!(
+                                task_id,
+                                plugin_id = plugin_id.as_str(),
+                                "Plugin execution completed"
+                            );
                             // TODO: collect results into TaskResult
                         }
                         Err(e) => {

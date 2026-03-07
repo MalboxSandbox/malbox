@@ -9,8 +9,8 @@ use crate::error::{Result, SdkError};
 use crate::plugin::{EventContext, Plugin};
 
 use malbox_plugin_transport::grpc::proto;
-use malbox_plugin_transport::plugin::{GrpcEmitter, GrpcServer, GuestPluginHandler};
 use malbox_plugin_transport::messages::events::*;
+use malbox_plugin_transport::plugin::{GrpcEmitter, GrpcServer, GuestPluginHandler};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -184,11 +184,7 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
         .await;
     }
 
-    async fn on_event(
-        &self,
-        event: Event,
-        payload: Payload,
-    ) -> std::result::Result<(), String> {
+    async fn on_event(&self, event: Event, payload: Payload) -> std::result::Result<(), String> {
         let plugin = self.plugin.clone();
         let result = tokio::task::spawn_blocking(move || {
             let emitter = GrpcEmitter::noop();
@@ -250,13 +246,10 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
 
         let output_fut = cmd.output();
         let output = match timeout_ms {
-            Some(ms) => tokio::time::timeout(
-                std::time::Duration::from_millis(ms),
-                output_fut,
-            )
-            .await
-            .map_err(|_| "command timed out".to_string())?
-            .map_err(|e| format!("command failed: {}", e))?,
+            Some(ms) => tokio::time::timeout(std::time::Duration::from_millis(ms), output_fut)
+                .await
+                .map_err(|_| "command timed out".to_string())?
+                .map_err(|e| format!("command failed: {}", e))?,
             None => output_fut
                 .await
                 .map_err(|e| format!("command failed: {}", e))?,

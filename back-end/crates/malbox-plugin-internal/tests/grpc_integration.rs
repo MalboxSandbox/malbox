@@ -1,7 +1,7 @@
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::grpc::proto;
-use malbox_plugin_internal::transport::plugin::{GrpcServer, GuestPluginHandler};
 use malbox_plugin_internal::transport::messages::events::*;
+use malbox_plugin_internal::transport::plugin::{GrpcServer, GuestPluginHandler};
 
 use std::collections::HashMap;
 use tokio::sync::mpsc;

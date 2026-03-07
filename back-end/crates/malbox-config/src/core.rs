@@ -1,7 +1,6 @@
 use crate::{
-    Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig,
-    machinery::MachineryConfig, plugins::PluginsConfig, providers::ProvidersConfig,
-    provisioning::ProvisioningConfig,
+    Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig, machinery::MachineryConfig,
+    plugins::PluginsConfig, providers::ProvidersConfig, provisioning::ProvisioningConfig,
 };
 use serde::{Deserialize, Serialize};
 

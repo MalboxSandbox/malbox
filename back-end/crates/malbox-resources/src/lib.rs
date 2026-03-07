@@ -29,12 +29,12 @@ pub use malbox_machinery::{
     Network,
     NetworkMode,
     Platform,
-    // Provisioner
-    ProvisionContext,
-    Provisioner,
     // Provider registry
     ProviderHandle,
     ProviderMetadata,
+    // Provisioner
+    ProvisionContext,
+    Provisioner,
     Resources,
     Snapshot,
     SnapshotId,

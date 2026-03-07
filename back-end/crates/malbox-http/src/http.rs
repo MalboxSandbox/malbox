@@ -26,7 +26,12 @@ struct AppState {
     sample_store: Arc<SampleStore>,
 }
 
-pub async fn serve(conf: MalboxConfig, db: PgPool, task_tx: mpsc::Sender<Task>, sample_store: Arc<SampleStore>) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn serve(
+    conf: MalboxConfig,
+    db: PgPool,
+    task_tx: mpsc::Sender<Task>,
+    sample_store: Arc<SampleStore>,
+) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
         config: conf,
         pool: db,

@@ -16,7 +16,9 @@ impl<'a> EventContext<'a> {
 
     /// Emit a raw event and payload back to the daemon.
     pub fn emit(&self, event: Event, payload: Payload) -> Result<()> {
-        self.emitter.emit(event, payload).map_err(SdkError::Transport)
+        self.emitter
+            .emit(event, payload)
+            .map_err(SdkError::Transport)
     }
 
     /// Emit PluginStarted event.

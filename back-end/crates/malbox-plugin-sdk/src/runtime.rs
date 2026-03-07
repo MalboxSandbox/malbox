@@ -4,7 +4,7 @@ use crate::error::{Result, SdkError};
 use crate::plugin::{EventContext, Plugin};
 
 use malbox_plugin_transport::ipc::{
-    daemon_channel, plugin_channel, EventEmitter, EventReceiver, IpcService, NodeBuilder,
+    EventEmitter, EventReceiver, IpcService, NodeBuilder, daemon_channel, plugin_channel,
 };
 use malbox_plugin_transport::messages::events::*;
 use malbox_plugin_transport::traits::TransportReceiver;
@@ -55,17 +55,11 @@ impl<P: Plugin> PluginRuntime<P> {
             .create::<IpcService>()
             .map_err(|e| SdkError::Init(format!("Failed to create IPC node: {}", e)))?;
 
-        let receiver =
-            EventReceiver::new(&node, daemon_channel::EVENTS, daemon_channel::PAYLOADS)
-                .map_err(|e| {
-                    SdkError::Init(format!("Failed to create event receiver: {}", e))
-                })?;
+        let receiver = EventReceiver::new(&node, daemon_channel::EVENTS, daemon_channel::PAYLOADS)
+            .map_err(|e| SdkError::Init(format!("Failed to create event receiver: {}", e)))?;
 
-        let emitter =
-            EventEmitter::new(&node, plugin_channel::EVENTS, plugin_channel::PAYLOADS)
-                .map_err(|e| {
-                    SdkError::Init(format!("Failed to create event emitter: {}", e))
-                })?;
+        let emitter = EventEmitter::new(&node, plugin_channel::EVENTS, plugin_channel::PAYLOADS)
+            .map_err(|e| SdkError::Init(format!("Failed to create event emitter: {}", e)))?;
 
         info!("Plugin runtime for '{}' initialized", plugin.name());
 
@@ -128,14 +122,12 @@ impl<P: Plugin> PluginRuntime<P> {
             (Event::Task(task_event), Payload::Task(task_payload)) => {
                 self.plugin.on_task_event(task_event, task_payload, ctx)
             }
-            (Event::Plugin(plugin_event), Payload::Plugin(plugin_payload)) => {
-                self.plugin
-                    .on_plugin_event(plugin_event, plugin_payload, ctx)
-            }
-            (Event::Sample(sample_event), Payload::Sample(sample_payload)) => {
-                self.plugin
-                    .on_sample_event(sample_event, sample_payload, ctx)
-            }
+            (Event::Plugin(plugin_event), Payload::Plugin(plugin_payload)) => self
+                .plugin
+                .on_plugin_event(plugin_event, plugin_payload, ctx),
+            (Event::Sample(sample_event), Payload::Sample(sample_payload)) => self
+                .plugin
+                .on_sample_event(sample_event, sample_payload, ctx),
             (Event::Daemon(daemon_event), _) => {
                 if matches!(daemon_event, DaemonEvent::DaemonShutdown) {
                     self.shutdown.store(true, Ordering::Relaxed);
@@ -143,7 +135,10 @@ impl<P: Plugin> PluginRuntime<P> {
                 self.plugin.on_daemon_event(daemon_event, ctx)
             }
             (event, payload) => {
-                warn!("Event/payload category mismatch: {:?} with {:?}", event, payload);
+                warn!(
+                    "Event/payload category mismatch: {:?} with {:?}",
+                    event, payload
+                );
                 Ok(())
             }
         }

@@ -1,4 +1,4 @@
-use crate::{domain_xml::Domain as XmlDomain, LibvirtError, LibvirtProvider};
+use crate::{LibvirtError, LibvirtProvider, domain_xml::Domain as XmlDomain};
 use async_trait::async_trait;
 use malbox_machinery::{Clone, Machine, MachineId, MachineState};
 use std::error::Error;
@@ -39,13 +39,11 @@ impl Clone for LibvirtProvider {
         domain_info.name = clone_domain_name.clone();
 
         // Clone the disk using qcow2 backing file
-        let source_disk_path = domain_info
-            .disk_path()
-            .ok_or_else(|| {
-                Box::new(LibvirtError::Libvirt(
-                    "Source domain has no disk".to_string(),
-                )) as Box<dyn Error + Send + Sync>
-            })?;
+        let source_disk_path = domain_info.disk_path().ok_or_else(|| {
+            Box::new(LibvirtError::Libvirt(
+                "Source domain has no disk".to_string(),
+            )) as Box<dyn Error + Send + Sync>
+        })?;
 
         // Create new disk with source as backing file
         let clone_disk_path = self

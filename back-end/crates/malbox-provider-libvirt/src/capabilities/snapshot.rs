@@ -1,4 +1,4 @@
-use crate::{snapshot_xml::SnapshotXml, LibvirtError, LibvirtProvider};
+use crate::{LibvirtError, LibvirtProvider, snapshot_xml::SnapshotXml};
 use async_trait::async_trait;
 use malbox_machinery::{Machine, Snapshot, SnapshotId, SnapshotInfo};
 use std::error::Error;
