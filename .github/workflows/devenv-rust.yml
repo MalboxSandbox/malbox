@@ -2,14 +2,14 @@ name: devenv - rust build and test
 
 on:
   push:
-    branches: ["main", "dev/*"]
+    branches: ["main", "dev*"]
     paths:
       - 'back-end/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/devenv-rs-rust.yml'
   pull_request:
-    branches: ["main", "dev/*"]
+    branches: ["main", "dev*"]
     paths:
       - 'back-end/**'
       - 'Cargo.toml'
