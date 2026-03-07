@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+<settings pass="offlineServicing"/>
+<settings pass="windowsPE">
+<component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<UILanguage>en-GB</UILanguage>
+</component>
+<component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<DriverPaths>
+<PathAndCredentials wcm:action="add" wcm:keyValue="1">
+<Path>D:\vioscsi\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="2">
+<Path>D:\viostor\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="3">
+<Path>D:\NetKVM\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="4">
+<Path>D:\Balloon\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="5">
+<Path>E:\vioscsi\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="6">
+<Path>E:\viostor\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="7">
+<Path>E:\NetKVM\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="8">
+<Path>E:\Balloon\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="9">
+<Path>F:\vioscsi\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="10">
+<Path>F:\viostor\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="11">
+<Path>F:\NetKVM\w10\amd64</Path>
+</PathAndCredentials>
+<PathAndCredentials wcm:action="add" wcm:keyValue="12">
+<Path>F:\Balloon\w10\amd64</Path>
+</PathAndCredentials>
+</DriverPaths>
+</component>
+<component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<DiskConfiguration>
+<Disk wcm:action="add">
+<DiskID>0</DiskID>
+<WillWipeDisk>true</WillWipeDisk>
+<CreatePartitions>
+<CreatePartition wcm:action="add">
+<Order>1</Order>
+<Type>Primary</Type>
+<Extend>true</Extend>
+</CreatePartition>
+</CreatePartitions>
+<ModifyPartitions>
+<ModifyPartition wcm:action="add">
+<Extend>false</Extend>
+<Format>NTFS</Format>
+<Letter>C</Letter>
+<Order>1</Order>
+<PartitionID>1</PartitionID>
+<Label>Windows</Label>
+</ModifyPartition>
+</ModifyPartitions>
+</Disk>
+<WillShowUI>OnError</WillShowUI>
+</DiskConfiguration>
+<ImageInstall>
+<OSImage>
+<InstallTo>
+<DiskID>0</DiskID>
+<PartitionID>1</PartitionID>
+</InstallTo>
+</OSImage>
+</ImageInstall>
+<UserData>
+<ProductKey>
+<Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>
+<WillShowUI>OnError</WillShowUI>
+</ProductKey>
+<AcceptEula>true</AcceptEula>
+</UserData>
+<UseConfigurationSet>false</UseConfigurationSet>
+<RunSynchronous>
+<RunSynchronousCommand wcm:action="add">
+<Order>1</Order>
+<Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>2</Order>
+<Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>3</Order>
+<Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>4</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:WScript.Echo ^"Scanning for newly created SYSTEM registry hive file to disable Windows Defender services...^"&amp;echo:Set fso = CreateObject(^"Scripting.FileSystemObject^"^))</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>5</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:Set existing = CreateObject(^"Scripting.Dictionary^"^)&amp;echo:Function Execute(command^)&amp;echo:WScript.Echo ^"Running command '^" + command + ^"'^"&amp;echo:Set shell = CreateObject(^"WScript.Shell^"^))</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>6</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:Set exec = shell.Exec(command^)&amp;echo:Do While exec.Status = 0&amp;echo:WScript.Sleep 100&amp;echo:Loop&amp;echo:WScript.Echo exec.StdOut.ReadAll&amp;echo:WScript.Echo exec.StdErr.ReadAll&amp;echo:Execute = exec.ExitCode&amp;echo:End Function)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>7</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:Function FindHiveFiles&amp;echo:Set FindHiveFiles = CreateObject(^"Scripting.Dictionary^"^)&amp;echo:For Each drive In fso.Drives&amp;echo:If drive.IsReady And drive.DriveLetter ^&lt;^&gt; ^"X^" Then)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>8</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:For Each folder In Array(^"$Windows.~BT\NewOS\Windows^", ^"Windows^"^)&amp;echo:file = fso.BuildPath(fso.BuildPath(drive.RootFolder, folder^), ^"System32\config\SYSTEM^"^))</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>9</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:If fso.FileExists(file^) And fso.FileExists(file + ^".LOG1^"^) And fso.FileExists(file + ^".LOG2^"^) Then&amp;echo:FindHiveFiles.Add file, Nothing&amp;echo:End If&amp;echo:Next&amp;echo:End If&amp;echo:Next&amp;echo:End Function)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>10</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:For Each file In FindHiveFiles&amp;echo:WScript.Echo ^"Will ignore file at '^" + file + ^"' because it was already present when Windows Setup started.^"&amp;echo:existing.Add file, Nothing&amp;echo:Next&amp;echo:Do)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>11</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:For Each file In FindHiveFiles&amp;echo:If Not existing.Exists(file^) Then&amp;echo:ret = 1&amp;echo:While ret ^&gt; 0&amp;echo:WScript.Sleep 500&amp;echo:ret = Execute(^"reg.exe LOAD HKLM\mount ^" + file^)&amp;echo:Wend)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>12</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:For Each service In Array(^"Sense^", ^"WdBoot^", ^"WdFilter^", ^"WdNisDrv^", ^"WdNisSvc^", ^"WinDefend^"^))</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>13</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:ret = Execute(^"reg.exe ADD HKLM\mount\ControlSet001\Services\^" + service + ^" /v Start /t REG_DWORD /d 4 /f^"^)&amp;echo:Next&amp;echo:ret = Execute(^"reg.exe UNLOAD HKLM\mount^"^))</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>14</Order>
+<Path>cmd.exe /c >>X:\defender.vbs (echo:WScript.Echo ^"Found and successfully modified SYSTEM registry hive file at '^" + file + ^"'. This window will now close.^"&amp;echo:WScript.Sleep 5000&amp;echo:Exit Do&amp;echo:End If&amp;echo:WScript.Sleep 1000&amp;echo:Next&amp;echo:Loop)</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>15</Order>
+<Path>cmd.exe /c "start /MIN cscript.exe //E:vbscript X:\defender.vbs"</Path>
+</RunSynchronousCommand>
+</RunSynchronous>
+</component>
+</settings>
+<settings pass="generalize"/>
+<settings pass="specialize">
+<component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<RunSynchronous>
+<RunSynchronousCommand wcm:action="add">
+<Order>1</Order>
+<Path>powershell.exe -WindowStyle "Normal" -NoProfile -Command "$xml = [xml]::new(); $xml.Load('C:\Windows\Panther\unattend.xml'); $sb = [scriptblock]::Create( $xml.unattend.Extensions.ExtractScript ); Invoke-Command -ScriptBlock $sb -ArgumentList $xml;"</Path>
+</RunSynchronousCommand>
+<RunSynchronousCommand wcm:action="add">
+<Order>2</Order>
+<Path>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\Specialize.ps1"</Path>
+</RunSynchronousCommand>
+</RunSynchronous>
+</component>
+</settings>
+<settings pass="auditSystem"/>
+<settings pass="auditUser"/>
+<settings pass="oobeSystem">
+<component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<InputLocale>0409:00000409</InputLocale>
+<SystemLocale>en-GB</SystemLocale>
+<UILanguage>en-GB</UILanguage>
+<UserLocale>en-GB</UserLocale>
+</component>
+<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+<UserAccounts>
+<AdministratorPassword>
+<Value>packer</Value>
+<PlainText>true</PlainText>
+</AdministratorPassword>
+</UserAccounts>
+<AutoLogon>
+<Username>Administrator</Username>
+<Enabled>true</Enabled>
+<LogonCount>5</LogonCount>
+<Password>
+<Value>packer</Value>
+<PlainText>true</PlainText>
+</Password>
+</AutoLogon>
+<OOBE>
+<ProtectYourPC>3</ProtectYourPC>
+<HideEULAPage>true</HideEULAPage>
+<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+<HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+</OOBE>
+<FirstLogonCommands>
+<SynchronousCommand wcm:action="add">
+<Order>1</Order>
+<CommandLine>cmd.exe /c C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File a:\enable-winrm.ps1</CommandLine>
+<Description>Enable WinRM</Description>
+</SynchronousCommand>
+<SynchronousCommand wcm:action="add">
+<Order>2</Order>
+<CommandLine>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\FirstLogon.ps1"</CommandLine>
+</SynchronousCommand>
+</FirstLogonCommands>
+</component>
+</settings>
+<Extensions>
+<ExtractScript>
+param( [xml] $Document ); foreach( $file in $Document.unattend.Extensions.File ) { $path = [System.Environment]::ExpandEnvironmentVariables( $file.GetAttribute( 'path' ) ); mkdir -Path( $path | Split-Path -Parent ) -ErrorAction 'SilentlyContinue'; $encoding = switch( [System.IO.Path]::GetExtension( $path ) ) { { $_ -in '.ps1', '.xml' } { [System.Text.Encoding]::UTF8; } { $_ -in '.reg', '.vbs', '.js' } { [System.Text.UnicodeEncoding]::new( $false, $true ); } default { [System.Text.Encoding]::Default; } }; $bytes = $encoding.GetPreamble() + $encoding.GetBytes( $file.InnerText.Trim() ); [System.IO.File]::WriteAllBytes( $path, $bytes ); }
+</ExtractScript>
+<File path="C:\Windows\Setup\Scripts\PauseWindowsUpdate.ps1">
+$formatter = { $args[0].ToString( "yyyy'-'MM'-'dd'T'HH':'mm':'ssK" ); }; $now = [datetime]::UtcNow; $start = &amp; $formatter $now; $end = &amp; $formatter $now.AddDays( 365 ); $params = @{ LiteralPath = 'Registry::HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'; Type = 'String'; Force = $true; }; Set-ItemProperty @params -Name 'PauseFeatureUpdatesStartTime' -Value $start; Set-ItemProperty @params -Name 'PauseFeatureUpdatesEndTime' -Value $end; Set-ItemProperty @params -Name 'PauseQualityUpdatesStartTime' -Value $start; Set-ItemProperty @params -Name 'PauseQualityUpdatesEndTime' -Value $end; Set-ItemProperty @params -Name 'PauseUpdatesStartTime' -Value $start; Set-ItemProperty @params -Name 'PauseUpdatesExpiryTime' -Value $end;
+</File>
+<File path="C:\Windows\Setup\Scripts\PauseWindowsUpdate.xml">
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"> <Triggers> <BootTrigger> <Repetition> <Interval>P1D</Interval> <StopAtDurationEnd>false</StopAtDurationEnd> </Repetition> <Enabled>true</Enabled> </BootTrigger> </Triggers> <Principals> <Principal id="Author"> <UserId>S-1-5-19</UserId> <RunLevel>LeastPrivilege</RunLevel> </Principal> </Principals> <Settings> <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy> <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries> <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries> <AllowHardTerminate>true</AllowHardTerminate> <StartWhenAvailable>false</StartWhenAvailable> <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable> <IdleSettings> <StopOnIdleEnd>true</StopOnIdleEnd> <RestartOnIdle>false</RestartOnIdle> </IdleSettings> <AllowStartOnDemand>true</AllowStartOnDemand> <Enabled>true</Enabled> <Hidden>false</Hidden> <RunOnlyIfIdle>false</RunOnlyIfIdle> <WakeToRun>false</WakeToRun> <ExecutionTimeLimit>PT72H</ExecutionTimeLimit> <Priority>7</Priority> </Settings> <Actions Context="Author"> <Exec> <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command> <Arguments>-ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\PauseWindowsUpdate.ps1"</Arguments> </Exec> </Actions> </Task>
+</File>
+<File path="C:\Windows\Setup\Scripts\VirtIoGuestTools.ps1">
+&amp; { foreach( $letter in 'DEFGHIJKLMNOPQRSTUVWXYZ'.ToCharArray() ) { $exe = "${letter}:\virtio-win-guest-tools.exe"; if( Test-Path -LiteralPath $exe ) { Start-Process -FilePath $exe -ArgumentList '/passive', '/norestart' -Wait; return; } } 'VirtIO Guest Tools image (virtio-win-*.iso) is not attached to this VM.'; } *>&amp;1 | Out-String -Width 1KB -Stream >> 'C:\Windows\Setup\Scripts\VirtIoGuestTools.log';
+</File>
+<File path="C:\Windows\Setup\Scripts\EnableWinRM.ps1">
+Enable-PSRemoting -Force;
+Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $true;
+Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $true;
+Set-Item -Path WSMan:\localhost\Client\Auth\Basic -Value $true;
+winrm set winrm/config/service '@{AllowUnencrypted="true"}';
+winrm set winrm/config/service/auth '@{Basic="true"}';
+winrm set winrm/config/client/auth '@{Basic="true"}';
+netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=tcp action=allow;
+Set-Service -Name WinRM -StartupType Automatic;
+Restart-Service -Name WinRM;
+</File>
+<File path="C:\Windows\Setup\Scripts\Specialize.ps1">
+$scripts = @(
+  { reg.exe add "HKLM\SYSTEM\Setup\MoSetup" /v AllowUpgradesWithUnsupportedTPMOrCPU /t REG_DWORD /d 1 /f; };
+  { net.exe accounts /maxpwage:UNLIMITED; };
+  { Register-ScheduledTask -TaskName 'PauseWindowsUpdate' -Xml $( Get-Content -LiteralPath 'C:\Windows\Setup\Scripts\PauseWindowsUpdate.xml' -Raw ); };
+  { reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender Security Center\Notifications" /v DisableNotifications /t REG_DWORD /d 1 /f; };
+  { reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f; };
+  { reg.exe add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableRealtimeMonitoring /t REG_DWORD /d 1 /f; };
+  { Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue; Set-Service -Name wuauserv -StartupType Disabled -ErrorAction SilentlyContinue; };
+  { Stop-Service -Name UsoSvc -Force -ErrorAction SilentlyContinue; Set-Service -Name UsoSvc -StartupType Disabled -ErrorAction SilentlyContinue; };
+  { &amp; 'C:\Windows\Setup\Scripts\VirtIoGuestTools.ps1'; };
+  { &amp; 'C:\Windows\Setup\Scripts\EnableWinRM.ps1'; };
+);
+&amp; {
+  [float] $complete = 0;
+  [float] $increment = 100 / $scripts.Count;
+  foreach( $script in $scripts ) {
+    Write-Progress -Id 0 -Activity 'Running scripts to customize your Windows installation. Do not close this window.' -PercentComplete $complete;
+    '*** Will now execute command: {0}' -f $( $str = $script.ToString().Trim() -replace '\s+', ' '; $max = 100; if( $str.Length -le $max ) { $str; } else { $str.Substring( 0, $max - 1 ) + '...'; } );
+    $start = [datetime]::Now;
+    &amp; $script;
+    '*** Finished executing command after {0:0} ms.' -f [datetime]::Now.Subtract( $start ).TotalMilliseconds;
+    "`r`n" * 3;
+    $complete += $increment;
+  }
+} *>&amp;1 | Out-String -Width 1KB -Stream >> "C:\Windows\Setup\Scripts\Specialize.log";
+</File>
+<File path="C:\Windows\Setup\Scripts\FirstLogon.ps1">
+$scripts = @(
+  { Set-ItemProperty -LiteralPath 'Registry::HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'AutoLogonCount' -Type 'DWord' -Force -Value 0; };
+  { Restart-Service -Name WinRM -Force -ErrorAction SilentlyContinue; };
+  { Remove-Item -LiteralPath @( 'C:\Windows\Panther\unattend.xml'; 'C:\Windows\Panther\unattend-original.xml'; ) -Force -ErrorAction 'SilentlyContinue' -Verbose; };
+);
+&amp; {
+  [float] $complete = 0;
+  [float] $increment = 100 / $scripts.Count;
+  foreach( $script in $scripts ) {
+    Write-Progress -Id 0 -Activity 'Running scripts to finalize your Windows installation. Do not close this window.' -PercentComplete $complete;
+    '*** Will now execute command: {0}' -f $( $str = $script.ToString().Trim() -replace '\s+', ' '; $max = 100; if( $str.Length -le $max ) { $str; } else { $str.Substring( 0, $max - 1 ) + '...'; } );
+    $start = [datetime]::Now;
+    &amp; $script;
+    '*** Finished executing command after {0:0} ms.' -f [datetime]::Now.Subtract( $start ).TotalMilliseconds;
+    "`r`n" * 3;
+    $complete += $increment;
+  }
+} *>&amp;1 | Out-String -Width 1KB -Stream >> "C:\Windows\Setup\Scripts\FirstLogon.log";
+</File>
+</Extensions>
+</unattend>

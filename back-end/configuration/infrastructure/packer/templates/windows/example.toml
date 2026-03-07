@@ -6,25 +6,20 @@ platform = "windows"
 template = "base.pkr.hcl"
 
 [packer.vars]
-# Common variables
-vm_name = "win10-sandbox"
-os_version = "10"
-cpu_num = "2"
-memory = "4096"
+name = "win10-sandbox"
+iso_url = "/path/to/windows10.iso"
+iso_checksum = "sha256:YOUR_CHECKSUM_HERE"
+virtio_iso_path = "/path/to/virtio-win.iso"
+disk_size = "61440M"
+cpus = 2
+memory = 4096
+headless = true
+autounattend_path = "autounattend/Autounattend.xml"
+tools_path = "C:\\Tools"
 
-# VMware specific
-vcenter_server = "vcenter.local"
-vsphere_username = "administrator@vsphere.local"
-vsphere_password = "secret"
-vmware_network = "Sandbox_Network"
-
-# VirtualBox specific
-vbox_network = "vboxnet0"
-vbox_guest_os_type = "Windows10_64"
-
-# KVM specific
-libvirt_uri = "qemu:///system"
-libvirt_network = "default"
+# WinRM credentials (must match Autounattend.xml)
+winrm_username = "Administrator"
+winrm_password = "packer"
 
 [ansible]
 playbook = "playbooks/windows.yml"

@@ -1,0 +1,27 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  identity:
+    hostname: malbox-linux
+    username: malbox
+    password: "$6$rounds=4096$randomsalt$pOxzG0sGLqMkSQiaeNhPjkKDGbSHtGfXQn/bBrfMKbCP9Oua3O0M.YIJQ8GVoFtBMNIxqKfwBVFoGK/cfRfz0"
+  ssh:
+    install-server: true
+    allow-pw: true
+  storage:
+    layout:
+      name: lvm
+  packages:
+    - openssh-server
+    - python3
+    - python3-pip
+    - curl
+    - wget
+    - qemu-guest-agent
+  late-commands:
+    - echo 'malbox ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/malbox
+    - chmod 440 /target/etc/sudoers.d/malbox
+    - systemctl enable qemu-guest-agent --root=/target

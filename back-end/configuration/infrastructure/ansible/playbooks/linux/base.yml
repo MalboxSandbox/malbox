@@ -1,33 +1,65 @@
 ---
-- hosts: all
-  roles:
-    - common
-    - windows_analyzer
+- name: Configure Linux Sandbox
+  hosts: all
+  become: true
+  gather_facts: true
+
   vars:
     analysis_tools:
-      - name: procmon
-        version: "3.92"
-      - name: pestudio
-        version: "9.53"
+      - tcpdump
+      - strace
+      - ltrace
+      - gdb
+      - radare2
+      - binutils
+      - net-tools
+      - nmap
 
   tasks:
+    - name: Update package cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
     - name: Install analysis tools
-      win_chocolatey:
-        name: "{{ item.name }}"
-        version: "{{ item.version }}"
+      apt:
+        name: "{{ analysis_tools }}"
         state: present
-      loop: "{{ analysis_tools }}"
 
-    - name: Configure network isolation
-      win_firewall_rule:
-        name: "Block all outbound"
-        direction: out
-        action: block
-        enabled: yes
+    - name: Install Python analysis packages
+      pip:
+        name:
+          - yara-python
+          - pefile
+          - volatility3
+        state: present
 
-    - name: Setup monitoring services
-      win_service:
-        name: "analysis_monitor"
-        path: "C:\\Program Files\\Analyzer\\monitor.exe"
-        start_mode: auto
+    - name: Configure network isolation (drop outbound by default)
+      iptables:
+        chain: OUTPUT
+        policy: DROP
+      when: network_isolation | default(false) | bool
+
+    - name: Allow loopback traffic
+      iptables:
+        chain: OUTPUT
+        out_interface: lo
+        jump: ACCEPT
+
+    - name: Allow established connections
+      iptables:
+        chain: OUTPUT
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+
+    - name: Ensure analysis tools directory exists
+      file:
+        path: /opt/malbox/tools
+        state: directory
+        mode: "0755"
+
+    - name: Enable and start qemu-guest-agent
+      systemd:
+        name: qemu-guest-agent
+        enabled: true
         state: started
