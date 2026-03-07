@@ -1,6 +1,4 @@
 use crate::error::{MachineError, Result};
-use bon::Builder;
-use malbox_config::machinery::MachineArch as MachineArchConfig;
 use malbox_config::types::Platform as MachinePlatformConfig;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, Postgres, QueryBuilder, query, query_as};
@@ -20,15 +18,6 @@ pub enum MachinePlatform {
     #[default]
     Windows,
     Linux,
-}
-
-impl From<MachineArchConfig> for MachineArch {
-    fn from(value: MachineArchConfig) -> Self {
-        match value {
-            MachineArchConfig::X64 => MachineArch::X64,
-            MachineArchConfig::X86 => MachineArch::X86,
-        }
-    }
 }
 
 impl From<MachinePlatformConfig> for MachinePlatform {
@@ -58,14 +47,13 @@ pub struct Machine {
     pub reserved: bool,
 }
 
-#[derive(Builder, Default)]
+#[derive(Default)]
 pub struct MachineFilter {
     pub locked: Option<bool>,
     pub label: Option<String>,
     pub platform: Option<MachinePlatform>,
     pub tags: Option<String>,
     pub arch: Option<MachineArch>,
-    #[builder(default = false)]
     pub include_reserved: bool,
     pub os_version: Option<String>,
 }

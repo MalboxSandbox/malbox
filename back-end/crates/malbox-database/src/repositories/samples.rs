@@ -91,3 +91,22 @@ pub async fn insert_sample(pool: &PgPool, sample: Sample) -> Result<SampleEntity
         }
     }
 }
+
+pub async fn fetch_sample_by_id(pool: &PgPool, id: i64) -> Result<Option<SampleEntity>> {
+    let id_i32 = id as i32;
+    query_as!(
+        SampleEntity,
+        r#"SELECT * FROM "samples" WHERE id = $1"#,
+        id_i32
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        SampleError::FetchFailed {
+            hash: id.to_string(),
+            message: "Failed to fetch sample by ID".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}

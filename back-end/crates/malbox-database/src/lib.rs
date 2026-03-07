@@ -1,7 +1,4 @@
-use error::Result;
 use malbox_config::core::DatabaseConfig;
-use malbox_config::machinery::{MachineProvider, MachineryConfig, ProviderConfig};
-use repositories::machinery::{Machine, clean_machines, insert_machine};
 pub use sqlx::Error;
 pub use sqlx::PgPool;
 pub use sqlx::error::DatabaseError;
@@ -23,31 +20,5 @@ pub async fn init_database(config: &DatabaseConfig) -> sqlx::Pool<sqlx::Postgres
     db
 }
 
-pub async fn init_machines(pool: &PgPool, config: &MachineryConfig) -> Result<()> {
-    clean_machines(pool).await.unwrap();
-
-    let machines = match &config.provider {
-        ProviderConfig::Vmware(vmware_config) => vmware_config.get_machines(),
-        ProviderConfig::Kvm(kvm_config) => kvm_config.get_machines(),
-        ProviderConfig::VirtualBox(vbox_config) => vbox_config.get_machines(),
-    };
-
-    for machine_config in machines {
-        let db_machine = Machine {
-            name: machine_config.name.clone(),
-            label: machine_config.label.clone().unwrap_or_default(),
-            arch: machine_config.arch.clone().into(),
-            platform: machine_config.platform.clone().into(),
-            ip: machine_config.ip.clone(),
-            tags: machine_config.tags.clone(),
-            interface: machine_config.interface.clone(),
-            snapshot: machine_config.snapshot.clone(),
-            reserved: machine_config.reserved,
-            ..Machine::default()
-        };
-
-        insert_machine(pool, db_machine).await?;
-    }
-
-    Ok(())
-}
+// TODO: Machine initialization will be handled by the new provider system
+// Machines are now managed dynamically through the provider registry

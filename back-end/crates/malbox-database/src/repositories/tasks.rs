@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use time::{PrimitiveDateTime, macros::date};
 
 #[derive(sqlx::Type, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[sqlx(type_name = "task_state", rename_all = "lowercase")]
+#[sqlx(type_name = "task_state", rename_all = "snake_case")]
 pub enum TaskState {
     Pending,
     Initializing,
