@@ -14,6 +14,9 @@ pub enum StorageError {
 
     #[error("XDG error: {0}")]
     Xdg(String),
+
+    #[error("Invalid SHA256 hash: must be at least 4 characters, got {0}")]
+    InvalidHash(usize),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
