@@ -3,6 +3,15 @@ name = "malbox-daemon"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["provider-libvirt", "provisioner-ansible", "provisioner-native"]
+provider-libvirt = ["dep:malbox-provider-libvirt"]
+# Add more providers here as they're implemented:
+# provider-vmware = ["dep:malbox-provider-vmware"]
+# provider-virtualbox = ["dep:malbox-provider-virtualbox"]
+provisioner-ansible = ["dep:malbox-provisioner-ansible"]
+provisioner-native = ["dep:malbox-provisioner-native"]
+
 [dependencies]
 malbox-database = { path = "../../crates/malbox-database" }
 malbox-hashing = { path = "../../crates/malbox-hashing" }
@@ -10,7 +19,20 @@ malbox-tracing.path = "../../crates/malbox-tracing"
 malbox-config = { path = "../../crates/malbox-config" }
 malbox-scheduler = { path = "../../crates/malbox-scheduler" }
 malbox-http = { path = "../../crates/malbox-http" }
-anyhow = { workspace = true }
+malbox-machinery = { path = "../../crates/malbox-machinery" }
+malbox-resources = { path = "../../crates/malbox-resources" }
+malbox-plugin-internal = { path = "../../crates/malbox-plugin-internal" }
+malbox-storage = { path = "../../crates/malbox-storage" }
+
+# Provider implementations (optional, feature-gated)
+malbox-provider-libvirt = { path = "../../crates/malbox-provider-libvirt", optional = true }
+# malbox-provider-vmware = { path = "../../crates/malbox-provider-vmware", optional = true }
+# malbox-provider-virtualbox = { path = "../../crates/malbox-provider-virtualbox", optional = true }
+
+# Provisioner implementations (optional, feature-gated)
+malbox-provisioner-ansible = { path = "../../crates/malbox-provisioner-ansible", optional = true }
+malbox-provisioner-native = { path = "../../crates/malbox-provisioner-native", optional = true }
+
 color-eyre = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }

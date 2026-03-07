@@ -4,6 +4,9 @@ use thiserror::Error;
 pub enum DaemonError {
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Configuration error: {0}")]
+    Configuration(String),
 }
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
