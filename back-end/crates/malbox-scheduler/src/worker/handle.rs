@@ -3,7 +3,7 @@ use crate::{
     worker::{Job, WorkerId},
 };
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
 /// Handle to a worker instance that allows control over the worker.
@@ -53,9 +53,10 @@ impl WorkerHandle {
     }
 
     /// Check if worker is busy.
+    ///
+    /// In actor-per-worker model, workers self-schedule from the queue.
+    /// This is kept for potential future monitoring use.
     pub async fn is_busy(&self) -> bool {
-        // let status = self.status.read().await;
-        // status.is_busy
-        todo!()
+        false
     }
 }

@@ -9,11 +9,15 @@ pub enum SchedulerError {
     #[error("Worker error: {0}")]
     Worker(#[from] WorkerError),
     #[error("Resource error: {0}")]
-    Resource(#[from] crate::resource::ResourceError),
+    Resource(#[from] malbox_resources::error::ResourceError),
     #[error("Database error: {0}")]
     Database(#[from] malbox_database::error::DatabaseError),
     #[error("Internal error: {0}")]
     Internal(String),
+    #[error("Channel closed")]
+    ChannelClosed,
+    #[error("Initialization failed: {0}")]
+    Initialization(String),
 }
 
 #[derive(Error, Debug, Clone)]
@@ -37,9 +41,11 @@ pub enum TaskError {
     #[error("Database error: {0}")]
     Database(#[from] malbox_database::error::DatabaseError),
     #[error("Resource error: {0}")]
-    Resource(#[from] crate::resource::ResourceError),
+    Resource(#[from] malbox_resources::error::ResourceError),
     #[error("Plugin error: {0}")]
     Plugin(String),
+    #[error("Task execution failed (task_id: {task_id}): {message}")]
+    ExecutionFailed { task_id: i32, message: String },
     #[error("Internal error: {0}")]
     Internal(String),
     #[error("Task canceled")]

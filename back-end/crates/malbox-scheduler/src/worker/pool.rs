@@ -1,180 +1,116 @@
-use super::{Worker, WorkerConfig, WorkerEvent, WorkerHandle, WorkerId};
-use crate::{
-    error::{Result, WorkerError},
-    task::executor::TaskExecutor,
-};
-use malbox_database::repositories::tasks::Task;
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Weak};
-use tokio::sync::mpsc;
-use tokio::sync::{Mutex, Notify, RwLock};
+//! Worker pool implementation.
+//!
+//! Spawns and manages a pool of Worker actors as tokio tasks.
+
+use super::Worker;
+use crate::worker::event::WorkerEvent;
+use crate::task::queue::TaskQueue;
+use crate::task::store::TaskStore;
+use malbox_config::MachineryConfig;
+use malbox_plugin_internal::manager::PluginManager;
+use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_storage::SampleStore;
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tracing::{error, info};
+
+/// A managed worker with its shutdown handle and join handle.
+struct ManagedWorker {
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    join_handle: JoinHandle<()>,
+}
 
 /// Pool of workers for task execution.
-///
-/// The worker pool manages a collection of workers, allocating
-/// them to tasks as needed and maintaining a balance between
-/// resource utilization and responsiveness. It handles worker
-/// lifecycle management, including creation, allocation, and
-/// cleanup of idle workers.
 pub struct WorkerPool {
-    /// All worker handles, indexed by ID.
-    workers: RwLock<HashMap<WorkerId, WorkerHandle>>,
-    /// Queue of idle worker IDs.
-    idle_workers: Mutex<VecDeque<WorkerId>>,
-    /// Notifier for when a worker becomes available.
-    worker_available_notifier: Arc<Notify>,
-    /// Maximum number of workers to create.
+    workers: Vec<ManagedWorker>,
     max_workers: usize,
-    /// Worker configurations.
-    worker_configs: RwLock<HashMap<WorkerId, WorkerConfig>>,
-    /// Task executor for workers to use.
-    executor: Arc<TaskExecutor>,
-    /// Channel for receiving worker events.
-    event_rx: Mutex<mpsc::Receiver<WorkerEvent>>,
-    /// Channel for sending worker events.
-    event_tx: mpsc::Sender<WorkerEvent>,
 }
 
 impl WorkerPool {
-    /// Create a new worker pool.
-    ///
-    /// Initializes the pool with the specified executor and
-    /// maximum number of workers.
-    pub fn new(max_workers: usize, executor: Arc<TaskExecutor>) -> Self {
-        let (event_tx, event_rx) = mpsc::channel(100);
-
+    /// Create a new empty worker pool.
+    pub fn new(max_workers: usize) -> Self {
         Self {
-            workers: RwLock::new(HashMap::new()),
-            idle_workers: Mutex::new(VecDeque::new()),
-            worker_configs: RwLock::new(HashMap::new()),
-            worker_available_notifier: Arc::new(Notify::new()),
-            event_rx: Mutex::new(event_rx),
-            event_tx,
-            executor,
+            workers: Vec::with_capacity(max_workers),
             max_workers,
         }
     }
 
-    /// Start the pool's event processing loop.
+    /// Spawn all workers in the pool.
     ///
-    /// This should be spawned in a tokio task to handle worker events.
-    pub async fn run_event_loop(&self) -> Result<()> {
-        let mut event_rx = self.event_rx.lock().await;
+    /// Each worker is an independent tokio task that competes
+    /// for tasks from the shared queue.
+    pub fn spawn_workers(
+        &mut self,
+        task_queue: Arc<TaskQueue>,
+        task_store: Arc<TaskStore>,
+        machinery_manager: Arc<dyn MachineryManager>,
+        machinery_config: MachineryConfig,
+        plugin_manager: Arc<PluginManager>,
+        event_tx: mpsc::Sender<WorkerEvent>,
+        transport: Option<Arc<ResolvedTransport>>,
+        sample_store: Arc<SampleStore>,
+    ) {
+        for _ in 0..self.max_workers {
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-        while let Some(event) = event_rx.recv().await {
-            self.handle_worker_event(event).await?;
+            let worker = Worker::new(
+                Arc::clone(&task_queue),
+                Arc::clone(&task_store),
+                Arc::clone(&machinery_manager),
+                machinery_config.clone(),
+                Arc::clone(&plugin_manager),
+                event_tx.clone(),
+                transport.clone(),
+                Arc::clone(&sample_store),
+            );
+
+            let worker_id = worker.id().clone();
+            info!(worker_id = %worker_id, "Spawning worker");
+
+            let join_handle = tokio::spawn(worker.run(shutdown_rx));
+
+            self.workers.push(ManagedWorker {
+                shutdown_tx: Some(shutdown_tx),
+                join_handle,
+            });
         }
 
-        Ok(())
+        info!(count = self.workers.len(), "Worker pool initialized");
     }
 
-    /// Handle events from workers.
-    async fn handle_worker_event(&self, event: WorkerEvent) -> Result<()> {
-        match event {
-            WorkerEvent::JobCompleted { worker_id, .. }
-            | WorkerEvent::BatchCompleted { worker_id, .. } => {
-                // Mark worker as idle and add to queue
-                self.mark_worker_idle(worker_id).await?;
-            }
-
-            WorkerEvent::WorkerShutdown { worker_id, reason } => {
-                // Remove worker from pool
-                self.remove_worker(worker_id).await?;
-                tracing::info!("Worker shutdown: {:?}", reason);
-            }
-
-            WorkerEvent::WorkerError { worker_id, error } => {
-                tracing::error!("Worker {} error: {:?}", worker_id.as_string(), error);
-                // TODO: Handle error - maybe restart worker or mark as failed
-            }
-        }
-
-        Ok(())
+    /// Get the number of active workers.
+    pub fn active_count(&self) -> usize {
+        self.workers
+            .iter()
+            .filter(|w| !w.join_handle.is_finished())
+            .count()
     }
 
-    /// Create a new worker with the given configuration.
-    pub async fn create_worker(&self, config: WorkerConfig) -> Result<()> {
-        if self.workers.read().await.len() >= self.max_workers {
-            return Err(WorkerError::MaxWorkersReached.into());
-        }
+    /// Get the maximum number of workers.
+    pub fn max_workers(&self) -> usize {
+        self.max_workers
+    }
 
-        // Create worker
-        let (worker, handle, mut event_rx) = Worker::new(config.clone(), self.executor.clone());
-        let worker_id = handle.id().clone();
+    /// Shutdown all workers gracefully.
+    pub async fn shutdown(&mut self) {
+        info!("Shutting down worker pool");
 
-        // Store worker handle and config
-        {
-            let mut workers = self.workers.write().await;
-            workers.insert(worker_id.clone(), handle);
-        }
-
-        {
-            let mut configs = self.worker_configs.write().await;
-            configs.insert(worker_id.clone(), config);
-        }
-
-        // Forward worker events to pool
-        let event_tx = self.event_tx.clone();
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                let _ = event_tx.send(event).await;
+        // Send shutdown signal to all workers
+        for managed in &mut self.workers {
+            if let Some(tx) = managed.shutdown_tx.take() {
+                let _ = tx.send(());
             }
-        });
+        }
 
-        // Start worker
-        tokio::spawn(async move {
-            if let Err(e) = worker.run().await {
-                tracing::error!("Worker execution error: {:?}", e);
+        // Wait for all workers to finish
+        for managed in &mut self.workers {
+            if let Err(e) = (&mut managed.join_handle).await {
+                error!(error = %e, "Worker task panicked during shutdown");
             }
-        });
-
-        // Add to idle queue
-        {
-            let mut idle = self.idle_workers.lock().await;
-            idle.push_back(worker_id);
         }
 
-        self.worker_available_notifier.notify_one();
-
-        Ok(())
-    }
-
-    /// Acquire a worker for a specific task.
-    pub async fn acquire_worker_for_task(&self, task: &Task) -> Result<WorkerHandle> {
-        todo!()
-    }
-
-    /// Mark a worker as idle.
-    async fn mark_worker_idle(&self, worker_id: WorkerId) -> Result<()> {
-        {
-            let mut idle = self.idle_workers.lock().await;
-            idle.push_back(worker_id);
-        }
-
-        self.worker_available_notifier.notify_one();
-        Ok(())
-    }
-
-    /// Remove a worker from the pool.
-    async fn remove_worker(&self, worker_id: WorkerId) -> Result<()> {
-        // Remove from workers map
-        {
-            let mut workers = self.workers.write().await;
-            workers.remove(&worker_id);
-        }
-
-        // Remove from configs
-        {
-            let mut configs = self.worker_configs.write().await;
-            configs.remove(&worker_id);
-        }
-
-        // Remove from idle queue
-        {
-            let mut idle = self.idle_workers.lock().await;
-            idle.retain(|id| id != &worker_id);
-        }
-
-        Ok(())
+        self.workers.clear();
+        info!("Worker pool shut down");
     }
 }

@@ -1,8 +1,7 @@
 use crate::error::{Result, TaskError};
 use malbox_database::PgPool;
-use malbox_database::repositories::{
-    machinery::update_machine,
-    tasks::{Task, TaskState, fetch_pending_tasks, fetch_task, insert_task, update_task_status},
+use malbox_database::repositories::tasks::{
+    Task, TaskState, fetch_pending_tasks, fetch_task, insert_task, update_task_status,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -27,6 +26,12 @@ impl TaskStore {
             tasks: RwLock::new(HashMap::new()),
         }
     }
+
+    /// Get a reference to the database pool.
+    pub fn pool(&self) -> &PgPool {
+        &self.db
+    }
+
     /// Load a task by ID, first checking the in-memory cache,
     /// then falling back to the database if needed.
     pub async fn load_task(&self, task_id: i32) -> Result<Task> {
@@ -88,20 +93,23 @@ impl TaskStore {
     }
 
     /// Update the result of a task both in-memory and database.
-    pub async fn update_task_result(&self, task_id: i32, result: String) -> Result<()> {
-        // Update the in-memory cache.
-        {
-            let mut tasks = self.tasks.write().await;
-            if let Some(task) = tasks.get_mut(&task_id) {
-                // TODO: actually update the result in struct.
-                // Field is not present as of now.
-                todo!();
-            }
-        }
-
-        // DB function: update_task_result
-
+    ///
+    /// Note: The Task struct does not yet have a result field.
+    /// This will be implemented when the result storage schema is added.
+    pub async fn update_task_result(&self, _task_id: i32, _result: String) -> Result<()> {
+        // TODO: Add result field to Task struct and persist to DB
         Ok(())
+    }
+
+    /// Cache a task in memory without inserting into the database.
+    ///
+    /// Used by the scheduler ingestion loop when tasks are already
+    /// persisted by the HTTP layer.
+    pub async fn cache_task(&self, task: Task) {
+        if let Some(id) = task.id {
+            let mut tasks = self.tasks.write().await;
+            tasks.insert(id, task);
+        }
     }
 
     /// Load all pending tasks from the database.

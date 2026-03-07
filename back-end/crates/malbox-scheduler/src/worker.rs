@@ -1,22 +1,8 @@
-use crate::{
-    error::Result,
-    task::{
-        batch::{BatchCollector, TaskBatch},
-        executor::TaskExecutor,
-    },
-};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::sync::{mpsc, oneshot};
-use uuid::Uuid;
-
-use config::WorkerConfig;
-use event::{ShutdownReason, WorkerEvent};
-use handle::WorkerHandle;
-use job::Job;
-use pool::WorkerPool;
+//! Worker implementation.
+//!
+//! Each worker is an independent tokio task that competes for tasks
+//! from a shared TaskQueue, allocates machines, drives task state
+//! transitions, and emits IPC events.
 
 pub mod config;
 pub mod event;
@@ -24,267 +10,354 @@ pub mod handle;
 pub mod job;
 pub mod pool;
 
+pub use config::WorkerConfig;
+pub use event::WorkerEvent;
+pub use handle::WorkerHandle;
+pub use job::Job;
+
+use crate::error::{Result, SchedulerError};
+use crate::task::queue::TaskQueue;
+use crate::task::store::TaskStore;
+use crate::task::task_to_machine_spec;
+use malbox_config::MachineryConfig;
+use malbox_database::repositories::samples::fetch_sample_by_id;
+use malbox_database::repositories::tasks::TaskState;
+use malbox_plugin_internal::manager::PluginManager;
+use malbox_plugin_internal::transport::messages::events::{
+    Event, Payload, TaskEvent, TaskEventPayload,
+};
+use malbox_plugin_internal::transport::traits::TransportEmitter;
+use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_storage::SampleStore;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::time::Duration;
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
 /// Unique identifier for a worker instance.
-///
-/// Used to track and reference individual workers throughout the system.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WorkerId(Uuid);
 
 impl WorkerId {
-    /// Create a new unique worker ID.
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 
-    /// Get the string represntation of the worker ID.
     pub fn as_string(&self) -> String {
         self.0.to_string()
     }
 }
 
-/// A worker that executes tasks.
-///
-/// Workers are responsible for executing tasks with their associated plugins
-/// in the appropriate environment. Each worker runs in its own tokio task and
-/// can be manager through a WorkerHandle.
+impl Default for WorkerId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for WorkerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Show first 8 chars for readable logs
+        write!(f, "{}", &self.0.to_string()[..8])
+    }
+}
+
+/// A worker that executes tasks by competing for them from a shared queue.
 pub struct Worker {
-    /// Unique identifier for this worker.
     id: WorkerId,
-    /// Task executor used to run tasks.
-    executor: Arc<TaskExecutor>,
-    /// Channel for receiving jobs.
-    job_rx: mpsc::Receiver<Job>,
-    /// Channel for signaling worker shutdown.
-    shutdown_rx: oneshot::Receiver<()>,
-    /// Channel for sending completion notifications back to the pool.
-    completion_tx: mpsc::Sender<WorkerEvent>,
-    /// Batch collector for this worker (if batch processing enabled).
-    batch_collector: Option<BatchCollector>,
-    /// Configuration for this worker.
-    config: WorkerConfig,
+    task_queue: Arc<TaskQueue>,
+    task_store: Arc<TaskStore>,
+    machinery_manager: Arc<dyn MachineryManager>,
+    machinery_config: MachineryConfig,
+    plugin_manager: Arc<PluginManager>,
+    event_tx: mpsc::Sender<WorkerEvent>,
+    transport: Option<Arc<ResolvedTransport>>,
+    sample_store: Arc<SampleStore>,
 }
 
 impl Worker {
-    /// Create a new worker with the given configuration.
+    /// Create a new worker with all required shared state.
     pub fn new(
-        config: WorkerConfig,
-        executor: Arc<TaskExecutor>,
-    ) -> (Self, WorkerHandle, mpsc::Receiver<WorkerEvent>) {
-        let (job_tx, job_rx) = mpsc::channel(16);
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let (completion_tx, completion_rx) = mpsc::channel(32);
-
-        let id = WorkerId::new();
-
-        let handle = WorkerHandle::new(id.clone(), job_tx, shutdown_tx);
-
-        let batch_collector = if config.batch_processing {
-            Some(BatchCollector::new(config.clone()))
-        } else {
-            None
-        };
-
-        let worker = Self {
-            id: id.clone(),
-            executor,
-            config,
-            job_rx,
-            shutdown_rx,
-            completion_tx,
-            batch_collector,
-        };
-
-        (worker, handle, completion_rx)
+        task_queue: Arc<TaskQueue>,
+        task_store: Arc<TaskStore>,
+        machinery_manager: Arc<dyn MachineryManager>,
+        machinery_config: MachineryConfig,
+        plugin_manager: Arc<PluginManager>,
+        event_tx: mpsc::Sender<WorkerEvent>,
+        transport: Option<Arc<ResolvedTransport>>,
+        sample_store: Arc<SampleStore>,
+    ) -> Self {
+        Self {
+            id: WorkerId::new(),
+            task_queue,
+            task_store,
+            machinery_manager,
+            machinery_config,
+            plugin_manager,
+            event_tx,
+            transport,
+            sample_store,
+        }
     }
 
-    /// Run the worker's main execution loop.
-    ///
-    /// This method contains the worker's entire lifecycle and should be
-    /// spawned in a tokio task.
-    pub async fn run(mut self) -> Result<()> {
-        let idle_timeout = Duration::from_millis(self.config.batch_timeout_ms);
-        let mut batch_timer = if self.config.batch_processing {
-            Some(tokio::time::interval(idle_timeout / 2))
-        } else {
-            None
-        };
+    /// Get the worker's ID.
+    pub fn id(&self) -> &WorkerId {
+        &self.id
+    }
 
-        let mut last_activity = Instant::now();
+    /// Run the worker's main loop.
+    ///
+    /// The worker waits for tasks on the shared queue's notifier,
+    /// dequeues a task (competing with other workers), and executes
+    /// the full task lifecycle.
+    pub async fn run(self, mut shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
+        let notifier = self.task_queue.get_notifier();
+        info!(worker_id = %self.id, "Worker started");
 
         loop {
+            // Wait for a task to become available or shutdown signal
             tokio::select! {
-                // Handle incoming jobs
-                Some(job) = self.job_rx.recv() => {
-                    last_activity = Instant::now();
-                    self.handle_job(job).await?;
-                }
-
-                // Handle batch timeout (if batch processing enabled)
-                _ = async {
-                    if let Some(ref mut timer) = batch_timer {
-                        timer.tick().await;
-                    } else {
-                        // If no batch processing, sleep forever
-                        std::future::pending::<()>().await;
-                    }
-                }, if batch_timer.is_some() => {
-                    self.check_batch_timeout().await?;
-                }
-
-                // Handle shutdown signal
-                _ = &mut self.shutdown_rx => {
-                    self.notify_shutdown(ShutdownReason::Requested).await;
+                _ = notifier.notified() => {},
+                _ = &mut shutdown_rx => {
+                    info!(worker_id = %self.id, "Worker received shutdown signal");
                     break;
                 }
+            }
 
-                // Handle idle timeout
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    if self.config.idle_timeout_ms > 0 {
-                        let idle_duration = Duration::from_millis(self.config.idle_timeout_ms);
-                        if last_activity.elapsed() >= idle_duration {
-                            self.notify_shutdown(ShutdownReason::IdleTimeout).await;
-                            break;
-                        }
+            // Try to dequeue a task (another worker may have grabbed it)
+            let task_id = match self.task_queue.dequeue().await {
+                Some(id) => id,
+                None => continue,
+            };
+
+            info!(worker_id = %self.id, task_id, "Worker picked up task");
+
+            // Load full task from store
+            let task = match self.task_store.load_task(task_id).await {
+                Ok(t) => t,
+                Err(e) => {
+                    error!(worker_id = %self.id, task_id, error = %e, "Failed to load task");
+                    continue;
+                }
+            };
+
+            // Determine timeout duration
+            let timeout_secs = task.timeout as u64;
+            let timeout_duration = if timeout_secs > 0 {
+                Duration::from_secs(timeout_secs)
+            } else {
+                Duration::from_secs(300) // Default 5 min timeout
+            };
+
+            // Execute with timeout
+            let start = std::time::Instant::now();
+            let result =
+                tokio::time::timeout(timeout_duration, self.execute_task(task_id)).await;
+
+            let duration = start.elapsed();
+
+            match result {
+                Ok(Ok(())) => {
+                    info!(worker_id = %self.id, task_id, duration = ?duration, "Task completed successfully");
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::JobCompleted {
+                            worker_id: self.id.clone(),
+                            job_result: Ok(crate::task::TaskResult::new(Some(task_id))),
+                            duration,
+                        })
+                        .await;
+                }
+                Ok(Err(e)) => {
+                    error!(worker_id = %self.id, task_id, error = %e, "Task execution failed");
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::WorkerError {
+                            worker_id: self.id.clone(),
+                            error: crate::error::WorkerError::ExecutionFailed(e.to_string()),
+                        })
+                        .await;
+                }
+                Err(_) => {
+                    warn!(worker_id = %self.id, task_id, timeout = timeout_secs, "Task timed out");
+                    if let Err(e) = self.handle_timeout(task_id).await {
+                        error!(worker_id = %self.id, task_id, error = %e, "Failed to handle timeout cleanup");
+                    }
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::JobCompleted {
+                            worker_id: self.id.clone(),
+                            job_result: Err(SchedulerError::Internal(format!(
+                                "Task {} timed out after {}s",
+                                task_id, timeout_secs
+                            ))),
+                            duration,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        info!(worker_id = %self.id, "Worker stopped");
+    }
+
+    /// Execute the full lifecycle of a single task.
+    async fn execute_task(&self, task_id: i32) -> Result<()> {
+        // --- Initializing ---
+        self.task_store
+            .update_task_state(task_id, TaskState::Initializing)
+            .await?;
+        self.emit_task_event(TaskEvent::TaskStarting, task_id);
+
+        // Load full task for spec building
+        let task = self.task_store.load_task(task_id).await?;
+
+        // --- Preparing Resources ---
+        self.task_store
+            .update_task_state(task_id, TaskState::PreparingResources)
+            .await?;
+
+        let spec = task_to_machine_spec(&task, &self.machinery_config);
+        let machine = match self.machinery_manager.allocate(&spec).await {
+            Ok(m) => m,
+            Err(e) => {
+                error!(task_id, error = %e, "Machine allocation failed");
+                self.task_store
+                    .update_task_state(task_id, TaskState::Failed)
+                    .await?;
+                self.emit_task_event(TaskEvent::TaskFailed, task_id);
+                return Err(SchedulerError::Resource(e));
+            }
+        };
+
+        info!(task_id, machine_id = ?machine.id, "Machine allocated");
+
+        // --- Running ---
+        self.task_store
+            .update_task_state(task_id, TaskState::Running)
+            .await?;
+
+        // Guest access phase: transfer sample, execute, collect results.
+        // Only activated when a transport is configured.
+        if let Some(ref transport) = self.transport {
+            match transport.open_session(&machine).await {
+                Ok(session) => {
+                    // Push sample file to guest if task has a sample
+                    if let Some(sample_id) = task.sample_id {
+                        let sample = fetch_sample_by_id(
+                            self.task_store.pool(),
+                            sample_id,
+                        )
+                        .await
+                        .map_err(|e| SchedulerError::Internal(
+                            format!("Failed to fetch sample {}: {}", sample_id, e),
+                        ))?
+                        .ok_or_else(|| SchedulerError::Internal(
+                            format!("Sample {} not found in database", sample_id),
+                        ))?;
+
+                        let host_path = self.sample_store.path(&sample.sha256)
+                            .map_err(|e| SchedulerError::Internal(
+                                format!("Failed to resolve sample path: {}", e),
+                            ))?;
+
+                        info!(task_id, sample_id, path = %host_path.display(), "Pushing sample to guest");
+
+                        session.push_file(&host_path, &task.target).await
+                            .map_err(|e| SchedulerError::Internal(
+                                format!("Failed to push sample to guest: {}", e),
+                            ))?;
+
+                        info!(task_id, dest = task.target.as_str(), "Sample transferred to guest");
+                    } else {
+                        warn!(task_id, "Task has no sample_id, skipping guest file transfer");
+                    }
+
+                    if let Err(e) = session.close().await {
+                        warn!(task_id, error = %e, "Failed to close guest session cleanly");
                     }
                 }
-            }
-        }
+                Err(e) => {
+                    error!(task_id, error = %e, "Failed to open guest session");
+                    self.task_store
+                        .update_task_state(task_id, TaskState::Failed)
+                        .await?;
+                    self.emit_task_event(TaskEvent::TaskFailed, task_id);
 
-        Ok(())
-    }
-
-    /// Handle a job.
-    async fn handle_job(&mut self, job: Job) -> Result<()> {
-        let start_time = Instant::now();
-
-        if self.config.batch_processing {
-            self.handle_batch_job(job).await
-        } else {
-            self.handle_single_job(job, start_time).await
-        }
-    }
-
-    /// Handle a job that might be batched.
-    async fn handle_batch_job(&mut self, job: Job) -> Result<()> {
-        if let Some(ref mut collector) = self.batch_collector {
-            if let Some(batch) = collector
-                .add_task(job.task, job.resources, job.result_tx)
-                .await
-            {
-                self.execute_batch(batch).await?;
-            }
-        } else {
-            // Fallback to single job if no batch collector
-            let start_time = Instant::now();
-            self.handle_single_job(job, start_time).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Handle a single job execution.
-    async fn handle_single_job(&self, job: Job, start_time: Instant) -> Result<()> {
-        let result = self.executor.execute(job.task, job.resources).await;
-        let duration = start_time.elapsed();
-
-        // Create a copy of the result for notification
-        let result_for_notification = match &result {
-            Ok(task_result) => Ok(task_result.clone()),
-            Err(_) => Err(crate::error::SchedulerError::Internal(
-                "Job execution failed".to_string(),
-            )),
-        };
-
-        // Send result back to caller
-        let _ = job.result_tx.send(result);
-
-        // Notify pool of completion
-        let event = WorkerEvent::JobCompleted {
-            worker_id: self.id.clone(),
-            job_result: result_for_notification,
-            duration,
-        };
-
-        let _ = self.completion_tx.send(event).await;
-
-        Ok(())
-    }
-
-    /// Execute a bathc of tasks.
-    async fn execute_batch(&self, batch: TaskBatch) -> Result<()> {
-        let start_time = Instant::now();
-
-        // Execute all tasks in the batch
-        let results = self
-            .executor
-            .execute_batch(batch.tasks, batch.resources)
-            .await?;
-        let duration = start_time.elapsed();
-
-        // Count successful results and send individual results back
-        let batch_size = results.len();
-        let mut successful_count = 0;
-
-        for (result, result_tx) in results.into_iter().zip(batch.result_channels.into_iter()) {
-            if result.is_ok() {
-                successful_count += 1;
-            }
-            let _ = result_tx.send(result);
-        }
-
-        // Notify pool of batch completion
-        let event = WorkerEvent::BatchCompleted {
-            worker_id: self.id.clone(),
-            batch_size,
-            successful_count,
-            duration,
-        };
-
-        let _ = self.completion_tx.send(event).await;
-
-        Ok(())
-    }
-
-    /// Check if current batch should be finalized due to timeout.
-    async fn check_batch_timeout(&mut self) -> Result<()> {
-        if let Some(ref mut collector) = self.batch_collector {
-            if collector.should_finalize_batch() {
-                if let Some(batch) = collector.finalize_current_batch() {
-                    self.execute_batch(batch).await?;
+                    // Still release the machine
+                    if let Err(rel_err) = self.machinery_manager.release(&machine).await {
+                        error!(task_id, error = %rel_err, "Failed to release machine after guest session failure");
+                    }
+                    return Err(SchedulerError::Internal(format!(
+                        "Guest session failed for task {}: {}",
+                        task_id, e
+                    )));
                 }
             }
         }
 
+        // --- Plugin execution phase ---
+        // Run all registered plugins for this task via the plugin manager.
+        let snapshot = self.plugin_manager.registry().snapshot();
+        // TODO: Filter plugins based on task type, scope, manifest config
+        for entry in snapshot.list() {
+            let plugin_id = &entry.id;
+
+            match self.plugin_manager.acquire(plugin_id).await {
+                Ok(handle) => {
+                    let config = std::collections::HashMap::new(); // TODO: build from task config
+                    match handle.execute_task(task_id, "", config).await {
+                        Ok(_results) => {
+                            info!(task_id, plugin_id = plugin_id.as_str(), "Plugin execution completed");
+                            // TODO: collect results into TaskResult
+                        }
+                        Err(e) => {
+                            error!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Plugin execution failed");
+                        }
+                    }
+                    handle.release().await;
+                }
+                Err(e) => {
+                    warn!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                }
+            }
+        }
+
+        // --- Stopping ---
+        self.task_store
+            .update_task_state(task_id, TaskState::Stopping)
+            .await?;
+
+        // --- Release machine ---
+        if let Err(e) = self.machinery_manager.release(&machine).await {
+            error!(task_id, machine_id = ?machine.id, error = %e, "Failed to release machine");
+        }
+
+        // --- Completed ---
+        self.task_store
+            .update_task_state(task_id, TaskState::Completed)
+            .await?;
+        self.emit_task_event(TaskEvent::TaskCompleted, task_id);
+
         Ok(())
     }
 
-    /// Notify the pool that this worker is shutting down.
-    async fn notify_shutdown(&self, reason: ShutdownReason) {
-        let event = WorkerEvent::WorkerShutdown {
-            worker_id: self.id.clone(),
-            reason,
-        };
-
-        let _ = self.completion_tx.send(event).await;
+    /// Handle task timeout: transition to Failed and emit event.
+    async fn handle_timeout(&self, task_id: i32) -> Result<()> {
+        self.task_store
+            .update_task_state(task_id, TaskState::Failed)
+            .await?;
+        self.emit_task_event(TaskEvent::TaskFailed, task_id);
+        Ok(())
     }
 
-    /// Create a worker from an existing handle.
-    ///
-    /// This method creates a Worker instance that can use an existing worker
-    /// process through its handle. This is typically used when retrieving a
-    /// worker from the pool.
-    pub fn from_handle(
-        handle: WorkerHandle,
-        executor: Arc<TaskExecutor>,
-        pool: Arc<WorkerPool>,
-    ) -> Self {
-        todo!()
-    }
-
-    /// Get a handle to this worker.
-    ///
-    /// Creates a new handle that can be used to control this worker.
-    pub fn handle(&self) -> WorkerHandle {
-        todo!()
+    /// Emit a task IPC event, logging errors but not propagating them.
+    fn emit_task_event(&self, event: TaskEvent, task_id: i32) {
+        if let Err(e) = self.plugin_manager.emitter().emit(
+            Event::Task(event),
+            Payload::Task(TaskEventPayload { task_id }),
+        ) {
+            error!(task_id, error = %e, "Failed to emit task event");
+        }
     }
 }

@@ -8,7 +8,9 @@ edition = "2024"
 [dependencies]
 malbox-database = { path = "../malbox-database" }
 malbox-config = { path = "../malbox-config" }
+malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
+malbox-storage = { path = "../malbox-storage" }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

@@ -1,9 +1,7 @@
-use super::pool::WorkerPool;
 use crate::error::Result;
-use crate::task::{ResourceAllocation, TaskResult, executor::TaskExecutor};
+use crate::task::{ResourceAllocation, TaskResult};
 use malbox_database::repositories::tasks::Task;
-use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 pub struct Job {
     pub task: Task,

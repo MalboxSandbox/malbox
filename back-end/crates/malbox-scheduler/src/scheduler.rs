@@ -1,200 +1,176 @@
-use super::error::Result;
-use crate::resource::ResourceManager;
-use crate::task::{TaskResult, queue::TaskQueue, store::TaskStore};
+//! Scheduler implementation.
+//!
+//! The Scheduler initializes shared state (TaskQueue, TaskStore, WorkerPool),
+//! loads pending tasks from the database on startup, ingests new tasks from
+//! the HTTP layer, and spawns Worker actors to process them.
+
+use crate::error::Result;
+use crate::task::queue::TaskQueue;
+use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
 use crate::worker::pool::WorkerPool;
+use malbox_config::MachineryConfig;
 use malbox_database::PgPool;
-use malbox_database::repositories::tasks::{Task, TaskState};
-use malbox_plugin_internal::PluginRegistry;
+use malbox_database::repositories::tasks::Task;
+use malbox_plugin_internal::manager::PluginManager;
+use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_storage::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-/// The scheduler orchestrates the entire task-management system.
+/// The scheduler orchestrates task ingestion, queuing, and worker management.
 pub struct Scheduler {
-    task_store: Arc<TaskStore>,
     task_queue: Arc<TaskQueue>,
-    resource_manager: Arc<ResourceManager>,
-    worker_pool: Arc<WorkerPool>,
-    worker_events: mpsc::Receiver<WorkerEvent>,
-    task_notifications: mpsc::Receiver<Task>,
-    shutdown_notification: oneshot::Receiver<()>,
+    task_store: Arc<TaskStore>,
+    machinery_manager: Arc<dyn MachineryManager>,
+    machinery_config: MachineryConfig,
+    plugin_manager: Arc<PluginManager>,
+    worker_pool: WorkerPool,
+    worker_count: usize,
+    transport: Option<Arc<ResolvedTransport>>,
+    sample_store: Arc<SampleStore>,
 }
 
 impl Scheduler {
     /// Create a new scheduler.
     pub fn new(
         db_pool: PgPool,
-        resource_manager: Arc<ResourceManager>,
-        task_notifications: mpsc::Receiver<Task>,
-        worker_events: mpsc::Receiver<WorkerEvent>,
-        shutdown_notification: oneshot::Receiver<()>,
+        machinery_manager: Arc<dyn MachineryManager>,
+        machinery_config: MachineryConfig,
+        plugin_manager: Arc<PluginManager>,
+        worker_count: usize,
+        transport: Option<Arc<ResolvedTransport>>,
+        sample_store: Arc<SampleStore>,
     ) -> Self {
-        let task_store = Arc::new(TaskStore::new(db_pool.clone()));
-        let task_queue = Arc::new(TaskQueue::new());
-        let plugin_registry = Arc::new(PluginRegistry::new());
-        let executor = Arc::new(crate::task::executor::TaskExecutor::new(
-            task_store.clone(),
-            plugin_registry,
-            resource_manager.clone(),
-        ));
-        let worker_pool = Arc::new(WorkerPool::new(10, executor));
-
         Self {
-            task_store,
-            task_queue,
-            worker_pool,
-            resource_manager,
-            task_notifications,
-            worker_events,
-            shutdown_notification,
+            task_queue: Arc::new(TaskQueue::new()),
+            task_store: Arc::new(TaskStore::new(db_pool)),
+            machinery_manager,
+            machinery_config,
+            plugin_manager,
+            worker_pool: WorkerPool::new(worker_count),
+            worker_count,
+            transport,
+            sample_store,
         }
     }
 
     /// Run the scheduler.
-    pub async fn run(mut self) -> Result<()> {
-        // Load any pending tasks from database on startup
-        self.task_store.load_pending_tasks().await?;
-
-        let queue_notifier = self.task_queue.get_notifier();
-
-        loop {
-            tokio::select! {
-                // Handle new task notifications
-                Some(task) = self.task_notifications.recv() => {
-                    self.handle_new_task(task).await?;
+    ///
+    /// This method:
+    /// 1. Loads pending tasks from the database
+    /// 2. Spawns an ingestion task that reads from the task receiver
+    /// 3. Spawns workers via the WorkerPool
+    /// 4. Spawns a worker event listener
+    /// 5. Waits for shutdown signal
+    pub async fn run(
+        mut self,
+        mut task_rx: mpsc::Receiver<Task>,
+        shutdown_rx: oneshot::Receiver<()>,
+    ) -> Result<()> {
+        // 1. Load pending tasks from DB
+        match self.task_store.load_pending_tasks().await {
+            Ok(pending) => {
+                if !pending.is_empty() {
+                    info!(
+                        count = pending.len(),
+                        "Recovered pending tasks from database"
+                    );
+                    let entries: Vec<(i32, i64)> = pending
+                        .iter()
+                        .filter_map(|t| t.id.map(|id| (id, t.priority)))
+                        .collect();
+                    self.task_queue.enqueue_batch(entries).await;
                 }
-
-                // Handle worker completion events
-                Some(event) = self.worker_events.recv() => {
-                    self.handle_worker_event(event).await?;
-                }
-
-                // Process queued tasks when queue has items
-                _ = queue_notifier.notified() => {
-                    todo!()
-                }
-
-                // Handle shutdown signal
-                _ = &mut self.shutdown_notification => {
-                    info!("Scheduler shutdown requested");
-                    break;
-                }
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to load pending tasks from database");
             }
         }
 
-        self.shutdown().await?;
-        Ok(())
-    }
+        // 2. Create worker event channel
+        let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(100);
 
-    /// Handle worker events (completion, errors, etc.).
-    async fn handle_worker_event(&self, event: WorkerEvent) -> Result<()> {
-        match event {
-            WorkerEvent::JobCompleted {
-                worker_id,
-                job_result,
-                duration,
-            } => {
-                info!(
-                    "Worker {} completed job in {:?}",
-                    worker_id.as_string(),
-                    duration
-                );
+        // 3. Spawn workers
+        self.worker_pool.spawn_workers(
+            Arc::clone(&self.task_queue),
+            Arc::clone(&self.task_store),
+            Arc::clone(&self.machinery_manager),
+            self.machinery_config.clone(),
+            Arc::clone(&self.plugin_manager),
+            event_tx,
+            self.transport.clone(),
+            Arc::clone(&self.sample_store),
+        );
 
-                match job_result {
-                    Ok(task_result) => {
-                        self.handle_task_completion(task_result).await?;
+        info!(workers = self.worker_count, "Scheduler running");
+
+        let task_queue = Arc::clone(&self.task_queue);
+        let task_store = Arc::clone(&self.task_store);
+
+        // 4. Spawn task ingestion loop
+        let ingest_handle = tokio::spawn(async move {
+            while let Some(task) = task_rx.recv().await {
+                // Should throw error instead of putting arbitrary `-1`.
+                let task_id = task.id.unwrap_or(-1);
+                let priority = task.priority;
+
+                // Cache the task in the store
+                task_store.cache_task(task).await;
+
+                // Enqueue for workers to pick up
+                task_queue.enqueue(task_id, priority).await;
+                info!(task_id, priority, "Task ingested into queue");
+            }
+            info!("Task ingestion channel closed");
+        });
+
+        // 5. Spawn worker event listener
+        let event_handle = tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                match &event {
+                    WorkerEvent::JobCompleted {
+                        worker_id,
+                        duration,
+                        ..
+                    } => {
+                        info!(worker_id = %worker_id, duration = ?duration, "Job completed");
                     }
-                    Err(e) => {
-                        error!("Job failed: {}", e);
-                        // TODO: Handle task failure
+                    WorkerEvent::BatchCompleted {
+                        worker_id,
+                        batch_size,
+                        successful_count,
+                        duration,
+                    } => {
+                        info!(
+                            worker_id = %worker_id,
+                            batch_size,
+                            successful_count,
+                            duration = ?duration,
+                            "Batch completed"
+                        );
+                    }
+                    WorkerEvent::WorkerShutdown { worker_id, reason } => {
+                        info!(worker_id = %worker_id, reason = ?reason, "Worker shut down");
+                    }
+                    WorkerEvent::WorkerError { worker_id, error } => {
+                        error!(worker_id = %worker_id, error = %error, "Worker error");
                     }
                 }
             }
+        });
 
-            WorkerEvent::BatchCompleted {
-                worker_id,
-                batch_size,
-                successful_count,
-                duration,
-            } => {
-                info!(
-                    "Worker {} completed batch of {} jobs ({} successful) in {:?}",
-                    worker_id.as_string(),
-                    batch_size,
-                    successful_count,
-                    duration
-                );
-                // Individual task completion is handled through their result channels
-            }
+        // 6. Wait for shutdown signal
+        let _ = shutdown_rx.await;
+        info!("Scheduler received shutdown signal");
 
-            WorkerEvent::WorkerShutdown { worker_id, reason } => {
-                info!("Worker {} shut down: {:?}", worker_id.as_string(), reason);
-                // TODO: Handle worker replacement if needed
-            }
+        // Graceful shutdown
+        self.worker_pool.shutdown().await;
+        ingest_handle.abort();
+        event_handle.abort();
 
-            WorkerEvent::WorkerError { worker_id, error } => {
-                error!(
-                    "Worker {} reported error: {:?}",
-                    worker_id.as_string(),
-                    error
-                );
-                // TODO: Handle worker error recovery
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle successful task completion.
-    async fn handle_task_completion(&self, task_result: TaskResult) -> Result<()> {
-        let task_id = task_result.task_id.expect("Task result must have task ID");
-
-        // Update task state to completed
-        self.task_store
-            .update_task_state(task_id, TaskState::Completed)
-            .await?;
-
-        // Release resources
-        self.resource_manager.release_resources(task_id).await?;
-
-        // Store results (implement this)
-        // self.result_store.store_task_result(task_result).await?;
-
-        info!("Task {} completed successfully", task_id);
-        Ok(())
-    }
-
-    /// Handle a new task that has been sent to the scheduler.
-    async fn handle_new_task(&self, task: Task) -> Result<()> {
-        // TODO:
-        // Load balancing!
-        self.execute_task(task).await?;
-        // In case resources are already exhausted:
-        // self.task_queue.enqueue(task).await?;
-
-        Ok(())
-    }
-
-    async fn execute_task(&self, task: Task) -> Result<()> {
-        let worker = self.worker_pool.acquire_worker_for_task(&task).await?;
-
-        // worker.send_job(job);
-
-        Ok(())
-    }
-
-    /// Graceful shutdown.
-    async fn shutdown(&self) -> Result<()> {
-        info!("Shutting down scheduler...");
-
-        // Shutdown worker pool
-        // self.worker_pool.shutdown().await?;
-
-        // Clean up resources
-        // self.resource_manager.cleanup().await?;
-
-        info!("Scheduler shutdown complete");
+        info!("Scheduler stopped");
         Ok(())
     }
 }
