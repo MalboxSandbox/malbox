@@ -1,6 +1,69 @@
-use async_trait::async_trait;
+//! Machine types and specifications.
+//!
+//! Machine is a concrete struct that represents
+//! a running machine instance. It's provider-agnostic and can be
+//! passed between different capabilities.
+
 use serde::{Deserialize, Serialize};
-use std::{any::Any, net::IpAddr, time::Duration};
+use std::net::IpAddr;
+
+/// A running machine instance.
+///
+/// This is a concrete type that represents a machine allocated by a provider.
+/// It's owned by strategies and passed to capabilities as needed.
+#[derive(Debug, Clone)]
+pub struct Machine {
+    /// Unique identifier for this machine.
+    pub id: MachineId,
+    /// Specification used to create this machine.
+    pub spec: MachineSpec,
+    /// Current state of the machine.
+    pub state: MachineState,
+    /// Network endpoint (if available).
+    pub endpoint: Option<MachineEndpoint>,
+}
+
+impl Machine {
+    /// Create a new machine instance.
+    pub fn new(id: MachineId, spec: MachineSpec) -> Self {
+        Self {
+            id,
+            spec,
+            state: MachineState::Creating,
+            endpoint: None,
+        }
+    }
+
+    /// Get the machine ID.
+    pub fn id(&self) -> &MachineId {
+        &self.id
+    }
+
+    /// Get the machine specification.
+    pub fn spec(&self) -> &MachineSpec {
+        &self.spec
+    }
+
+    /// Get the current state.
+    pub fn state(&self) -> MachineState {
+        self.state
+    }
+
+    /// Get the network endpoint (if available).
+    pub fn endpoint(&self) -> Option<&MachineEndpoint> {
+        self.endpoint.as_ref()
+    }
+
+    /// Update the machine state.
+    pub fn set_state(&mut self, state: MachineState) {
+        self.state = state;
+    }
+
+    /// Update the network endpoint.
+    pub fn set_endpoint(&mut self, endpoint: Option<MachineEndpoint>) {
+        self.endpoint = endpoint;
+    }
+}
 
 /// Runtime endpoint information for provisioning.
 #[derive(Debug, Clone)]
@@ -13,33 +76,7 @@ pub struct MachineEndpoint {
     pub platform: Platform,
 }
 
-/// Machine trait that all machine types must implement.
-#[async_trait]
-pub trait Machine: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn id(&self) -> &MachineId;
-    fn spec(&self) -> &MachineSpec;
-    fn state(&self) -> MachineState;
-
-    async fn start(&mut self) -> Result<(), Self::Error>;
-    async fn stop(&mut self) -> Result<(), Self::Error>;
-    async fn reboot(&mut self) -> Result<(), Self::Error>;
-    async fn wait_ready(&self, timeout: Duration) -> Result<(), Self::Error>;
-
-    /// Wait for machine to have network connectivity.
-    async fn wait_network(&self, timeout: Duration) -> Result<(), Self::Error>;
-
-    /// Get network endpoint for provisioning.
-    /// Returns None if machine is not in a network-accessible state.
-    fn endpoint(&self) -> Option<MachineEndpoint>;
-
-    /// For downcasting support (internal use).
-    fn as_any(&self) -> &dyn Any;
-    /// For mutable downcasting support (internal use).
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
-
+/// Machine specification - describes the desired machine configuration.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MachineSpec {
     pub name: String,
@@ -55,23 +92,59 @@ pub struct MachineSpec {
     pub provisioning: Option<Provisioning>,
 }
 
-// For now let's just keep MachineId as a String..
-// TODO make this type-safe and maybe use UUID? Or similar.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+/// Provisioning configuration attached to a machine spec.
+///
+/// Specifies which registered provisioner to use and its configuration.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Provisioning {
+    /// Name of the registered provisioner (e.g., "ansible", "native").
+    pub provisioner: String,
+    /// Provisioner-specific configuration (passed through as TOML).
+    #[serde(default = "default_toml_value")]
+    pub config: toml::Value,
+}
+
+fn default_toml_value() -> toml::Value {
+    toml::Value::Table(toml::map::Map::new())
+}
+
+/// Machine identifier.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct MachineId(pub String);
 
+impl std::fmt::Display for MachineId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for MachineId {
+    fn from(s: String) -> Self {
+        MachineId(s)
+    }
+}
+
+impl From<&str> for MachineId {
+    fn from(s: &str) -> Self {
+        MachineId(s.to_string())
+    }
+}
+
+/// Resource requirements.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Resources {
     pub cpus: u32,
     pub memory_mb: u32,
 }
 
+/// Storage configuration.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Storage {
     pub boot_disk_gb: u32,
     pub disk_type: DiskType,
 }
 
+/// Network configuration.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Network {
     pub mode: NetworkMode,
@@ -79,6 +152,7 @@ pub struct Network {
     pub mac: Option<String>,
 }
 
+/// Network mode options.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NetworkMode {
     Nat,
@@ -86,6 +160,7 @@ pub enum NetworkMode {
     Bridged { interface: String },
 }
 
+/// Disk type options.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum DiskType {
     Raw,
@@ -94,7 +169,7 @@ pub enum DiskType {
 }
 
 /// Machine state representation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineState {
     Creating,
     Starting,
@@ -106,87 +181,8 @@ pub enum MachineState {
 }
 
 /// Machine platform.
-// TODO: shared enum across crates.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Windows,
     Linux,
-}
-
-/// Provisioning configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
-pub enum Provisioning {
-    Ansible { playbook: String },
-}
-
-/// Object-safe machine trait for dynamic dispatch.
-///
-/// This trait provides a type-erased interface to machines, allowing them to be
-/// stored and used without knowing their concrete types at compile time.
-#[async_trait]
-pub trait DynMachine: Send + Sync {
-    fn id(&self) -> &MachineId;
-    fn spec(&self) -> &MachineSpec;
-    fn state(&self) -> MachineState;
-    fn endpoint(&self) -> Option<MachineEndpoint>;
-
-    async fn start(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn reboot(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn wait_ready(&self, timeout: Duration) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn wait_network(&self, timeout: Duration) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-    /// For downcasting support (internal use).
-    fn as_any(&self) -> &dyn Any;
-    /// For mutable downcasting support (internal use).
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
-
-/// Blanket implementation of DynMachine for all Machine types.
-#[async_trait]
-impl<M: Machine + 'static> DynMachine for M {
-    fn id(&self) -> &MachineId {
-        Machine::id(self)
-    }
-
-    fn spec(&self) -> &MachineSpec {
-        Machine::spec(self)
-    }
-
-    fn state(&self) -> MachineState {
-        Machine::state(self)
-    }
-
-    fn endpoint(&self) -> Option<MachineEndpoint> {
-        Machine::endpoint(self)
-    }
-
-    async fn start(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Machine::start(self).await.map_err(|e| Box::new(e) as _)
-    }
-
-    async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Machine::stop(self).await.map_err(|e| Box::new(e) as _)
-    }
-
-    async fn reboot(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Machine::reboot(self).await.map_err(|e| Box::new(e) as _)
-    }
-
-    async fn wait_ready(&self, timeout: Duration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Machine::wait_ready(self, timeout).await.map_err(|e| Box::new(e) as _)
-    }
-
-    async fn wait_network(&self, timeout: Duration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        Machine::wait_network(self, timeout).await.map_err(|e| Box::new(e) as _)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
 }

@@ -1,140 +1,169 @@
-use super::machine::{DynMachine, Machine, MachineSpec};
-use async_trait::async_trait;
-use std::marker::PhantomData;
+//! Providers register themselves at compile time using the `inventory` crate.
+//! The registry provides a way to look up providers by name and access their
+//! capabilities.
 
-pub mod extension;
+use crate::provider::capabilities::{Allocate, Clone, GuestAccess, Migrate, Snapshot};
+use std::sync::Arc;
 
-/// Provider trait that all providers must implement.
-#[async_trait]
-pub trait Provider: Sized + Send + Sync + 'static {
-    /// Provider-specific configuration.
-    type Config: Send + Sync;
-    /// Provider-specific machine type.
-    type Machine: Machine;
-    /// Provider-specific error type.
-    type Error: std::error::Error + Send + Sync + 'static;
+pub mod capabilities;
+pub mod config;
 
-    /// Initialize the provider from configuration.
-    async fn initialize(config: Self::Config) -> Result<Self, Self::Error>;
-    /// Allocate a machine.
-    async fn allocate(&self, spec: MachineSpec) -> Result<Self::Machine, Self::Error>;
-    /// Deallocate a machine and clean up resources.
-    async fn deallocate(&self, machine: &Self::Machine) -> Result<(), Self::Error>;
-    /// List machines.
-    async fn list(&self) -> Result<Option<Vec<Self::Machine>>, Self::Error>;
-}
+// Re-export toml::Value so providers don't need to depend on toml directly
+pub use toml::Value as TomlValue;
 
-/// Object-safe provider trait for dynamic dispatch.
+// TODO: Refactor `ProviderHandle`, the struct would eventually get huge with capability additions
+// and hard to maintain, for the time being, we keep this as functional. Should be
+// modified in the future.
+
+/// Handle to a provider with its capabilities.
 ///
-/// This trait provides a type-erased interface to providers, allowing them to be
-/// stored and used without knowing their concrete types at compile time.
-#[async_trait]
-pub trait DynProvider: Send + Sync {
-    /// Provider name/identifier for debugging.
-    fn name(&self) -> &str;
-
-    /// Allocate a machine with the given spec.
-    async fn allocate(
-        &self,
-        spec: MachineSpec,
-    ) -> Result<Box<dyn DynMachine>, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Deallocate a machine (machine must be from this provider).
-    async fn deallocate(
-        &self,
-        machine: &dyn DynMachine,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-    /// List all machines managed by this provider.
-    async fn list(
-        &self,
-    ) -> Result<Option<Vec<Box<dyn DynMachine>>>, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-/// Wrapper that implements DynProvider for any Provider type.
+/// This struct holds trait objects for each capability that a provider implements.
+/// The Allocate capability is mandatory, while others are optional.
 ///
-/// This allows providers with associated types to be used through the object-safe
-/// DynProvider trait. The wrapper stores the concrete machine type information for
-/// safe downcasting during deallocation.
-pub struct ProviderWrapper<P: Provider> {
-    provider: P,
-    _phantom: PhantomData<P::Machine>,
+/// This struct is created by the derive macro and should not be constructed manually.
+pub struct ProviderHandle {
+    /// Provider name (e.g., "libvirt", "vmware").
+    name: String,
+    /// Allocate capability (mandatory - all providers must implement this).
+    allocate: Arc<dyn Allocate>,
+    /// Snapshot capability (optional).
+    snapshot: Option<Arc<dyn Snapshot>>,
+    /// Clone capability (optional).
+    clone: Option<Arc<dyn Clone>>,
+    /// Migrate capability (optional).
+    migrate: Option<Arc<dyn Migrate>>,
+    /// GuestAccess capability (optional).
+    guest_access: Option<Arc<dyn GuestAccess>>,
 }
 
-impl<P: Provider> ProviderWrapper<P> {
-    /// Create a new provider wrapper.
-    pub fn new(provider: P) -> Self {
+impl ProviderHandle {
+    /// Create a new provider handle with required Allocate capability.
+    ///
+    /// This is called by the macro-generated code. Provider authors should not
+    /// call this directly - use the `#[derive(RegisterProvider)]` macro instead.
+    pub fn new(
+        name: String,
+        allocate: Arc<dyn Allocate>,
+        snapshot: Option<Arc<dyn Snapshot>>,
+        clone: Option<Arc<dyn Clone>>,
+        migrate: Option<Arc<dyn Migrate>>,
+        guest_access: Option<Arc<dyn GuestAccess>>,
+    ) -> Self {
         Self {
-            provider,
-            _phantom: PhantomData,
+            name,
+            allocate,
+            snapshot,
+            clone,
+            migrate,
+            guest_access,
         }
     }
 
-    /// Get a reference to the underlying provider.
-    pub fn inner(&self) -> &P {
-        &self.provider
+    /// Get the provider name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the Allocate capability.
+    ///
+    /// This is always available since all providers must implement Allocate.
+    pub fn allocate(&self) -> Arc<dyn Allocate> {
+        self.allocate.clone()
+    }
+
+    /// Get the Snapshot capability if available.
+    pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+        self.snapshot.clone()
+    }
+
+    /// Get the Clone capability if available.
+    pub fn clone_capability(&self) -> Option<Arc<dyn Clone>> {
+        self.clone.clone()
+    }
+
+    /// Get the Migrate capability if available.
+    pub fn migrate(&self) -> Option<Arc<dyn Migrate>> {
+        self.migrate.clone()
+    }
+
+    /// Get the GuestAccess capability if available.
+    pub fn guest_access(&self) -> Option<Arc<dyn GuestAccess>> {
+        self.guest_access.clone()
+    }
+
+    /// Check if provider has a specific capability by name.
+    pub fn has_capability(&self, capability: &str) -> bool {
+        match capability {
+            "allocate" => true,
+            "snapshot" => self.snapshot.is_some(),
+            "clone" => self.clone.is_some(),
+            "migrate" => self.migrate.is_some(),
+            "guest_access" => self.guest_access.is_some(),
+            _ => false,
+        }
+    }
+
+    /// Get all capability names this provider supports.
+    pub fn list_capabilities(&self) -> Vec<&'static str> {
+        let mut caps = vec!["allocate"]; // Always present
+        if self.snapshot.is_some() {
+            caps.push("snapshot");
+        }
+        if self.clone.is_some() {
+            caps.push("clone");
+        }
+        if self.migrate.is_some() {
+            caps.push("migrate");
+        }
+        if self.guest_access.is_some() {
+            caps.push("guest_access");
+        }
+        caps
     }
 }
 
-#[async_trait]
-impl<P: Provider + 'static> DynProvider for ProviderWrapper<P>
-where
-    P::Machine: 'static,
-{
-    fn name(&self) -> &str {
-        std::any::type_name::<P>()
-    }
+/// Metadata about a registered provider.
+///
+/// This struct is submitted to the inventory by provider crates.
+/// It contains the provider name and a function to create a ProviderHandle.
+pub struct ProviderMetadata {
+    /// Unique name for this provider (e.g., "libvirt", "vmware").
+    pub name: &'static str,
+    /// Function to create a provider handle with capabilities.
+    /// Takes provider-specific configuration as TOML value and returns a ProviderHandle.
+    pub create: fn(&TomlValue) -> Result<ProviderHandle, Box<dyn std::error::Error + Send + Sync>>,
+}
 
-    async fn allocate(
-        &self,
-        spec: MachineSpec,
-    ) -> Result<Box<dyn DynMachine>, Box<dyn std::error::Error + Send + Sync>> {
-        let machine = self
-            .provider
-            .allocate(spec)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        Ok(Box::new(machine) as Box<dyn DynMachine>)
-    }
+// Collect all registered providers at compile time
+inventory::collect!(ProviderMetadata);
 
-    async fn deallocate(
-        &self,
-        machine: &dyn DynMachine,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Downcast to the concrete machine type
-        let concrete_machine = machine
-            .as_any()
-            .downcast_ref::<P::Machine>()
-            .ok_or_else(|| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Machine type mismatch: cannot deallocate machine from different provider. \
-                         Expected {}, got a different type.",
-                        std::any::type_name::<P::Machine>()
-                    ),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+/// Get provider metadata by name.
+pub fn get_provider_metadata(name: &str) -> Option<&'static ProviderMetadata> {
+    inventory::iter::<ProviderMetadata>().find(|p| p.name == name)
+}
 
-        self.provider
-            .deallocate(concrete_machine)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    }
+/// List all registered provider names.
+pub fn list_providers() -> Vec<&'static str> {
+    inventory::iter::<ProviderMetadata>()
+        .map(|p| p.name)
+        .collect()
+}
 
-    async fn list(
-        &self,
-    ) -> Result<Option<Vec<Box<dyn DynMachine>>>, Box<dyn std::error::Error + Send + Sync>> {
-        let machines = self
-            .provider
-            .list()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+/// Create a provider handle by name with configuration.
+///
+/// This looks up the provider in the registry and calls its create function
+/// with the provider-specific configuration.
+pub fn create_provider(
+    name: &str,
+    config: &TomlValue,
+) -> Result<ProviderHandle, Box<dyn std::error::Error + Send + Sync>> {
+    let metadata = get_provider_metadata(name).ok_or_else(|| {
+        format!(
+            "Provider '{}' not found. Available providers: {:?}",
+            name,
+            list_providers()
+        )
+    })?;
 
-        Ok(machines.map(|vec| {
-            vec.into_iter()
-                .map(|m| Box::new(m) as Box<dyn DynMachine>)
-                .collect()
-        }))
-    }
+    (metadata.create)(config)
 }
