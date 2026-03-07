@@ -24,8 +24,8 @@ pub enum Error {
         errors: HashMap<Cow<'static, str>, Vec<Cow<'static, str>>>,
     },
 
-    #[error("An internal server error occurred")]
-    Internal(#[from] anyhow::Error),
+    #[error("An internal server error occurred: {0}")]
+    Internal(String),
 }
 
 impl Error {
@@ -65,8 +65,8 @@ impl IntoResponse for Error {
                 headers.insert(WWW_AUTHENTICATE, HeaderValue::from_static("Token"));
                 (self.status_code(), headers, self.to_string()).into_response()
             }
-            Self::Internal(ref err) => {
-                tracing::error!("Internal error: {:?}", err);
+            Self::Internal(ref msg) => {
+                tracing::error!("Internal error: {}", msg);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "An internal server error occured",
@@ -81,7 +81,7 @@ impl IntoResponse for Error {
 impl From<SqlxError> for Error {
     fn from(err: SqlxError) -> Self {
         tracing::error!("Database error: {:?}", err);
-        Error::Internal(anyhow::anyhow!("Database error occurred"))
+        Error::Internal("Database error occurred".to_string())
     }
 }
 
@@ -102,18 +102,6 @@ where
         name: &str,
         map_err: impl FnOnce(&dyn DatabaseError) -> Error,
     ) -> Result<T, Error> {
-        self.map_err(|e| {
-            let error = e.into();
-            if let Error::Internal(internal_error) = &error {
-                if let Some(db_error) = internal_error.downcast_ref::<SqlxError>() {
-                    if let SqlxError::Database(dbe) = db_error {
-                        if dbe.constraint() == Some(name) {
-                            return map_err(dbe.as_ref());
-                        }
-                    }
-                }
-            }
-            error
-        })
+        self.map_err(|e| e.into())
     }
 }

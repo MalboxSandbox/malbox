@@ -1,5 +1,4 @@
 use crate::http::{AppState, Result, error::Error};
-use anyhow::Context;
 use axum::body::Bytes;
 use axum::{
     Json, Router,
@@ -15,9 +14,8 @@ use malbox_database::repositories::{
     tasks::{Task, TaskState, insert_task},
 };
 use malbox_hashing::*;
-use tempfile::Builder;
 use time::{OffsetDateTime, PrimitiveDateTime};
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -67,46 +65,43 @@ async fn create_task_from_file(
     State(state): State<AppState>,
     TypedMultipart(request): TypedMultipart<CreateTaskRequest>,
 ) -> Result<Json<TaskResponse>> {
-    write_file(&request.file).context("Failed to read file content")?;
+    let file_info = get_file_info(&request.file).map_err(|e| Error::Internal(format!("Failed to get file information: {}", e)))?;
 
-    let file_info = get_file_info(&request.file).context("Failed to get file information")?;
+    state
+        .sample_store
+        .store(&file_info.sha256, &request.file.contents)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to store sample file: {}", e)))?;
 
     let sample = create_sample(&state, &file_info)
-        .await
-        .context("Failed to create sample")?;
+        .await?;
     let task = create_task(&state, &request, &file_info, sample.id)
-        .await
-        .context("Failed to create task")?;
+        .await?;
 
     let task_id = task.id.expect("Task must have an ID");
+
+    // Send task to scheduler for processing
+    state
+        .task_tx
+        .send(task.clone())
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to send task to scheduler: {}", e)))?;
+
+    info!("Task {} submitted to scheduler", task_id);
 
     Ok(Json(TaskResponse {
         task_id: task.id.unwrap(),
     }))
 }
 
-// NOTE: This is temporary, file storage should be handled by the malbox_storage
-// crate (new plugin system needed in order to do the crate implementation)
-fn write_file(file: &FieldData<Bytes>) -> anyhow::Result<()> {
-    let file_name = file
-        .metadata
-        .file_name
-        .clone()
-        .unwrap_or_else(|| "data.bin".to_string());
-
-    Builder::new().prefix(&file_name).keep(true).tempfile()?;
-
-    Ok(())
-}
-
-fn get_file_info(file: &FieldData<Bytes>) -> anyhow::Result<FileInfo> {
+fn get_file_info(file: &FieldData<Bytes>) -> std::result::Result<FileInfo, Box<dyn std::error::Error + Send + Sync>> {
     let file_type = {
         let cookie = magic::Cookie::open(magic::cookie::Flags::default())
-            .context("Failed to open magic cookie")?;
+            .map_err(|e| format!("Failed to open magic cookie: {}", e))?;
         let cookie = cookie.load(&DatabasePaths::default()).unwrap();
         cookie
             .buffer(&file.contents)
-            .context("Failed to analyze file type")?
+            .map_err(|e| format!("Failed to analyze file type: {}", e))?
     };
 
     Ok(FileInfo {
@@ -154,7 +149,7 @@ async fn create_task(
     let task = Task {
         id: None,
         target: file_info.name.to_string(),
-        timeout: request.timeout.unwrap_or(1),
+        timeout: request.timeout.unwrap_or(300),
         priority: request.priority.unwrap_or(1),
         platform: MachinePlatform::Linux,
         tags: request
