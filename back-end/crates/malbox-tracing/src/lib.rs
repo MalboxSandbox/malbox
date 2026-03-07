@@ -64,7 +64,7 @@ pub fn init_tracing(log_level: &str) {
         .with_ansi(true);
 
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("malbox={}", log_level)));
+        .unwrap_or_else(|_| EnvFilter::new(format!("malbox={},libvirt={}", log_level, log_level)));
 
     tracing_subscriber::registry()
         .with(env_filter)
