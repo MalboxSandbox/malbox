@@ -25,7 +25,11 @@ impl SampleStore {
         if sha256.len() < 4 {
             return Err(StorageError::InvalidHash(sha256.len()));
         }
-        Ok(self.base_dir.join(&sha256[0..2]).join(&sha256[2..4]).join(sha256))
+        Ok(self
+            .base_dir
+            .join(&sha256[0..2])
+            .join(&sha256[2..4])
+            .join(sha256))
     }
 
     /// Check whether a sample exists on disk.
@@ -46,7 +50,9 @@ impl SampleStore {
             return Ok(dest);
         }
 
-        let parent = dest.parent().expect("content-addressed path always has a parent");
+        let parent = dest
+            .parent()
+            .expect("content-addressed path always has a parent");
         tokio::fs::create_dir_all(parent).await?;
 
         // Atomic write: tempfile in the same directory, then rename.

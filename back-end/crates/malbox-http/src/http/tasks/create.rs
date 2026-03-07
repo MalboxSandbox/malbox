@@ -13,7 +13,7 @@ use malbox_database::repositories::{
     samples::{Sample, SampleEntity, insert_sample},
     tasks::{Task, TaskState, insert_task},
 };
-use malbox_hashing::*;
+use malbox_utils::hashing::*;
 use time::{OffsetDateTime, PrimitiveDateTime};
 use tracing::info;
 

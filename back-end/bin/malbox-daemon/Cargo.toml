@@ -14,7 +14,7 @@ provisioner-native = ["dep:malbox-provisioner-native"]
 
 [dependencies]
 malbox-database = { path = "../../crates/malbox-database" }
-malbox-hashing = { path = "../../crates/malbox-hashing" }
+malbox-utils = { path = "../../crates/malbox-utils" }
 malbox-tracing.path = "../../crates/malbox-tracing"
 malbox-config = { path = "../../crates/malbox-config" }
 malbox-scheduler = { path = "../../crates/malbox-scheduler" }
@@ -22,7 +22,6 @@ malbox-http = { path = "../../crates/malbox-http" }
 malbox-machinery = { path = "../../crates/malbox-machinery" }
 malbox-resources = { path = "../../crates/malbox-resources" }
 malbox-plugin-internal = { path = "../../crates/malbox-plugin-internal" }
-malbox-storage = { path = "../../crates/malbox-storage" }
 
 # Provider implementations (optional, feature-gated)
 malbox-provider-libvirt = { path = "../../crates/malbox-provider-libvirt", optional = true }

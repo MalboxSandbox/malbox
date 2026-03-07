@@ -9,7 +9,7 @@ use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachineryManager, ResolvedTransport};
-use malbox_storage::SampleStore;
+use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;

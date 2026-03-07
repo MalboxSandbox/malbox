@@ -10,7 +10,7 @@ malbox-database = { path = "../malbox-database" }
 malbox-config = { path = "../malbox-config" }
 malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
-malbox-storage = { path = "../malbox-storage" }
+malbox-utils = { path = "../malbox-utils" }
 serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

@@ -6,7 +6,7 @@ use axum::{
 };
 use malbox_config::Config as MalboxConfig;
 use malbox_database::{PgPool, repositories::tasks::Task};
-use malbox_storage::SampleStore;
+use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;

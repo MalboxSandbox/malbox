@@ -28,7 +28,7 @@ use malbox_plugin_internal::transport::messages::events::{
 };
 use malbox_plugin_internal::transport::traits::TransportEmitter;
 use malbox_resources::{MachineryManager, ResolvedTransport};
-use malbox_storage::SampleStore;
+use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;

@@ -9,7 +9,7 @@ use malbox_plugin_internal::transport::ipc::{
 };
 use malbox_resources::{MachineryManager, OnDemandManager, PooledManager, resolve_transport};
 use malbox_scheduler::init_scheduler;
-use malbox_storage::SampleStore;
+use malbox_utils::SampleStore;
 use std::sync::Arc;
 
 pub mod error;

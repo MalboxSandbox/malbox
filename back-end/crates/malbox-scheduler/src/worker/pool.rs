@@ -9,7 +9,7 @@ use crate::task::store::TaskStore;
 use malbox_config::MachineryConfig;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachineryManager, ResolvedTransport};
-use malbox_storage::SampleStore;
+use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
