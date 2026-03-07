@@ -1,0 +1,11 @@
+[package]
+name = "guest-yara-scanner"
+version = "0.1.0"
+edition = "2024"
+description = "Example guest plugin that scans samples with YARA-like rules"
+publish = false
+
+[dependencies]
+malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["guest"] }
+malbox-tracing = { path = "../../../crates/malbox-tracing" }
+tracing = "0.1"

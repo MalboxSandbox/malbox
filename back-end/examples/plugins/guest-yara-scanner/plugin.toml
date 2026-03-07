@@ -1,0 +1,17 @@
+[plugin]
+name = "guest-yara-scanner"
+version = "0.1.0"
+description = "Scans samples inside the guest VM using signature-based rules"
+authors = ["Malbox Team"]
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+
+[results.yara_matches]
+description = "Matched YARA rule names and metadata"
+user_visible = true
+display_name = "YARA Matches"
+render = "json"
+
+[events]
+subscribe = ["TaskCreated", "TaskStarting"]

@@ -1,0 +1,12 @@
+[package]
+name = "host-file-info"
+version = "0.1.0"
+edition = "2024"
+description = "Example host plugin that extracts basic file information"
+publish = false
+
+[dependencies]
+malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk" }
+malbox-tracing = { path = "../../../crates/malbox-tracing" }
+tracing = "0.1"
+sha2 = "0.10"
