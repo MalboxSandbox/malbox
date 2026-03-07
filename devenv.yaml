@@ -1,4 +1,6 @@
 inputs:
+  git-hooks:
+    url: github:cachix/git-hooks.nix
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
   nixpkgs-unstable:
@@ -8,9 +10,8 @@ inputs:
     inputs:
       nixpkgs:
         follows: nixpkgs
-imports:
-  - ./front-end
-  - ./back-end
-  - ./docs
-
 allowUnfree: true
+imports:
+- ./front-end
+- ./back-end
+- ./docs
