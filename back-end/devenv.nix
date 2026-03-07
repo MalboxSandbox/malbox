@@ -38,15 +38,14 @@ in {
     dtc
     zlib
     pixman
-    python311Packages.sphinx
-    python311Packages.sphinx-rtd-theme
-    python311Packages.ninja
     llvm_18
     libllvm
+    libvirt
     clang_18
     glibc
     packer
-    terraform
+    ansible
+    python3Packages.pywinrm
     unstable.cocogitto
     protoc-gen-rust
     protobuf
