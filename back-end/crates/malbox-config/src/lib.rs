@@ -4,14 +4,21 @@ use tracing::info;
 
 pub mod core;
 pub mod error;
+pub mod guest_access;
 pub mod machinery;
-pub mod profiles;
+pub mod plugins;
+pub mod providers;
+pub mod provisioning;
 pub mod storage;
-pub mod templates;
 pub mod types;
 
 pub use core::Config;
 pub use error::ConfigError;
+pub use machinery::{MachineryConfig, ManagerType};
+pub use providers::ProvidersConfig;
+pub use provisioning::ProvisioningConfig;
+pub use guest_access::GuestAccessConfig;
+pub use plugins::PluginsConfig;
 pub use storage::PathConfig;
 pub use types::*;
 
@@ -54,8 +61,6 @@ async fn load_config_internal() -> Result<Config, ConfigError> {
     config.paths.ensure_dirs_exist().await?;
     tracing::debug!("Using paths: {:#?}", config.paths);
 
-    load_provider_config(&mut config).await?;
-
     Ok(config)
 }
 
@@ -75,12 +80,4 @@ fn find_system_config() -> Option<PathBuf> {
     } else {
         None
     }
-}
-
-async fn load_provider_config(config: &mut Config) -> Result<(), ConfigError> {
-    let provider_type = config.general.provider.to_string();
-    let provider_config =
-        machinery::MachineryConfig::load(&config.paths.terraform_dir, &provider_type).await?;
-    config.machinery = provider_config;
-    Ok(())
 }

@@ -9,14 +9,12 @@ pub enum ConfigError {
     Parse { file: String, error: String },
     #[error("Invalid value for {field}: {message}")]
     InvalidValue { field: String, message: String },
-    #[error("Required environment variable {0} not set")]
-    EnvVarNotSet(String),
     #[error("Provider {0} not configured")]
     ProviderNotConfigured(String),
-    #[error("Profile {0} not found")]
-    ProfileNotFound(String),
-    #[error("Template {0} not found")]
-    TemplateNotFound(String),
+    #[error("Provider {0} not enabled")]
+    ProviderNotEnabled(String),
+    #[error("Invalid provider config for {provider}: {error}")]
+    InvalidProviderConfig { provider: String, error: String },
     #[error("Path error: {message} for {path}")]
     PathError { message: String, path: PathBuf },
     #[error("Io error: {0}")]
@@ -27,24 +25,6 @@ pub enum ConfigError {
     TomlDe(#[from] toml::de::Error),
     #[error("Internal error: {0}")]
     Internal(String),
-}
-
-impl ConfigError {
-    pub fn is_not_found(&self) -> bool {
-        matches!(self, ConfigError::NotFound)
-    }
-
-    pub fn is_invalid_value(&self) -> bool {
-        matches!(self, ConfigError::InvalidValue { .. })
-    }
-
-    pub fn is_parse_error(&self) -> bool {
-        matches!(self, ConfigError::Parse { .. })
-    }
-
-    pub fn is_provider_error(&self) -> bool {
-        matches!(self, ConfigError::ProviderNotConfigured(_))
-    }
 }
 
 pub type Result<T> = std::result::Result<T, ConfigError>;

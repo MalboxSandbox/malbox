@@ -1,37 +1,40 @@
-use crate::Provider;
 use crate::{
-    Environment, LogLevel, PathConfig, machinery::MachineryConfig, profiles::ProfileConfig,
+    Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig,
+    machinery::MachineryConfig, plugins::PluginsConfig, providers::ProvidersConfig,
+    provisioning::ProvisioningConfig,
 };
-use bon::Builder;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub paths: PathConfig,
     pub general: GeneralConfig,
     pub http: HttpConfig,
     pub database: DatabaseConfig,
-    pub machinery: MachineryConfig,
-    pub profiles: ProfileConfig,
-    pub analysis: AnalysisConfig,
     #[serde(default)]
-    pub variables: HashMap<String, String>,
+    pub providers: ProvidersConfig,
+    pub machinery: MachineryConfig,
+    #[serde(default)]
+    pub provisioning: Option<ProvisioningConfig>,
+    #[serde(default)]
+    pub guest_access: Option<GuestAccessConfig>,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
+    pub analysis: AnalysisConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     pub environment: Environment,
-    pub provider: Provider,
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
-    #[builder(default = false)]
+    #[serde(default)]
     pub debug: bool,
-    #[builder(default = 4)]
+    #[serde(default = "default_worker_threads")]
     pub worker_threads: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpConfig {
     pub host: String,
     pub port: u16,
@@ -45,21 +48,13 @@ pub struct HttpConfig {
     pub max_upload_size: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
-    // pub username: String,
-    // pub password: Option<String>,
-    // pub password_env: Option<String>,
-    // pub database: String,
-    // #[serde(default = 10)]
-    // pub max_connections: u32,
-    // #[serde(default = true)]
-    // pub ssl_enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisConfig {
     pub timeout: u32,
     pub max_vms: u32,
@@ -68,7 +63,7 @@ pub struct AnalysisConfig {
     pub linux: PlatformAnalysisConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformAnalysisConfig {
     pub default_profile: String,
     pub timeout: Option<u32>,
@@ -77,4 +72,8 @@ pub struct PlatformAnalysisConfig {
 
 fn default_log_level() -> LogLevel {
     LogLevel::Info
+}
+
+fn default_worker_threads() -> usize {
+    4
 }

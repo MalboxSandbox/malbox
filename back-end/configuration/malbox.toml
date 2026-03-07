@@ -1,118 +1,154 @@
+# =============================================================================
+# Malbox Configuration
+# =============================================================================
+#
+# Copy this file to ~/.config/malbox/malbox.toml and adjust values as needed.
+# Fields with defaults are commented out — uncomment to override.
+
+# -----------------------------------------------------------------------------
+# Paths
+# -----------------------------------------------------------------------------
+# All paths default to XDG directories (~/.config/malbox, ~/.cache/malbox, etc.)
+# Uncomment to override.
+
+[paths]
+# config_dir = "/home/user/.config/malbox"
+# cache_dir = "/home/user/.cache/malbox"
+# data_dir = "/home/user/.local/share/malbox"
+# state_dir = "/home/user/.local/state/malbox"
+
+# -----------------------------------------------------------------------------
+# General
+# -----------------------------------------------------------------------------
+
+[general]
+# Environment: "development", "staging", or "production"
+environment = "development"
+# Log level: "error", "warn", "info", "debug", or "trace" (default: "info")
+# log_level = "info"
+# Enable debug mode
+# debug = false
+# Number of worker threads for task processing (default: 4)
+# worker_threads = 4
+
+# -----------------------------------------------------------------------------
+# HTTP Server
+# -----------------------------------------------------------------------------
+
 [http]
 host = "127.0.0.1"
-port = 5000
+port = 8080
+# tls_enabled = false
+# cert_path = "/path/to/cert.pem"
+# key_path = "/path/to/key.pem"
+# CORS origins allowed to access the API
+# cors_origins = ["http://localhost:5173"]
+# Maximum upload size in bytes (default: 0 = unlimited)
+# max_upload_size = 104857600
+
+# -----------------------------------------------------------------------------
+# Database
+# -----------------------------------------------------------------------------
 
 [database]
-host = "postgresql://postgres:password@localhost/malbox_db"
+host = "postgresql://postgres@localhost:5432/malbox_db"
 port = 5432
 
-[debug]
-rust_log = "malbox=debug"
+# -----------------------------------------------------------------------------
+# Providers
+# -----------------------------------------------------------------------------
+# Providers must be compiled into the daemon via Cargo features.
+# Each enabled provider needs a corresponding [providers.<name>] section.
 
-[templates]
-# NOTE: Optional, default will be in configuration_root/templates
-base_path = "./templates" 
+[providers]
+enabled = ["libvirt"]
+# default = "libvirt"
 
-[infrastructure]
-# NOTE: "kvm", "virtualbox" etc.. no defaults
-provider = "vmware" 
-# NOTE: "prod", default will be "prod"
-environment = "dev"
+# Libvirt/KVM provider configuration
+[providers.libvirt]
+uri = "qemu:///system"
+# storage_pool = "default"
+
+# -----------------------------------------------------------------------------
+# Machinery
+# -----------------------------------------------------------------------------
+
+[machinery]
+# Manager type: "ondemand" or "pooled" (default: "ondemand")
+# "ondemand" — allocates a new VM per task, works with any provider.
+# "pooled"   — pre-allocates VMs and restores snapshots between tasks.
+#              Requires the provider to support the Snapshot capability.
+manager = "ondemand"
+
+[machinery.defaults]
+# Default resources for allocated machines
+# cpus = 2
+# memory = 2048
+# video_memory = 128
+
+# Path to a golden qcow2 image used as a read-only backing file.
+# Each machine gets a copy-on-write overlay; the golden image is never modified.
+# When unset, machines are created with blank disks.
+# base_image = "/path/to/your/golden-image.qcow2"
+
+# Pool settings (only used when manager = "pooled")
+[machinery.pool]
+# min_size = 1
+# max_size = 5
+# clean_snapshot_name = "clean"
+
+# -----------------------------------------------------------------------------
+# Provisioning (optional)
+# -----------------------------------------------------------------------------
+# When configured, machines are provisioned after allocation.
+# Uncomment to enable.
+
+# [provisioning]
+# type = "ansible"
+# [provisioning.config]
+# playbook = "playbooks/setup.yml"
+
+# -----------------------------------------------------------------------------
+# Guest Access (optional)
+# -----------------------------------------------------------------------------
+# Configures how the daemon communicates with guest VMs for file transfer
+# and command execution. The transport is resolved against the provider's
+# native capabilities first, then standalone transports.
+# When omitted, guest access is disabled and tasks requiring it will fail.
+
+# [guest_access]
+# transport = "virtio-serial"    # or "grpc", "qemu-guest-agent", etc.
+# [guest_access.config]
+# Transport-specific configuration goes here.
+# e.g., for grpc:
+# port = 9500
+
+# -----------------------------------------------------------------------------
+# Plugins
+# -----------------------------------------------------------------------------
+# Directory containing plugin subdirectories. Each subdirectory should contain
+# a plugin.toml manifest and the plugin binary.
+
+[plugins]
+# directory = "/home/user/.config/malbox/plugins"
+# watch = true
+
+# -----------------------------------------------------------------------------
+# Analysis
+# -----------------------------------------------------------------------------
 
 [analysis]
 timeout = 300
-max_vms = 10
-# NOTE: A default profile to choose if malbox couldn't find out the platform/profile to use
-default_profile = "default/linux" 
+max_vms = 5
+default_profile = "default"
 
 [analysis.windows]
-default_profile = "default/windows"
-
-# NOTE: You can override max_vms and timeout with:
-# timeout = 150
+default_profile = "win10_default"
+# Per-platform overrides (optional)
+# timeout = 300
 # max_vms = 3
 
 [analysis.linux]
-default_profile = "default/linux"
-# NOTE: You can override max_vms and timeout with:
-# timeout = 150
-# max_vms = 3
-
-[paths]
-config_dir = "/home/shard/.config/malbox/"
-cache_dir = "/home/shard/Downloads/malbox"
-data_dir = "/home/shard/Downloads/malbox/data_dir/"
-state_dir = "/home/shard/Downloads/malbox/state_dir/"
-templates_dir = "/home/shard/.config/malbox/templates/"
-terraform_dir = "/home/shard/.config/malbox/terraform/"
-packer_dir = "/home/shard/.config/malbox/packer/"
-ansible_dir = "/home/shard/.config/malbox/ansible/"
-images_dir = "/home/shard/.config/malbox/images/"
-
-[general]
-environment = "development"
-provider = "kvm"
-debug = true
-worker_threads = 4
-
-[machinery.provider]
-name = "test"
-type = "kvm"
-uri = "test"
-cpus = 4
-memory = 32
-video_memory = 32
-
-[machinery.provider.network]
-name = "testnet"
-interface = "wlo1"
-address_range = "10.10.10.0"
-bridge = ""
-nat_enabled = false
-
-[machinery.provider.storage]
-path = "/home/shard/Downloads/malbox/"
-storage_type = "Raw"
-default_size_gb = 32
-bus = "virtio"
-
-[[machinery.provider.machines]]
-name = "test"
-platform = "windows"
-arch = "X64"
-ip = "10.10.10.1"
-reserved = true
-cpus = 4
-memory = 4096
-
-[machinery.terraform]
-state_dir = "/home/shard/Downloads/malbox/state_dir/"
-variables = { var1 = "test", var2 = "test" }
-backend_config = { test = "test" }
-
-
-[profiles.defaults.default_profile]
-name = "default"
-description = "test"
-platform = "windows"
-timeout = 300
-max_vms = 32
-analysis_options = { test = "test" }
-network_isolated = true
-environment_vars = { test = "test" }
-
-[[profiles.defaults.default_profile.tools]]
-name = "x64dbg"
-version = "10.0.0"
-env_vars = { test = "test" }
-source = { type = "url", url = "https://example.com/tool", checksum = "abc123" }
-
-
-
-[profiles.defaults.default_profile.result_server]
-ip = "182.19.23.22"
-port = 3248
-protocol = "https"
-
-
-
+default_profile = "ubuntu_default"
+# timeout = 300
+# max_vms = 2

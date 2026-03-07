@@ -1,99 +1,149 @@
-use crate::ConfigError;
-use bon::Builder;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path};
 
-pub mod kvm;
-pub mod virtualbox;
-pub mod vmware;
-
-pub use kvm::KvmConfig;
-pub use virtualbox::VirtualBoxConfig;
-pub use vmware::VmwareConfig;
-
+/// Generic machinery configuration.
+///
+/// This configuration applies to all providers and defines defaults for
+/// machine allocation, pooling, and infrastructure management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ProviderConfig {
-    #[serde(rename = "vmware")]
-    Vmware(VmwareConfig),
-    #[serde(rename = "kvm")]
-    Kvm(KvmConfig),
-    #[serde(rename = "virtualbox")]
-    VirtualBox(VirtualBoxConfig),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct MachineryConfig {
-    pub provider: ProviderConfig,
-    #[builder(default)]
-    pub terraform: TerraformConfig,
+    /// Manager type to use for machine allocation
+    #[serde(default)]
+    pub manager: ManagerType,
+
+    /// Default machine specifications
+    #[serde(default)]
+    pub defaults: MachineDefaults,
+
+    /// Machine pooling configuration (for snapshot-capable providers)
+    #[serde(default)]
+    pub pool: PoolConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder, Default)]
-pub struct TerraformConfig {
-    #[builder(default = "./machinery/terraform".to_string())]
-    pub state_dir: String,
-    #[builder(default)]
-    pub variables: HashMap<String, String>,
-    #[builder(default)]
-    pub backend_config: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-pub struct MachineConfig {
-    pub name: String,
-    pub label: Option<String>,
-    pub platform: crate::types::Platform,
-    #[builder(default = MachineArch::X64)]
-    pub arch: MachineArch,
-    pub ip: String,
-    pub tags: Option<Vec<String>>,
-    pub snapshot: Option<String>,
-    pub interface: Option<String>,
-    pub result_server: Option<ResultServer>,
-    #[builder(default = false)]
-    pub reserved: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum MachineArch {
-    X86,
-    X64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-pub struct ResultServer {
-    pub ip: String,
-    pub port: u16,
-}
-
-pub trait MachineProvider {
-    fn get_machines(&self) -> &[MachineConfig];
-}
-
-impl MachineryConfig {
-    pub async fn load(config_root: &Path, provider_type: &str) -> Result<Self, ConfigError> {
-        let provider_path = config_root
-            .join("providers")
-            .join(provider_type)
-            .join(format!("{}.default.toml", provider_type));
-
-        tracing::debug!("current path: {:#?}", provider_path);
-
-        let content = tokio::fs::read_to_string(&provider_path)
-            .await
-            .map_err(ConfigError::from)?;
-
-        let provider: ProviderConfig =
-            toml::from_str(&content).map_err(|e| ConfigError::Parse {
-                file: provider_path.display().to_string(),
-                error: e.to_string(),
-            })?;
-
-        Ok(Self::builder().provider(provider).build())
+impl Default for MachineryConfig {
+    fn default() -> Self {
+        Self {
+            manager: ManagerType::default(),
+            defaults: MachineDefaults::default(),
+            pool: PoolConfig::default(),
+        }
     }
+}
 
-    pub fn get_provider_config(&self) -> Result<&ProviderConfig, ConfigError> {
-        Ok(&self.provider)
+/// Manager type for machine allocation.
+///
+/// Determines the strategy used to allocate and manage machines.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ManagerType {
+    /// Pooled manager - uses pre-allocated machines with snapshot restoration.
+    /// Requires provider to support Snapshot capability.
+    Pooled,
+
+    /// On-demand manager - allocates and provisions machines as needed.
+    /// Works with any provider.
+    OnDemand,
+}
+
+impl Default for ManagerType {
+    fn default() -> Self {
+        Self::OnDemand
     }
+}
+
+impl std::fmt::Display for ManagerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pooled => write!(f, "pooled"),
+            Self::OnDemand => write!(f, "on-demand"),
+        }
+    }
+}
+
+/// Default machine specifications.
+///
+/// These settings apply to all machines unless overridden by provider-specific config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MachineDefaults {
+    /// Number of virtual CPUs
+    #[serde(default = "default_cpus")]
+    pub cpus: u32,
+
+    /// Memory in megabytes
+    #[serde(default = "default_memory")]
+    pub memory: u64,
+
+    /// Video memory in megabytes
+    #[serde(default = "default_video_memory")]
+    pub video_memory: u64,
+
+    /// Path to a golden qcow2 image used as a read-only backing file.
+    /// Each machine gets a copy-on-write overlay; the golden image is never modified.
+    /// When None, machines are created with blank disks.
+    #[serde(default)]
+    pub base_image: Option<String>,
+}
+
+impl Default for MachineDefaults {
+    fn default() -> Self {
+        Self {
+            cpus: 2,
+            memory: 2048,
+            video_memory: 128,
+            base_image: None,
+        }
+    }
+}
+
+/// Machine pool configuration.
+///
+/// Pools maintain pre-allocated machines for fast allocation.
+/// Only used with snapshot-capable providers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolConfig {
+    /// Minimum number of machines to keep in the pool
+    #[serde(default = "default_min_size")]
+    pub min_size: usize,
+
+    /// Maximum number of machines allowed in the pool
+    #[serde(default = "default_max_size")]
+    pub max_size: usize,
+
+    /// Name of the clean snapshot to restore between uses
+    #[serde(default = "default_snapshot_name")]
+    pub clean_snapshot_name: String,
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            min_size: 1,
+            max_size: 5,
+            clean_snapshot_name: "clean".to_string(),
+        }
+    }
+}
+
+// Default value functions
+fn default_cpus() -> u32 {
+    2
+}
+
+fn default_memory() -> u64 {
+    2048
+}
+
+fn default_video_memory() -> u64 {
+    128
+}
+
+fn default_min_size() -> usize {
+    1
+}
+
+fn default_max_size() -> usize {
+    5
+}
+
+fn default_snapshot_name() -> String {
+    "clean".to_string()
 }

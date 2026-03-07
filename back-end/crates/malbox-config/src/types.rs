@@ -15,20 +15,6 @@ impl_display_fromstr!(Platform,
     Linux => "linux"
 );
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    Vmware,
-    VirtualBox,
-    Kvm,
-}
-
-impl_display_fromstr!(Provider,
-    Vmware => "vmware",
-    VirtualBox => "virtualbox",
-    Kvm => "kvm"
-);
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Environment {

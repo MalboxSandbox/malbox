@@ -12,14 +12,6 @@ pub struct PathConfig {
     pub data_dir: PathBuf,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
-    #[serde(default = "default_terraform_dir")]
-    pub terraform_dir: PathBuf,
-    #[serde(default = "default_packer_dir")]
-    pub packer_dir: PathBuf,
-    #[serde(default = "default_ansible_dir")]
-    pub ansible_dir: PathBuf,
-    #[serde(default = "default_download_dir")]
-    pub download_dir: PathBuf,
 }
 
 // NOTE: Should probably be handled somewhere else, not malbox-config
@@ -31,10 +23,6 @@ impl PathConfig {
                 cache_dir: proj_dirs.cache_dir().to_path_buf(),
                 data_dir: proj_dirs.data_dir().to_path_buf(),
                 state_dir: proj_dirs.state_dir().unwrap().to_path_buf(),
-                terraform_dir: default_terraform_dir(),
-                packer_dir: default_packer_dir(),
-                ansible_dir: default_ansible_dir(),
-                download_dir: default_download_dir(),
             })
         } else {
             Err(ConfigError::PathError {
@@ -50,10 +38,6 @@ impl PathConfig {
             &self.cache_dir,
             &self.data_dir,
             &self.state_dir,
-            &self.terraform_dir,
-            &self.packer_dir,
-            &self.ansible_dir,
-            &self.download_dir,
         ] {
             tokio::fs::create_dir_all(dir)
                 .await
@@ -96,20 +80,4 @@ fn default_state_dir() -> PathBuf {
     } else {
         PathBuf::from("/var/lib/malbox/state")
     }
-}
-
-fn default_terraform_dir() -> PathBuf {
-    default_config_dir().join("infrastructure/terraform")
-}
-
-fn default_packer_dir() -> PathBuf {
-    default_config_dir().join("infrastructure/packer")
-}
-
-fn default_ansible_dir() -> PathBuf {
-    default_config_dir().join("infrastructure/ansible")
-}
-
-fn default_download_dir() -> PathBuf {
-    default_config_dir().join("downloads")
 }
