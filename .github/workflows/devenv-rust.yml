@@ -5,16 +5,16 @@ on:
     branches: ["main", "dev*"]
     paths:
       - 'back-end/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/devenv-rs-rust.yml'
+      - '.github/workflows/devenv-rust.yml'
   pull_request:
     branches: ["main", "dev*"]
     paths:
       - 'back-end/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/devenv-rs-rust.yml'
+      - '.github/workflows/devenv-rust.yml'
+
+defaults:
+  run:
+    working-directory: back-end
 
 jobs:
   build:
@@ -29,12 +29,13 @@ jobs:
 
     - name: Install devenv
       run: nix profile install nixpkgs#devenv
+      working-directory: .
 
     - name: Run rustfmt
       run: devenv shell -- cargo fmt --all -- --check
 
     # - name: Run linter
-    # run: devenv shell -- cargo clippy --all-targets --all -- -D warnings
+    #   run: devenv shell -- cargo clippy --all-targets --all -- -D warnings
 
     - name: Build project
       run: SQLX_OFFLINE=true devenv shell -- cargo build --verbose
