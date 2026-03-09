@@ -12,10 +12,6 @@ on:
       - 'back-end/**'
       - '.github/workflows/devenv-rust.yml'
 
-defaults:
-  run:
-    working-directory: back-end
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,22 +25,21 @@ jobs:
 
     - name: Install devenv
       run: nix profile install nixpkgs#devenv
-      working-directory: .
 
     - name: Run rustfmt
-      run: devenv shell -- cargo fmt --all -- --check
+      run: devenv shell -- cargo fmt --all --manifest-path back-end/Cargo.toml -- --check
 
     # - name: Run linter
-    #   run: devenv shell -- cargo clippy --all-targets --all -- -D warnings
+    #   run: devenv shell -- cargo clippy --manifest-path back-end/Cargo.toml --all-targets --all -- -D warnings
 
     - name: Build project
-      run: SQLX_OFFLINE=true devenv shell -- cargo build --verbose
+      run: SQLX_OFFLINE=true devenv shell -- cargo build --manifest-path back-end/Cargo.toml --verbose
 
     - name: Tests
-      run: SQLX_OFFLINE=true devenv shell -- cargo nextest run --all --no-tests pass
+      run: SQLX_OFFLINE=true devenv shell -- cargo nextest run --manifest-path back-end/Cargo.toml --all --no-tests pass
 
     - name: Doctests
-      run: SQLX_OFFLINE=true devenv shell -- cargo test --doc
+      run: SQLX_OFFLINE=true devenv shell -- cargo test --manifest-path back-end/Cargo.toml --doc
 
     - name: Generate documentation
-      run: SQLX_OFFLINE=true devenv shell -- cargo doc --no-deps --document-private-items
+      run: SQLX_OFFLINE=true devenv shell -- cargo doc --manifest-path back-end/Cargo.toml --no-deps --document-private-items
