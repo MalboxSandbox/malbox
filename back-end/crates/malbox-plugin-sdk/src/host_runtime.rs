@@ -137,14 +137,12 @@ where
                 self.plugin
                     .__handle_task_lifecycle_event(task_event, task_payload, ctx)
             }
-            (Event::Plugin(plugin_event), Payload::Plugin(plugin_payload)) => {
-                self.plugin
-                    .__handle_plugin_event(plugin_event, plugin_payload, ctx)
-            }
-            (Event::Sample(sample_event), Payload::Sample(sample_payload)) => {
-                self.plugin
-                    .__handle_sample_event(sample_event, sample_payload, ctx)
-            }
+            (Event::Plugin(plugin_event), Payload::Plugin(plugin_payload)) => self
+                .plugin
+                .__handle_plugin_event(plugin_event, plugin_payload, ctx),
+            (Event::Sample(sample_event), Payload::Sample(sample_payload)) => self
+                .plugin
+                .__handle_sample_event(sample_event, sample_payload, ctx),
             (Event::Daemon(daemon_event), _) => {
                 if matches!(daemon_event, DaemonEvent::DaemonShutdown) {
                     self.shutdown.store(true, Ordering::Relaxed);

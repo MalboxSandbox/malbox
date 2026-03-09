@@ -83,9 +83,7 @@ pub fn deserialize_config<T: serde::de::DeserializeOwned>(
 pub fn init_tracing() {
     // Use MALBOX_LOG env var, fallback to "info"
     let filter = std::env::var("MALBOX_LOG").unwrap_or_else(|_| "info".to_string());
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .finish();
+    let subscriber = tracing_subscriber::fmt().with_env_filter(filter).finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
 

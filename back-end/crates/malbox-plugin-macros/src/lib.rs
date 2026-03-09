@@ -10,11 +10,10 @@
 //!
 //! See the [`malbox_plugin_sdk`] crate documentation for a full usage guide.
 
+mod codegen;
+mod handlers_impl;
 mod metadata;
 mod plugin_attr;
-mod handler_attr;
-mod handlers_impl;
-mod codegen;
 
 use proc_macro::TokenStream;
 
