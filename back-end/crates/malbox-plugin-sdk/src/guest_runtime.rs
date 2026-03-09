@@ -1,12 +1,17 @@
-//! Guest plugin runtime — bridges the `Plugin` trait to a gRPC server.
+//! Guest plugin runtime — bridges internal handler traits to a gRPC server.
 //!
-//! Unlike the IPC-based `PluginRuntime` which polls for events, the guest
+//! Unlike the IPC-based host runtime which polls for events, the guest
 //! runtime is reactive: the daemon calls RPCs on the plugin's gRPC server,
-//! and each RPC handler delegates to the user's `Plugin` implementation
+//! and each RPC handler delegates to the user's handler trait implementations
 //! via `tokio::task::spawn_blocking`.
 
+use crate::context::Context;
 use crate::error::{Result, SdkError};
-use crate::plugin::{EventContext, Plugin};
+use crate::internal::{
+    DaemonEventHandler, PluginEventHandler, SampleEventHandler, StartHandler, StopHandler,
+    TaskEventHandler, TaskHandler,
+};
+use crate::types::Task;
 
 use malbox_plugin_transport::grpc::proto;
 use malbox_plugin_transport::messages::events::*;
@@ -39,17 +44,29 @@ impl Default for GuestRuntimeConfig {
     }
 }
 
-/// Runtime that exposes a `Plugin` implementation as a gRPC server.
+/// Runtime that exposes a plugin as a gRPC server using internal handler traits.
 ///
 /// The daemon connects to this server to initialize, execute tasks, send
-/// events, and request shutdown. All `Plugin` trait methods are called from
+/// events, and request shutdown. All handler trait methods are called from
 /// blocking threads via `spawn_blocking`.
-pub struct GuestPluginRuntime<P: Plugin + Send + Sync + 'static> {
+pub struct GuestPluginRuntime<P: Send + Sync + 'static> {
     plugin: Arc<P>,
     config: GuestRuntimeConfig,
 }
 
-impl<P: Plugin + Send + Sync + 'static> GuestPluginRuntime<P> {
+impl<P> GuestPluginRuntime<P>
+where
+    P: TaskHandler
+        + StartHandler
+        + StopHandler
+        + DaemonEventHandler
+        + TaskEventHandler
+        + PluginEventHandler
+        + SampleEventHandler
+        + Send
+        + Sync
+        + 'static,
+{
     /// Create a guest runtime with default config (listens on `0.0.0.0:50051`).
     pub fn new(plugin: P) -> Self {
         Self::with_config(plugin, GuestRuntimeConfig::default())
@@ -60,6 +77,15 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginRuntime<P> {
         Self {
             plugin: Arc::new(plugin),
             config,
+        }
+    }
+
+    /// Create a guest runtime using the new internal handler traits.
+    /// Used by generated `main()` from `#[malbox::guest_plugin]`.
+    pub fn new_v2(plugin: P, _meta: crate::types::PluginMeta) -> Self {
+        Self {
+            plugin: Arc::new(plugin),
+            config: GuestRuntimeConfig::default(),
         }
     }
 
@@ -107,30 +133,38 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginRuntime<P> {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge: GuestPluginHandler -> Plugin trait
+// Bridge: GuestPluginHandler -> Internal handler traits
 // ---------------------------------------------------------------------------
 
-struct GuestPluginBridge<P: Plugin + Send + Sync + 'static> {
+struct GuestPluginBridge<P: Send + Sync + 'static> {
     plugin: Arc<P>,
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     work_dir: PathBuf,
 }
 
 #[tonic::async_trait]
-impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge<P> {
+impl<P> GuestPluginHandler for GuestPluginBridge<P>
+where
+    P: TaskHandler
+        + StartHandler
+        + StopHandler
+        + DaemonEventHandler
+        + TaskEventHandler
+        + PluginEventHandler
+        + SampleEventHandler
+        + Send
+        + Sync
+        + 'static,
+{
     async fn on_initialize(
         &self,
         _plugin_id: i32,
-        _config: HashMap<String, String>,
+        config: HashMap<String, String>,
     ) -> std::result::Result<Vec<String>, String> {
         let plugin = self.plugin.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let emitter = GrpcEmitter::noop();
-            let ctx = EventContext::new(&emitter);
-            plugin.on_start(&ctx)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
+        let result = tokio::task::spawn_blocking(move || plugin.__handle_start(config))
+            .await
+            .map_err(|e| format!("spawn_blocking panicked: {}", e))?;
 
         match result {
             Ok(()) => Ok(vec![]),
@@ -145,9 +179,7 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
     async fn on_shutdown(&self, _graceful: bool) {
         let plugin = self.plugin.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            let emitter = GrpcEmitter::noop();
-            let ctx = EventContext::new(&emitter);
-            if let Err(e) = plugin.on_stop(&ctx) {
+            if let Err(e) = plugin.__handle_stop() {
                 error!("Plugin on_stop error: {}", e);
             }
         })
@@ -164,20 +196,27 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
     async fn on_execute_task(
         &self,
         task_id: i32,
-        _sample_path: String,
-        _config: HashMap<String, String>,
+        sample_path: String,
+        config: HashMap<String, String>,
         result_tx: mpsc::Sender<std::result::Result<proto::TaskResult, Status>>,
     ) {
         let plugin = self.plugin.clone();
         let _ = tokio::task::spawn_blocking(move || {
             let emitter = GrpcEmitter::with_task(task_id, result_tx);
-            let ctx = EventContext::new(&emitter);
+            let ctx = Context::new(&emitter);
 
-            let event = TaskEvent::TaskStarting;
-            let payload = TaskEventPayload { task_id };
+            let task = Task::new(task_id, PathBuf::from(sample_path), config);
 
-            if let Err(e) = plugin.on_task_event(event, payload, &ctx) {
-                error!("Plugin on_task_event error: {}", e);
+            match plugin.__handle_task(task, &ctx) {
+                Ok(results) => {
+                    for result in &results {
+                        tracing::debug!("Produced result: {}", result.name());
+                    }
+                    // TODO: stream results back via emitter
+                }
+                Err(e) => {
+                    error!("Plugin task handler error: {}", e);
+                }
             }
             // Channel drops here, closing the stream
         })
@@ -188,7 +227,7 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
         let plugin = self.plugin.clone();
         let result = tokio::task::spawn_blocking(move || {
             let emitter = GrpcEmitter::noop();
-            let ctx = EventContext::new(&emitter);
+            let ctx = Context::new(&emitter);
             dispatch_event(&*plugin, event, payload, &ctx)
         })
         .await
@@ -263,24 +302,36 @@ impl<P: Plugin + Send + Sync + 'static> GuestPluginHandler for GuestPluginBridge
     }
 }
 
-/// Dispatch an event to the appropriate Plugin handler method.
-fn dispatch_event<P: Plugin>(
-    plugin: &P,
-    event: Event,
-    payload: Payload,
-    ctx: &EventContext,
-) -> Result<()> {
+/// Dispatch an event to the appropriate handler trait method.
+fn dispatch_event<P>(plugin: &P, event: Event, payload: Payload, ctx: &Context) -> Result<()>
+where
+    P: TaskHandler
+        + StartHandler
+        + StopHandler
+        + DaemonEventHandler
+        + TaskEventHandler
+        + PluginEventHandler
+        + SampleEventHandler,
+{
     match (event, payload) {
         (Event::Task(task_event), Payload::Task(task_payload)) => {
-            plugin.on_task_event(task_event, task_payload, ctx)
+            if matches!(task_event, TaskEvent::TaskStarting | TaskEvent::TaskCreated) {
+                let task = Task::new(task_payload.task_id, PathBuf::new(), HashMap::new());
+                let _results = plugin.__handle_task(task, ctx)?;
+            }
+            plugin.__handle_task_lifecycle_event(task_event, task_payload, ctx)
         }
         (Event::Plugin(plugin_event), Payload::Plugin(plugin_payload)) => {
-            plugin.on_plugin_event(plugin_event, plugin_payload, ctx)
+            plugin.__handle_plugin_event(plugin_event, plugin_payload, ctx)
         }
         (Event::Sample(sample_event), Payload::Sample(sample_payload)) => {
-            plugin.on_sample_event(sample_event, sample_payload, ctx)
+            plugin.__handle_sample_event(sample_event, sample_payload, ctx)
         }
-        (Event::Daemon(daemon_event), _) => plugin.on_daemon_event(daemon_event, ctx),
+        (Event::Daemon(daemon_event), _) => {
+            // DaemonShutdown is handled by the on_shutdown RPC, but still
+            // forward to the user's handler if they registered one.
+            plugin.__handle_daemon_event(daemon_event, ctx)
+        }
         _ => Ok(()),
     }
 }
@@ -328,13 +379,61 @@ fn resolve_path(work_dir: &Path, relative: &str) -> std::result::Result<PathBuf,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
-    // Helper: minimal Plugin impl for testing the bridge
+    // Helper: minimal plugin impl for testing the bridge
     struct NoopPlugin;
-    impl Plugin for NoopPlugin {
-        fn name(&self) -> &str {
-            "noop"
+    impl TaskHandler for NoopPlugin {
+        fn __handle_task(
+            &self,
+            _task: Task,
+            _ctx: &Context,
+        ) -> Result<Vec<crate::types::PluginResult>> {
+            Ok(vec![])
+        }
+    }
+    impl StartHandler for NoopPlugin {
+        fn __handle_start(&self, _raw_config: HashMap<String, String>) -> Result<()> {
+            Ok(())
+        }
+    }
+    impl StopHandler for NoopPlugin {
+        fn __handle_stop(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+    impl DaemonEventHandler for NoopPlugin {
+        fn __handle_daemon_event(&self, _event: DaemonEvent, _ctx: &Context) -> Result<()> {
+            Ok(())
+        }
+    }
+    impl TaskEventHandler for NoopPlugin {
+        fn __handle_task_lifecycle_event(
+            &self,
+            _event: TaskEvent,
+            _payload: TaskEventPayload,
+            _ctx: &Context,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+    impl PluginEventHandler for NoopPlugin {
+        fn __handle_plugin_event(
+            &self,
+            _event: PluginEvent,
+            _payload: PluginEventPayload,
+            _ctx: &Context,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+    impl SampleEventHandler for NoopPlugin {
+        fn __handle_sample_event(
+            &self,
+            _event: SampleEvent,
+            _payload: SampleEventPayload,
+            _ctx: &Context,
+        ) -> Result<()> {
+            Ok(())
         }
     }
 

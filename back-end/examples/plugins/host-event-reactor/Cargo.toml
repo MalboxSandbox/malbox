@@ -1,12 +1,11 @@
 [package]
-name = "host-file-info"
+name = "host-event-reactor"
 version = "0.1.0"
 edition = "2024"
-description = "Example host plugin that extracts basic file information"
+description = "Example host plugin that reacts to system events"
 authors = ["Malbox Team"]
 publish = false
 
 [dependencies]
 malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["host"] }
-sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }

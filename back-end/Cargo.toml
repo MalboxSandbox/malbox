@@ -7,6 +7,7 @@ members = [
 exclude = [
     "examples/plugins/host-file-info",
     "examples/plugins/guest-yara-scanner",
+    "examples/plugins/host-event-reactor",
 ]
 [workspace.dependencies]
 tokio = { version = "1.49.0", features = ["full", "fs"] }

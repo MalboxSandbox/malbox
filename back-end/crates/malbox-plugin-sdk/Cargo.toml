@@ -5,22 +5,24 @@ edition = "2024"
 description = "SDK for building Malbox analysis plugins"
 
 [features]
-default = []
+host = []
 guest = ["dep:tokio", "dep:tonic"]
 
 [dependencies]
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
+malbox-plugin-macros = { path = "../malbox-plugin-macros" }
 
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = "1"
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+#iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
 tokio = { workspace = true, optional = true }
 tonic = { version = "0.14", optional = true }
 
-tracing.workspace = true
-thiserror.workspace = true
-
-[[example]]
-name = "guest_echo_plugin"
-required-features = ["guest"]
-
 [dev-dependencies]
 malbox-tracing = { path = "../malbox-tracing" }
-tempfile = "3"
+tempfile = "3.26"
