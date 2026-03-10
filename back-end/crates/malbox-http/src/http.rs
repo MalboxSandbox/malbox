@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tower_http::trace::TraceLayer;
 
 mod error;
+mod images;
 mod tasks;
 
 pub use error::Error;
@@ -63,6 +64,7 @@ fn api_router() -> Router<AppState> {
         .route("/", get(root))
         .fallback(handler_404)
         .merge(tasks::create::router())
+        .merge(images::router())
 }
 
 async fn root() -> &'static str {
