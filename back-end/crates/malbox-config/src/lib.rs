@@ -17,7 +17,7 @@ pub use core::Config;
 pub use error::ConfigError;
 pub use guest_access::GuestAccessConfig;
 pub use images::ImagesConfig;
-pub use machinery::{MachineryConfig, ManagerType};
+pub use machinery::MachineryConfig;
 pub use plugins::PluginsConfig;
 pub use providers::ProvidersConfig;
 pub use provisioning::ProvisioningConfig;

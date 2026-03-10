@@ -3,58 +3,23 @@ use serde::{Deserialize, Serialize};
 /// Generic machinery configuration.
 ///
 /// This configuration applies to all providers and defines defaults for
-/// machine allocation, pooling, and infrastructure management.
+/// machine allocation and infrastructure management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineryConfig {
-    /// Manager type to use for machine allocation
-    #[serde(default)]
-    pub manager: ManagerType,
-
     /// Default machine specifications
     #[serde(default)]
     pub defaults: MachineDefaults,
 
-    /// Machine pooling configuration (for snapshot-capable providers)
-    #[serde(default)]
-    pub pool: PoolConfig,
+    /// Name of the clean snapshot to restore between uses
+    #[serde(default = "default_clean_snapshot_name")]
+    pub clean_snapshot_name: String,
 }
 
 impl Default for MachineryConfig {
     fn default() -> Self {
         Self {
-            manager: ManagerType::default(),
             defaults: MachineDefaults::default(),
-            pool: PoolConfig::default(),
-        }
-    }
-}
-
-/// Manager type for machine allocation.
-///
-/// Determines the strategy used to allocate and manage machines.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ManagerType {
-    /// Pooled manager - uses pre-allocated machines with snapshot restoration.
-    /// Requires provider to support Snapshot capability.
-    Pooled,
-
-    /// On-demand manager - allocates and provisions machines as needed.
-    /// Works with any provider.
-    OnDemand,
-}
-
-impl Default for ManagerType {
-    fn default() -> Self {
-        Self::OnDemand
-    }
-}
-
-impl std::fmt::Display for ManagerType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pooled => write!(f, "pooled"),
-            Self::OnDemand => write!(f, "on-demand"),
+            clean_snapshot_name: default_clean_snapshot_name(),
         }
     }
 }
@@ -94,35 +59,6 @@ impl Default for MachineDefaults {
     }
 }
 
-/// Machine pool configuration.
-///
-/// Pools maintain pre-allocated machines for fast allocation.
-/// Only used with snapshot-capable providers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolConfig {
-    /// Minimum number of machines to keep in the pool
-    #[serde(default = "default_min_size")]
-    pub min_size: usize,
-
-    /// Maximum number of machines allowed in the pool
-    #[serde(default = "default_max_size")]
-    pub max_size: usize,
-
-    /// Name of the clean snapshot to restore between uses
-    #[serde(default = "default_snapshot_name")]
-    pub clean_snapshot_name: String,
-}
-
-impl Default for PoolConfig {
-    fn default() -> Self {
-        Self {
-            min_size: 1,
-            max_size: 5,
-            clean_snapshot_name: "clean".to_string(),
-        }
-    }
-}
-
 // Default value functions
 fn default_cpus() -> u32 {
     2
@@ -136,14 +72,6 @@ fn default_video_memory() -> u64 {
     128
 }
 
-fn default_min_size() -> usize {
-    1
-}
-
-fn default_max_size() -> usize {
-    5
-}
-
-fn default_snapshot_name() -> String {
+fn default_clean_snapshot_name() -> String {
     "clean".to_string()
 }
