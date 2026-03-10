@@ -13,7 +13,7 @@ use malbox_config::MachineryConfig;
 use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -23,7 +23,7 @@ use tracing::{error, info};
 pub struct Scheduler {
     task_queue: Arc<TaskQueue>,
     task_store: Arc<TaskStore>,
-    machinery_manager: Arc<dyn MachineryManager>,
+    machine_pool: Arc<MachinePool>,
     machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     worker_pool: WorkerPool,
@@ -36,7 +36,7 @@ impl Scheduler {
     /// Create a new scheduler.
     pub fn new(
         db_pool: PgPool,
-        machinery_manager: Arc<dyn MachineryManager>,
+        machine_pool: Arc<MachinePool>,
         machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         worker_count: usize,
@@ -46,7 +46,7 @@ impl Scheduler {
         Self {
             task_queue: Arc::new(TaskQueue::new()),
             task_store: Arc::new(TaskStore::new(db_pool)),
-            machinery_manager,
+            machine_pool,
             machinery_config,
             plugin_manager,
             worker_pool: WorkerPool::new(worker_count),
@@ -96,7 +96,7 @@ impl Scheduler {
         self.worker_pool.spawn_workers(
             Arc::clone(&self.task_queue),
             Arc::clone(&self.task_store),
-            Arc::clone(&self.machinery_manager),
+            Arc::clone(&self.machine_pool),
             self.machinery_config.clone(),
             Arc::clone(&self.plugin_manager),
             event_tx,

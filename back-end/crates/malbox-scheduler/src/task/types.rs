@@ -1,9 +1,6 @@
 //! Task-related type definitions.
 
-use malbox_config::MachineryConfig;
-use malbox_database::repositories::machinery::MachinePlatform;
 use malbox_database::repositories::tasks::Task;
-use malbox_resources::{DiskType, MachineSpec, Network, NetworkMode, Platform, Resources, Storage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -80,30 +77,3 @@ impl Default for ResourceAllocation {
     }
 }
 
-/// Build a MachineSpec from a Task using config defaults as fallback.
-pub fn task_to_machine_spec(task: &Task, config: &MachineryConfig) -> MachineSpec {
-    let platform = match task.platform {
-        MachinePlatform::Windows => Platform::Windows,
-        MachinePlatform::Linux => Platform::Linux,
-    };
-
-    MachineSpec {
-        name: format!("task-{}", task.id.unwrap_or(0)),
-        platform,
-        resources: Resources {
-            cpus: task.machine_cpus.unwrap_or(config.defaults.cpus as i32) as u32,
-            memory_mb: task.machine_memory.unwrap_or(config.defaults.memory as i64) as u32,
-        },
-        storage: Storage {
-            boot_disk_gb: 64,
-            disk_type: DiskType::Qcow2,
-        },
-        network: Network {
-            mode: NetworkMode::Nat,
-            ip: None,
-            mac: None,
-        },
-        base_image: config.defaults.image.clone(),
-        provisioning: None,
-    }
-}

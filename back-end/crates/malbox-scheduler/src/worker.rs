@@ -18,7 +18,6 @@ pub use job::Job;
 use crate::error::{Result, SchedulerError};
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
-use crate::task::task_to_machine_spec;
 use malbox_config::MachineryConfig;
 use malbox_database::repositories::samples::fetch_sample_by_id;
 use malbox_database::repositories::tasks::TaskState;
@@ -27,7 +26,10 @@ use malbox_plugin_internal::transport::messages::events::{
     Event, Payload, TaskEvent, TaskEventPayload,
 };
 use malbox_plugin_internal::transport::traits::TransportEmitter;
-use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_resources::{
+    Machine as RuntimeMachine, MachineEndpoint, MachineId, MachinePool, MachineSpec, MachineState,
+    Platform, ResolvedTransport, Resources, Storage, DiskType, Network, NetworkMode,
+};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -67,7 +69,7 @@ pub struct Worker {
     id: WorkerId,
     task_queue: Arc<TaskQueue>,
     task_store: Arc<TaskStore>,
-    machinery_manager: Arc<dyn MachineryManager>,
+    machine_pool: Arc<MachinePool>,
     machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     event_tx: mpsc::Sender<WorkerEvent>,
@@ -80,7 +82,7 @@ impl Worker {
     pub fn new(
         task_queue: Arc<TaskQueue>,
         task_store: Arc<TaskStore>,
-        machinery_manager: Arc<dyn MachineryManager>,
+        machine_pool: Arc<MachinePool>,
         machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         event_tx: mpsc::Sender<WorkerEvent>,
@@ -91,7 +93,7 @@ impl Worker {
             id: WorkerId::new(),
             task_queue,
             task_store,
-            machinery_manager,
+            machine_pool,
             machinery_config,
             plugin_manager,
             event_tx,
@@ -216,11 +218,25 @@ impl Worker {
             .update_task_state(task_id, TaskState::PreparingResources)
             .await?;
 
-        let spec = task_to_machine_spec(&task, &self.machinery_config);
-        let machine = match self.machinery_manager.allocate(&spec).await {
-            Ok(m) => m,
+        let db_machine = match self.machine_pool.acquire(task.platform, task_id).await {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                // No machine available — re-enqueue and wait
+                info!(task_id, "No machine available, re-enqueueing task");
+                self.task_store
+                    .update_task_state(task_id, TaskState::Pending)
+                    .await?;
+                self.task_queue.enqueue(task_id, task.priority).await;
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    self.machine_pool.available_notifier().notified(),
+                )
+                .await
+                .ok();
+                return Ok(());
+            }
             Err(e) => {
-                error!(task_id, error = %e, "Machine allocation failed");
+                error!(task_id, error = %e, "Machine acquisition failed");
                 self.task_store
                     .update_task_state(task_id, TaskState::Failed)
                     .await?;
@@ -228,8 +244,63 @@ impl Worker {
                 return Err(SchedulerError::Resource(e));
             }
         };
+        let machine_id = db_machine.id.expect("acquired machine has id");
+        info!(task_id, machine_id, "Machine acquired");
 
-        info!(task_id, machine_id = ?machine.id, "Machine allocated");
+        // Build a runtime Machine from the DbMachine so transport can use it.
+        let runtime_machine = {
+            let spec = MachineSpec {
+                name: db_machine.name.clone(),
+                platform: match db_machine.platform {
+                    malbox_database::repositories::machinery::MachinePlatform::Windows => {
+                        Platform::Windows
+                    }
+                    malbox_database::repositories::machinery::MachinePlatform::Linux => {
+                        Platform::Linux
+                    }
+                },
+                resources: Resources {
+                    cpus: self.machinery_config.defaults.cpus,
+                    memory_mb: self.machinery_config.defaults.memory as u32,
+                },
+                storage: Storage {
+                    boot_disk_gb: 64,
+                    disk_type: DiskType::Qcow2,
+                },
+                network: Network {
+                    mode: NetworkMode::Nat,
+                    ip: None,
+                    mac: None,
+                },
+                base_image: None,
+                provisioning: None,
+            };
+            let mut m = RuntimeMachine::new(
+                MachineId(db_machine.provider_id.clone().unwrap_or_default()),
+                spec,
+            );
+            m.set_state(MachineState::Running);
+            if let Some(ref ip) = db_machine.ip {
+                if let Ok(addr) = ip.parse() {
+                    m.set_endpoint(Some(MachineEndpoint {
+                        address: addr,
+                        id: db_machine
+                            .provider_id
+                            .clone()
+                            .unwrap_or_default(),
+                        platform: match db_machine.platform {
+                            malbox_database::repositories::machinery::MachinePlatform::Windows => {
+                                Platform::Windows
+                            }
+                            malbox_database::repositories::machinery::MachinePlatform::Linux => {
+                                Platform::Linux
+                            }
+                        },
+                    }));
+                }
+            }
+            m
+        };
 
         // --- Running ---
         self.task_store
@@ -239,7 +310,7 @@ impl Worker {
         // Guest access phase: transfer sample, execute, collect results.
         // Only activated when a transport is configured.
         if let Some(ref transport) = self.transport {
-            match transport.open_session(&machine).await {
+            match transport.open_session(&runtime_machine).await {
                 Ok(session) => {
                     // Push sample file to guest if task has a sample
                     if let Some(sample_id) = task.sample_id {
@@ -301,8 +372,8 @@ impl Worker {
                     self.emit_task_event(TaskEvent::TaskFailed, task_id);
 
                     // Still release the machine
-                    if let Err(rel_err) = self.machinery_manager.release(&machine).await {
-                        error!(task_id, error = %rel_err, "Failed to release machine after guest session failure");
+                    if let Err(rel_err) = self.machine_pool.release(machine_id).await {
+                        error!(task_id, machine_id, error = %rel_err, "Failed to release machine after guest session failure");
                     }
                     return Err(SchedulerError::Internal(format!(
                         "Guest session failed for task {}: {}",
@@ -349,8 +420,8 @@ impl Worker {
             .await?;
 
         // --- Release machine ---
-        if let Err(e) = self.machinery_manager.release(&machine).await {
-            error!(task_id, machine_id = ?machine.id, error = %e, "Failed to release machine");
+        if let Err(e) = self.machine_pool.release(machine_id).await {
+            error!(task_id, machine_id, error = %e, "Failed to release machine");
         }
 
         // --- Completed ---
@@ -363,6 +434,11 @@ impl Worker {
     }
 
     /// Handle task timeout: transition to Failed and emit event.
+    ///
+    /// Note: the machine assigned to this task (if any) cannot be released here
+    /// because `execute_task` was cancelled by the timeout and we have lost the
+    /// `machine_id`. The machine will remain in `assigned` status and will be
+    /// recovered by `MachinePool::reconcile()` on the next startup.
     async fn handle_timeout(&self, task_id: i32) -> Result<()> {
         self.task_store
             .update_task_state(task_id, TaskState::Failed)

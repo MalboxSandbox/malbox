@@ -8,7 +8,7 @@ use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
 use malbox_config::MachineryConfig;
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -44,7 +44,7 @@ impl WorkerPool {
         &mut self,
         task_queue: Arc<TaskQueue>,
         task_store: Arc<TaskStore>,
-        machinery_manager: Arc<dyn MachineryManager>,
+        machine_pool: Arc<MachinePool>,
         machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         event_tx: mpsc::Sender<WorkerEvent>,
@@ -57,7 +57,7 @@ impl WorkerPool {
             let worker = Worker::new(
                 Arc::clone(&task_queue),
                 Arc::clone(&task_store),
-                Arc::clone(&machinery_manager),
+                Arc::clone(&machine_pool),
                 machinery_config.clone(),
                 Arc::clone(&plugin_manager),
                 event_tx.clone(),

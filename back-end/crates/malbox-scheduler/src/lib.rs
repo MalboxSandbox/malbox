@@ -8,7 +8,7 @@ use malbox_config::MachineryConfig;
 use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_resources::{MachineryManager, ResolvedTransport};
+use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -29,7 +29,7 @@ pub use task::{PluginContext, PluginResult, PluginStatus, ResourceAllocation, Ta
 /// The scheduler runs in a background tokio task.
 pub async fn init_scheduler(
     db_pool: PgPool,
-    machinery_manager: Arc<dyn MachineryManager>,
+    machine_pool: Arc<MachinePool>,
     machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     worker_count: usize,
@@ -45,7 +45,7 @@ pub async fn init_scheduler(
     // Create and run scheduler in background
     let scheduler = scheduler::Scheduler::new(
         db_pool,
-        machinery_manager,
+        machine_pool,
         machinery_config,
         plugin_manager,
         worker_count,
