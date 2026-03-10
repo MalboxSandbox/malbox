@@ -52,6 +52,22 @@ pub enum ResourceError {
 
     #[error("Database error: {0}")]
     Database(String),
+
+    #[error("No machine available for platform {platform}")]
+    NoMachineAvailable { platform: String },
+
+    #[error("Machine {id} is currently assigned to a task")]
+    MachineAssigned { id: i32 },
+
+    #[error("Machine {id} is in state '{status}', expected '{expected}'")]
+    InvalidMachineState {
+        id: i32,
+        status: String,
+        expected: String,
+    },
+
+    #[error("Snapshot restore failed for machine {id}: {reason}")]
+    SnapshotRestoreFailed { id: i32, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, ResourceError>;
