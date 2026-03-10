@@ -13,6 +13,7 @@ use malbox_utils::SampleStore;
 use std::sync::Arc;
 
 pub mod error;
+mod image_store;
 mod providers;
 mod provisioners;
 
@@ -44,42 +45,6 @@ fn validate_manager_compatibility(
     Ok(())
 }
 
-// TODO: add provider-specific validation and move this into malbox-config
-/// Validate that the configured base image exists and is readable.
-fn validate_base_image(config: &malbox_config::MachineryConfig) -> error::Result<()> {
-    if let Some(ref path_str) = config.defaults.image {
-        let path = std::path::Path::new(path_str);
-
-        if !path.exists() {
-            return Err(DaemonError::Configuration(format!(
-                "Base image not found: '{}'. \
-                 Set [machinery.defaults] base_image to a valid image path, \
-                 or remove it to use blank disks.",
-                path_str
-            )));
-        }
-
-        let metadata = std::fs::metadata(path).map_err(|e| {
-            DaemonError::Configuration(format!("Cannot read base image '{}': {}", path_str, e))
-        })?;
-
-        if !metadata.is_file() {
-            return Err(DaemonError::Configuration(format!(
-                "Base image path '{}' is not a regular file",
-                path_str
-            )));
-        }
-
-        // Verify the file is readable
-        std::fs::File::open(path).map_err(|e| {
-            DaemonError::Configuration(format!("Base image '{}' is not readable: {}", path_str, e))
-        })?;
-
-        tracing::info!("Base image validated: {}", path_str);
-    }
-    Ok(())
-}
-
 pub async fn run(config: &Config) -> error::Result<()> {
     // Validate provider configuration
     let compiled_providers: Vec<String> = list_providers()
@@ -95,6 +60,19 @@ pub async fn run(config: &Config) -> error::Result<()> {
         .map_err(|e| DaemonError::Internal(e.to_string()))?;
 
     let db = init_database(&config.database).await;
+
+    // Start image store watcher if configured
+    if let Some(ref images_config) = config.images {
+        let store_path = std::path::PathBuf::from(&images_config.store_path);
+        if store_path.exists() {
+            image_store::spawn_image_watcher(store_path, db.clone());
+        } else {
+            tracing::warn!(
+                "Image store path does not exist: {}",
+                images_config.store_path
+            );
+        }
+    }
 
     // Initialize provider from configuration
     let provider_name = config
@@ -130,9 +108,6 @@ pub async fn run(config: &Config) -> error::Result<()> {
     // Validate manager/provider compatibility
     let manager_type = config.machinery.manager;
     validate_manager_compatibility(manager_type, &provider)?;
-
-    // Validate base image if configured
-    validate_base_image(&config.machinery)?;
 
     tracing::info!("Using machinery manager: {}", manager_type);
 
@@ -224,14 +199,57 @@ pub async fn run(config: &Config) -> error::Result<()> {
 
     let machinery_manager: Arc<dyn MachineryManager> = match manager_type {
         ManagerType::Pooled => {
-            let pooled_manager = PooledManager::new(provider_arc, &config.machinery, provisioner)
+            // Resolve image from registry
+            let image_name = config.machinery.defaults.image.as_deref().ok_or_else(|| {
+                DaemonError::Configuration(
+                    "Pooled manager requires [machinery.defaults] image to be set".to_string(),
+                )
+            })?;
+
+            let image = malbox_database::repositories::images::fetch_image_by_name(&db, image_name)
+                .await
                 .map_err(|e| {
+                    DaemonError::Internal(format!("Failed to query image registry: {}", e))
+                })?
+                .ok_or_else(|| {
+                    DaemonError::Configuration(format!(
+                        "Image '{}' not found in registry. Register it first via the API.",
+                        image_name
+                    ))
+                })?;
+
+            if !image.available {
+                return Err(DaemonError::Configuration(format!(
+                    "Image '{}' is registered but not available (file missing from disk)",
+                    image_name
+                )));
+            }
+
+            if !std::path::Path::new(&image.path).exists() {
+                return Err(DaemonError::Configuration(format!(
+                    "Image '{}' file not found at: {}",
+                    image_name, image.path
+                )));
+            }
+
+            tracing::info!(
+                image = image_name,
+                path = image.path.as_str(),
+                "Resolved image from registry"
+            );
+
+            let pooled_manager = PooledManager::new(
+                provider_arc,
+                &config.machinery,
+                provisioner,
+                db.clone(),
+            )
+            .map_err(|e| {
                 DaemonError::Internal(format!("Failed to create pooled manager: {}", e))
             })?;
 
-            // Initialize pool with machines
             pooled_manager
-                .initialize_pool()
+                .initialize_pool(image.id, &image.path)
                 .await
                 .map_err(|e| DaemonError::Internal(format!("Failed to initialize pool: {}", e)))?;
 
