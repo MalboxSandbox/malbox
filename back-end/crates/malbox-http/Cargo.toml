@@ -9,6 +9,7 @@ edition = "2024"
 malbox-database = { path = "../malbox-database" }
 malbox-utils = { path = "../malbox-utils" }
 malbox-config = { path = "../malbox-config" }
+malbox-resources = { path = "../malbox-resources" }
 malbox-scheduler = { path = "../malbox-scheduler" }
 malbox-tracing = { path = "../malbox-tracing" }
 tokio = { workspace = true }

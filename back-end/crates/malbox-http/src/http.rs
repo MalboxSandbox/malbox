@@ -6,6 +6,7 @@ use axum::{
 };
 use malbox_config::Config as MalboxConfig;
 use malbox_database::{PgPool, repositories::tasks::Task};
+use malbox_resources::MachinePool;
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -14,6 +15,7 @@ use tower_http::trace::TraceLayer;
 
 mod error;
 mod images;
+mod machines;
 mod tasks;
 
 pub use error::Error;
@@ -25,6 +27,7 @@ struct AppState {
     pool: PgPool,
     task_tx: mpsc::Sender<Task>,
     sample_store: Arc<SampleStore>,
+    machine_pool: Arc<MachinePool>,
 }
 
 pub async fn serve(
@@ -32,12 +35,14 @@ pub async fn serve(
     db: PgPool,
     task_tx: mpsc::Sender<Task>,
     sample_store: Arc<SampleStore>,
+    machine_pool: Arc<MachinePool>,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
         config: conf,
         pool: db,
         task_tx,
         sample_store,
+        machine_pool,
     };
 
     let app = api_router()
@@ -65,6 +70,7 @@ fn api_router() -> Router<AppState> {
         .fallback(handler_404)
         .merge(tasks::create::router())
         .merge(images::router())
+        .merge(machines::router())
 }
 
 async fn root() -> &'static str {
