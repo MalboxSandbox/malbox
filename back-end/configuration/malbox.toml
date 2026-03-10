@@ -86,16 +86,25 @@ manager = "ondemand"
 # memory = 2048
 # video_memory = 128
 
-# Path to a golden qcow2 image used as a read-only backing file.
-# Each machine gets a copy-on-write overlay; the golden image is never modified.
-# When unset, machines are created with blank disks.
-# base_image = "/path/to/your/golden-image.qcow2"
+# Name of the image (from the image registry) to use for new machines.
+# The image must be registered via the API before it can be referenced here.
+# image = "win10-base"
 
 # Pool settings (only used when manager = "pooled")
 [machinery.pool]
 # min_size = 1
 # max_size = 5
 # clean_snapshot_name = "clean"
+
+# -----------------------------------------------------------------------------
+# Images (optional)
+# -----------------------------------------------------------------------------
+# Managed image store directory. When configured, the daemon watches this
+# directory for qcow2 files and automatically updates image availability
+# in the registry.
+
+# [images]
+# store_path = "/var/lib/malbox/images"
 
 # -----------------------------------------------------------------------------
 # Provisioning (optional)
