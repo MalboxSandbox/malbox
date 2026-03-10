@@ -13,3 +13,4 @@ serde = { workspace = true }
 time = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
+uuid = { workspace = true }

@@ -10,6 +10,8 @@ pub enum DatabaseError {
     Task(#[from] TaskError),
     #[error("{0}")]
     Sample(#[from] SampleError),
+    #[error("{0}")]
+    Image(#[from] ImageError),
 }
 
 #[derive(Error, Debug)]
@@ -81,6 +83,34 @@ pub enum SampleError {
     FetchFailed {
         hash: String,
         message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum ImageError {
+    #[error("Failed to insert image '{name}': {message}")]
+    InsertFailed {
+        name: String,
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch image")]
+    FetchFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to update image: {message}")]
+    UpdateFailed {
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to delete image '{name}'")]
+    DeleteFailed {
+        name: String,
         #[source]
         source: sqlx::Error,
     },
