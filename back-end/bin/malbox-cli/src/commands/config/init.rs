@@ -143,6 +143,7 @@ fn create_default_config(paths: PathConfig) -> Result<Config> {
         database,
         providers,
         machinery,
+        images: None,
         provisioning: None,
         guest_access: None,
         plugins: Default::default(),

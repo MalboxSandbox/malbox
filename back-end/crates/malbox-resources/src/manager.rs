@@ -122,7 +122,7 @@ impl PooledManager {
                 ip: None,
                 mac: None,
             },
-            base_image: self.machinery_config.defaults.base_image.clone(),
+            base_image: self.machinery_config.defaults.image.clone(),
             provisioning: None,
         };
 

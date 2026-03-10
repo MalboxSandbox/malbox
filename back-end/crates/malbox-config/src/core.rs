@@ -1,6 +1,7 @@
 use crate::{
-    Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig, machinery::MachineryConfig,
-    plugins::PluginsConfig, providers::ProvidersConfig, provisioning::ProvisioningConfig,
+    Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig, images::ImagesConfig,
+    machinery::MachineryConfig, plugins::PluginsConfig, providers::ProvidersConfig,
+    provisioning::ProvisioningConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,8 @@ pub struct Config {
     #[serde(default)]
     pub providers: ProvidersConfig,
     pub machinery: MachineryConfig,
+    #[serde(default)]
+    pub images: Option<ImagesConfig>,
     #[serde(default)]
     pub provisioning: Option<ProvisioningConfig>,
     #[serde(default)]

@@ -103,7 +103,7 @@ pub fn task_to_machine_spec(task: &Task, config: &MachineryConfig) -> MachineSpe
             ip: None,
             mac: None,
         },
-        base_image: config.defaults.base_image.clone(),
+        base_image: config.defaults.image.clone(),
         provisioning: None,
     }
 }

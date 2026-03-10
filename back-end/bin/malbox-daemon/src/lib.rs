@@ -47,7 +47,7 @@ fn validate_manager_compatibility(
 // TODO: add provider-specific validation and move this into malbox-config
 /// Validate that the configured base image exists and is readable.
 fn validate_base_image(config: &malbox_config::MachineryConfig) -> error::Result<()> {
-    if let Some(ref path_str) = config.defaults.base_image {
+    if let Some(ref path_str) = config.defaults.image {
         let path = std::path::Path::new(path_str);
 
         if !path.exists() {

@@ -76,11 +76,11 @@ pub struct MachineDefaults {
     #[serde(default = "default_video_memory")]
     pub video_memory: u64,
 
-    /// Path to a golden qcow2 image used as a read-only backing file.
-    /// Each machine gets a copy-on-write overlay; the golden image is never modified.
+    /// Name of a registered image from the image registry.
+    /// Resolved to a file path at startup via the database.
     /// When None, machines are created with blank disks.
     #[serde(default)]
-    pub base_image: Option<String>,
+    pub image: Option<String>,
 }
 
 impl Default for MachineDefaults {
@@ -89,7 +89,7 @@ impl Default for MachineDefaults {
             cpus: 2,
             memory: 2048,
             video_memory: 128,
-            base_image: None,
+            image: None,
         }
     }
 }
