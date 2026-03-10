@@ -46,17 +46,10 @@ port = 8080
 # Maximum upload size in bytes (default: 0 = unlimited)
 # max_upload_size = 104857600
 
-# -----------------------------------------------------------------------------
-# Database
-# -----------------------------------------------------------------------------
-
 [database]
 host = "postgresql://postgres@localhost:5432/malbox_db"
 port = 5432
 
-# -----------------------------------------------------------------------------
-# Providers
-# -----------------------------------------------------------------------------
 # Providers must be compiled into the daemon via Cargo features.
 # Each enabled provider needs a corresponding [providers.<name>] section.
 
@@ -69,36 +62,22 @@ enabled = ["libvirt"]
 uri = "qemu:///system"
 # storage_pool = "default"
 
-# -----------------------------------------------------------------------------
-# Machinery
-# -----------------------------------------------------------------------------
-
 [machinery]
-# Manager type: "ondemand" or "pooled" (default: "ondemand")
-# "ondemand" — allocates a new VM per task, works with any provider.
-# "pooled"   — pre-allocates VMs and restores snapshots between tasks.
-#              Requires the provider to support the Snapshot capability.
-manager = "ondemand"
+# Name of the clean snapshot used to revert machines between tasks.
+# After a task completes, the machine is reverted to this snapshot.
+# If the provider doesn't support snapshots, the machine is re-provisioned instead.
+# clean_snapshot_name = "clean"
 
 [machinery.defaults]
-# Default resources for allocated machines
+# Default resources for machines
 # cpus = 2
 # memory = 2048
 # video_memory = 128
 
-# Name of the image (from the image registry) to use for new machines.
-# The image must be registered via the API before it can be referenced here.
+# Default image (from the image registry) for new machines.
+# Can be overridden per-machine via the API.
 # image = "win10-base"
 
-# Pool settings (only used when manager = "pooled")
-[machinery.pool]
-# min_size = 1
-# max_size = 5
-# clean_snapshot_name = "clean"
-
-# -----------------------------------------------------------------------------
-# Images (optional)
-# -----------------------------------------------------------------------------
 # Managed image store directory. When configured, the daemon watches this
 # directory for qcow2 files and automatically updates image availability
 # in the registry.
@@ -106,9 +85,6 @@ manager = "ondemand"
 # [images]
 # store_path = "/var/lib/malbox/images"
 
-# -----------------------------------------------------------------------------
-# Provisioning (optional)
-# -----------------------------------------------------------------------------
 # When configured, machines are provisioned after allocation.
 # Uncomment to enable.
 
@@ -117,9 +93,6 @@ manager = "ondemand"
 # [provisioning.config]
 # playbook = "playbooks/setup.yml"
 
-# -----------------------------------------------------------------------------
-# Guest Access (optional)
-# -----------------------------------------------------------------------------
 # Configures how the daemon communicates with guest VMs for file transfer
 # and command execution. The transport is resolved against the provider's
 # native capabilities first, then standalone transports.
@@ -132,19 +105,12 @@ manager = "ondemand"
 # e.g., for grpc:
 # port = 9500
 
-# -----------------------------------------------------------------------------
-# Plugins
-# -----------------------------------------------------------------------------
 # Directory containing plugin subdirectories. Each subdirectory should contain
 # a plugin.toml manifest and the plugin binary.
 
 [plugins]
 # directory = "/home/user/.config/malbox/plugins"
 # watch = true
-
-# -----------------------------------------------------------------------------
-# Analysis
-# -----------------------------------------------------------------------------
 
 [analysis]
 timeout = 300

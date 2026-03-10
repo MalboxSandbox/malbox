@@ -1,4 +1,4 @@
-use malbox_config::{Config, ManagerType};
+use malbox_config::Config;
 use malbox_database::init_database;
 use malbox_http::http;
 use malbox_machinery::provider::{create_provider, list_providers};
@@ -7,7 +7,7 @@ use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::transport::ipc::{
     EventEmitter, IpcService, NodeBuilder, daemon_channel,
 };
-use malbox_resources::{MachineryManager, OnDemandManager, PooledManager, resolve_transport};
+use malbox_resources::{MachinePool, MachinePoolConfig, resolve_transport};
 use malbox_scheduler::init_scheduler;
 use malbox_utils::SampleStore;
 use std::sync::Arc;
@@ -18,32 +18,6 @@ mod providers;
 mod provisioners;
 
 pub use error::DaemonError;
-
-/// Validate that the configured manager is compatible with provider capabilities.
-fn validate_manager_compatibility(
-    manager_type: ManagerType,
-    provider: &malbox_machinery::ProviderHandle,
-) -> error::Result<()> {
-    match manager_type {
-        ManagerType::Pooled => {
-            // Pooled manager requires Snapshot capability
-            if provider.snapshot().is_none() {
-                return Err(DaemonError::Configuration(format!(
-                    "Manager 'pooled' requires provider '{}' to support Snapshot capability. \
-                     Available capabilities: {:?}. \
-                     Either:\n  1. Change [machinery] manager to 'ondemand' in config, or\n  \
-                     2. Use a provider that supports Snapshot capability",
-                    provider.name(),
-                    provider.list_capabilities()
-                )));
-            }
-        }
-        ManagerType::OnDemand => {
-            // On-demand manager works with any provider (only needs Allocate, which is mandatory)
-        }
-    }
-    Ok(())
-}
 
 pub async fn run(config: &Config) -> error::Result<()> {
     // Validate provider configuration
@@ -105,12 +79,6 @@ pub async fn run(config: &Config) -> error::Result<()> {
         ))
     })?;
 
-    // Validate manager/provider compatibility
-    let manager_type = config.machinery.manager;
-    validate_manager_compatibility(manager_type, &provider)?;
-
-    tracing::info!("Using machinery manager: {}", manager_type);
-
     // Create provisioner if configured
     let provisioner: Option<Arc<dyn malbox_machinery::Provisioner>> = if let Some(ref prov_config) =
         config.provisioning
@@ -137,7 +105,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
         None
     };
 
-    // Create machinery manager based on configuration
+    // Create machine pool
     let provider_arc = Arc::new(provider);
 
     // Resolve guest access transport (if configured)
@@ -197,66 +165,20 @@ pub async fn run(config: &Config) -> error::Result<()> {
         );
     }
 
-    let machinery_manager: Arc<dyn MachineryManager> = match manager_type {
-        ManagerType::Pooled => {
-            // Resolve image from registry
-            let image_name = config.machinery.defaults.image.as_deref().ok_or_else(|| {
-                DaemonError::Configuration(
-                    "Pooled manager requires [machinery.defaults] image to be set".to_string(),
-                )
-            })?;
+    let machine_pool = Arc::new(MachinePool::new(
+        Arc::clone(&provider_arc),
+        provisioner,
+        db.clone(),
+        MachinePoolConfig {
+            clean_snapshot_name: config.machinery.clean_snapshot_name.clone(),
+            defaults: config.machinery.defaults.clone(),
+        },
+    ));
 
-            let image = malbox_database::repositories::images::fetch_image_by_name(&db, image_name)
-                .await
-                .map_err(|e| {
-                    DaemonError::Internal(format!("Failed to query image registry: {}", e))
-                })?
-                .ok_or_else(|| {
-                    DaemonError::Configuration(format!(
-                        "Image '{}' not found in registry. Register it first via the API.",
-                        image_name
-                    ))
-                })?;
-
-            if !image.available {
-                return Err(DaemonError::Configuration(format!(
-                    "Image '{}' is registered but not available (file missing from disk)",
-                    image_name
-                )));
-            }
-
-            if !std::path::Path::new(&image.path).exists() {
-                return Err(DaemonError::Configuration(format!(
-                    "Image '{}' file not found at: {}",
-                    image_name, image.path
-                )));
-            }
-
-            tracing::info!(
-                image = image_name,
-                path = image.path.as_str(),
-                "Resolved image from registry"
-            );
-
-            let pooled_manager = PooledManager::new(
-                provider_arc,
-                &config.machinery,
-                provisioner,
-                db.clone(),
-            )
-            .map_err(|e| {
-                DaemonError::Internal(format!("Failed to create pooled manager: {}", e))
-            })?;
-
-            pooled_manager
-                .initialize_pool(image.id, &image.path)
-                .await
-                .map_err(|e| DaemonError::Internal(format!("Failed to initialize pool: {}", e)))?;
-
-            Arc::new(pooled_manager)
-        }
-        ManagerType::OnDemand => Arc::new(OnDemandManager::new(provider_arc, provisioner)),
-    };
+    // Reconcile DB machines against provider state on startup
+    machine_pool.reconcile().await.map_err(|e| {
+        DaemonError::Internal(format!("Failed to reconcile machine pool: {}", e))
+    })?;
 
     // Initialize IPC event emitter for daemon → plugin communication
     let node = NodeBuilder::new()
@@ -285,7 +207,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
     // Initialize scheduler and keep channels alive
     let (task_tx, _shutdown_tx) = init_scheduler(
         db.clone(),
-        machinery_manager,
+        Arc::clone(&machine_pool),
         config.machinery.clone(),
         Arc::clone(&plugin_manager),
         config.general.worker_threads,
@@ -296,7 +218,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
     .map_err(|e| DaemonError::Internal(e.to_string()))?;
 
     // Start HTTP server (this blocks until shutdown)
-    http::serve(config.clone(), db, task_tx, sample_store)
+    http::serve(config.clone(), db, task_tx, sample_store, machine_pool)
         .await
         .map_err(|e| DaemonError::Internal(e.to_string()))
 }
