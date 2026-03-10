@@ -9,8 +9,7 @@ pub mod pool;
 pub mod transport;
 
 pub use error::{ResourceError, Result};
-pub use manager::{MachineryManager, OnDemandManager, PooledManager};
-pub use pool::{MachinePool, PoolConfig, PoolStats};
+pub use pool::{CreateMachineRequest, MachinePool, MachinePoolConfig};
 pub use transport::{ResolvedTransport, resolve_transport};
 
 // Re-export commonly used types from malbox-machinery

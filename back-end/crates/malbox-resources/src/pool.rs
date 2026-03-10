@@ -1,232 +1,761 @@
-//! Machine pooling for snapshot-capable providers
+//! Machine pool for managing persistent, user-created machines.
 //!
-//! This module implements a DB-backed pool that manages pre-allocated machines.
-//! The pool keeps an in-memory cache (Vec<PooledMachine> + VecDeque<MachineId>)
-//! for fast acquisition, with the database as the source of truth for persistence
-//! across restarts.
+//! `MachinePool` is the single entry point for machine lifecycle management.
+//! It replaces the old `PooledManager` / `OnDemandManager` split with a unified
+//! struct that owns a provider, an optional provisioner, and a database handle.
+//!
+//! Machines progress through the following states:
+//!   creating -> provisioning -> ready -> assigned -> reverting -> ready
+//!                                                                 \-> failed
+//!                                                    deleting -> (removed)
 
 use crate::error::{ResourceError, Result};
-use crate::{Allocate, Machine, MachineId, Snapshot, SnapshotId};
+use crate::manager::wait_for_endpoint;
+use malbox_config::machinery::MachineDefaults;
+use malbox_database::repositories::images;
+use malbox_database::repositories::machinery::{
+    self, MachineArch, MachinePlatform, MachineStatusDb,
+};
 use malbox_database::PgPool;
-use std::collections::VecDeque;
+use malbox_machinery::provisioner::{ProvisionContext, ProvisionStatus, Provisioner};
+use malbox_machinery::ProviderHandle;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tokio::sync::Notify;
+use tracing::{error, info, warn};
 
-/// Configuration for machine pool.
+// Re-export the DB machine type under a short alias used by callers.
+pub type DbMachine = machinery::Machine;
+
+/// Configuration extracted from `MachineryConfig` for pool use.
 #[derive(Debug, Clone)]
-pub struct PoolConfig {
-    /// Minimum number of machines to keep ready.
-    pub min_ready: usize,
-    /// Maximum number of machines in the pool.
-    pub max_size: usize,
+pub struct MachinePoolConfig {
+    pub clean_snapshot_name: String,
+    pub defaults: MachineDefaults,
 }
 
-impl Default for PoolConfig {
-    fn default() -> Self {
-        Self {
-            min_ready: 2,
-            max_size: 10,
-        }
-    }
+/// Request payload for creating a new machine.
+#[derive(Debug, Clone)]
+pub struct CreateMachineRequest {
+    pub name: String,
+    pub image: String,
+    pub platform: MachinePlatform,
+    pub arch: MachineArch,
+    pub cpus: Option<u32>,
+    pub memory_mb: Option<u64>,
 }
 
-/// A machine in the pool with its clean snapshot and DB row ID.
-pub struct PooledMachine {
-    pub machine: Machine,
-    pub clean_snapshot: SnapshotId,
-    pub db_id: i32,
-}
-
-/// Machine pool for snapshot-capable providers.
+/// Central machine pool that owns all lifecycle operations.
 ///
-/// Maintains a set of machines with their clean snapshots, backed by a
-/// database for persistence. The in-memory cache provides fast acquisition
-/// while the DB is the source of truth for reconciliation on restart.
+/// All heavy work (provisioning, reverting) is spawned into background tokio
+/// tasks so that API calls return immediately.  The `machine_available`
+/// [`Notify`] is signalled whenever a machine transitions to `ready`.
 pub struct MachinePool {
-    snapshot: Arc<dyn Snapshot>,
-    allocate: Arc<dyn Allocate>,
-    config: PoolConfig,
+    provider: Arc<ProviderHandle>,
+    provisioner: Option<Arc<dyn Provisioner>>,
     db: PgPool,
-    machines: Arc<RwLock<Vec<PooledMachine>>>,
-    available: Arc<RwLock<VecDeque<MachineId>>>,
+    config: MachinePoolConfig,
+    machine_available: Arc<Notify>,
 }
 
 impl MachinePool {
-    /// Create a new empty machine pool.
+    /// Create a new `MachinePool`.
     pub fn new(
-        snapshot: Arc<dyn Snapshot>,
-        allocate: Arc<dyn Allocate>,
-        config: PoolConfig,
+        provider: Arc<ProviderHandle>,
+        provisioner: Option<Arc<dyn Provisioner>>,
         db: PgPool,
+        config: MachinePoolConfig,
     ) -> Self {
         Self {
-            snapshot,
-            allocate,
-            config,
+            provider,
+            provisioner,
             db,
-            machines: Arc::new(RwLock::new(Vec::new())),
-            available: Arc::new(RwLock::new(VecDeque::new())),
+            config,
+            machine_available: Arc::new(Notify::new()),
         }
     }
 
-    /// Load existing pool machines from the database for reconciliation.
-    pub async fn load_from_db(
+    /// Return a handle to the [`Notify`] that fires when a machine becomes ready.
+    pub fn available_notifier(&self) -> Arc<Notify> {
+        self.machine_available.clone()
+    }
+
+    /// Clone all `Arc` references so the pool can be moved into a `tokio::spawn`.
+    pub fn clone_for_spawn(&self) -> MachinePool {
+        MachinePool {
+            provider: self.provider.clone(),
+            provisioner: self.provisioner.clone(),
+            db: self.db.clone(),
+            config: self.config.clone(),
+            machine_available: self.machine_available.clone(),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------
+
+    /// Create a new machine.
+    ///
+    /// Validates that the requested image exists, inserts a DB row in
+    /// `creating` status, and spawns background provisioning.  Returns the
+    /// DB row immediately so the caller can track progress.
+    pub async fn create_machine(&self, request: CreateMachineRequest) -> Result<DbMachine> {
+        // 1. Validate image exists
+        let image = images::fetch_image_by_name(&self.db, &request.image)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .ok_or_else(|| ResourceError::Internal(format!(
+                "Image '{}' not found",
+                request.image,
+            )))?;
+
+        // 2. Insert DB row in 'creating' status
+        let db_machine = machinery::insert_machine(
+            &self.db,
+            &request.name,
+            request.platform,
+            request.arch,
+            image.id,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        let machine_id = db_machine.id.expect("insert_machine always returns id");
+        let image_path = image.path.clone();
+
+        // 3. Spawn background provisioning
+        let pool = self.clone_for_spawn();
+        tokio::spawn(async move {
+            if let Err(e) = pool.provision_machine(machine_id, &image_path).await {
+                error!(machine_id, error = %e, "Background provisioning failed");
+                let _ = machinery::update_machine_status(
+                    &pool.db,
+                    machine_id,
+                    MachineStatusDb::Failed,
+                    Some(&e.to_string()),
+                )
+                .await;
+            }
+        });
+
+        Ok(db_machine)
+    }
+
+    /// Acquire a ready machine for a task.
+    ///
+    /// Delegates to the database's atomic `acquire_machine` query which uses
+    /// `FOR UPDATE SKIP LOCKED` to avoid contention.
+    pub async fn acquire(
         &self,
-    ) -> Result<Vec<malbox_database::repositories::machinery::Machine>> {
-        malbox_database::repositories::machinery::fetch_pool_machines(&self.db)
+        platform: MachinePlatform,
+        task_id: i32,
+    ) -> Result<Option<DbMachine>> {
+        machinery::acquire_machine(&self.db, platform, task_id)
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))
     }
 
-    /// Add a pre-allocated and provisioned machine to the pool.
-    /// The caller is responsible for allocation and provisioning.
-    pub async fn add_machine(
-        &self,
-        machine: Machine,
-        clean_snapshot: SnapshotId,
-        db_id: i32,
-    ) -> Result<MachineId> {
-        let machine_id = machine.id.clone();
-
-        info!(
-            "Adding machine {:?} to pool with clean snapshot (db_id={})",
-            machine_id, db_id
-        );
-
-        let pooled = PooledMachine {
-            machine,
-            clean_snapshot,
-            db_id,
-        };
-
-        let mut machines = self.machines.write().await;
-        machines.push(pooled);
-
-        let mut available = self.available.write().await;
-        available.push_back(machine_id.clone());
-
-        Ok(machine_id)
-    }
-
-    /// Check if pool can accept more machines.
-    pub async fn can_add_more(&self) -> bool {
-        let machines = self.machines.read().await;
-        machines.len() < self.config.max_size
-    }
-
-    /// Get the number of machines needed to reach minimum ready count.
-    pub async fn machines_needed(&self) -> usize {
-        let total = self.machines.read().await.len();
-        if total < self.config.min_ready {
-            self.config.min_ready - total
-        } else {
-            0
-        }
-    }
-
-    /// Acquire a machine from the pool.
+    /// Release a machine after task completion.
     ///
-    /// Restores the machine to its clean snapshot and removes it from
-    /// the in-memory cache. The machine must be re-added via add_machine()
-    /// if it's to be returned to the pool.
-    pub async fn acquire(&self) -> Result<Machine> {
-        let mut available = self.available.write().await;
+    /// Marks the machine as `reverting` and spawns an async revert.
+    pub async fn release(&self, machine_id: i32) -> Result<()> {
+        // Mark reverting in DB (also clears current_task_id)
+        machinery::release_machine(&self.db, machine_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
 
-        let machine_id = match available.pop_front() {
-            Some(id) => id,
-            None => {
-                return Err(ResourceError::PoolExhausted);
+        // Spawn background revert
+        let pool = self.clone_for_spawn();
+        tokio::spawn(async move {
+            if let Err(e) = pool.revert_machine(machine_id).await {
+                error!(machine_id, error = %e, "Background revert failed");
+                let _ = machinery::update_machine_status(
+                    &pool.db,
+                    machine_id,
+                    MachineStatusDb::Failed,
+                    Some(&e.to_string()),
+                )
+                .await;
             }
-        };
-        drop(available);
+        });
 
-        let mut machines = self.machines.write().await;
-        let idx = machines
-            .iter()
-            .position(|p| p.machine.id == machine_id)
-            .ok_or_else(|| ResourceError::MachineNotFound {
-                id: format!("{:?}", machine_id),
-            })?;
+        Ok(())
+    }
 
-        let pooled = machines.remove(idx);
+    /// Delete a machine.
+    ///
+    /// Rejects the request if the machine is currently assigned.  Otherwise,
+    /// marks `deleting`, deallocates from the provider, and removes the DB row.
+    pub async fn delete_machine(&self, machine_id: i32) -> Result<()> {
+        let db_machine = self.require_machine(machine_id).await?;
 
-        // Restore to clean snapshot before returning
-        debug!("Restoring machine {:?} to clean snapshot", machine_id);
-        self.snapshot
-            .restore_snapshot(&pooled.machine, &pooled.clean_snapshot)
+        if db_machine.status == MachineStatusDb::Assigned {
+            return Err(ResourceError::MachineAssigned { id: machine_id });
+        }
+
+        // Mark deleting
+        machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Deleting,
+            None,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        // Deallocate from provider if we have a provider_id
+        if let Some(ref provider_id) = db_machine.provider_id {
+            if let Err(e) = self.deallocate_by_provider_id(provider_id).await {
+                warn!(machine_id, error = %e, "Failed to deallocate from provider during delete (continuing)");
+            }
+        }
+
+        // Remove from DB
+        machinery::delete_machine(&self.db, machine_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        info!(machine_id, "Machine deleted");
+        Ok(())
+    }
+
+    /// Retry provisioning of a failed machine.
+    ///
+    /// Only valid for machines in `failed` status.  Resets to `creating` and
+    /// re-runs the provisioning pipeline.
+    pub async fn retry(&self, machine_id: i32) -> Result<DbMachine> {
+        let db_machine = self.require_machine(machine_id).await?;
+
+        if db_machine.status != MachineStatusDb::Failed {
+            return Err(ResourceError::InvalidMachineState {
+                id: machine_id,
+                status: format!("{:?}", db_machine.status),
+                expected: "failed".to_string(),
+            });
+        }
+
+        // Reset to creating
+        let updated = machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Creating,
+            None, // clear error message
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        // Look up the image path
+        let image_path = self.resolve_image_path(&db_machine).await?;
+
+        // Spawn background provisioning
+        let pool = self.clone_for_spawn();
+        tokio::spawn(async move {
+            if let Err(e) = pool.provision_machine(machine_id, &image_path).await {
+                error!(machine_id, error = %e, "Retry provisioning failed");
+                let _ = machinery::update_machine_status(
+                    &pool.db,
+                    machine_id,
+                    MachineStatusDb::Failed,
+                    Some(&e.to_string()),
+                )
+                .await;
+            }
+        });
+
+        Ok(updated)
+    }
+
+    /// Reconcile DB state against the provider on startup.
+    ///
+    /// Validates that every machine in the database still exists in the
+    /// provider and is in a consistent state.  Interrupted operations
+    /// (creating, provisioning, reverting) are marked failed.
+    pub async fn reconcile(&self) -> Result<()> {
+        info!("Reconciling machine pool with provider");
+
+        let db_machines = machinery::fetch_all_machines(&self.db)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        if db_machines.is_empty() {
+            info!("No machines in database, nothing to reconcile");
+            return Ok(());
+        }
+
+        let allocate = self.provider.allocate();
+        let provider_vms = allocate
+            .list()
             .await
             .map_err(|e| ResourceError::Provider(e.to_string()))?;
 
-        // Return ownership of the machine to the caller
-        Ok(pooled.machine)
+        for db_machine in &db_machines {
+            let machine_id = match db_machine.id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            match db_machine.status {
+                // Interrupted operations -> failed
+                MachineStatusDb::Creating | MachineStatusDb::Provisioning => {
+                    warn!(machine_id, status = ?db_machine.status, "Interrupted operation, marking failed");
+                    let _ = machinery::update_machine_status(
+                        &self.db,
+                        machine_id,
+                        MachineStatusDb::Failed,
+                        Some("Interrupted by restart"),
+                    )
+                    .await;
+                }
+
+                // Assigned or Reverting -> attempt snapshot revert, or mark failed
+                MachineStatusDb::Assigned | MachineStatusDb::Reverting => {
+                    warn!(machine_id, status = ?db_machine.status, "Machine was in-flight, attempting recovery");
+
+                    // Clear task assignment
+                    let _ = machinery::release_machine(&self.db, machine_id).await;
+
+                    // Try to revert via snapshot
+                    if self.try_snapshot_revert(machine_id, db_machine, &provider_vms).await {
+                        info!(machine_id, "Recovered machine via snapshot revert");
+                    } else {
+                        warn!(machine_id, "Could not recover, marking failed");
+                        let _ = machinery::update_machine_status(
+                            &self.db,
+                            machine_id,
+                            MachineStatusDb::Failed,
+                            Some("Could not recover after restart"),
+                        )
+                        .await;
+                    }
+                }
+
+                // Ready -> verify the VM and snapshot still exist in provider
+                MachineStatusDb::Ready => {
+                    if let Some(ref provider_id) = db_machine.provider_id {
+                        let vm_exists = provider_vms.iter().any(|vm| vm.id.0 == *provider_id);
+                        if !vm_exists {
+                            warn!(machine_id, provider_id, "Ready machine not found in provider, marking failed");
+                            let _ = machinery::update_machine_status(
+                                &self.db,
+                                machine_id,
+                                MachineStatusDb::Failed,
+                                Some("VM not found in provider after restart"),
+                            )
+                            .await;
+                            continue;
+                        }
+
+                        // Verify snapshot exists if provider has snapshot capability
+                        if let Some(snapshot_cap) = self.provider.snapshot() {
+                            if let Some(ref snap_name) = db_machine.clean_snapshot {
+                                let runtime_vm = provider_vms
+                                    .iter()
+                                    .find(|vm| vm.id.0 == *provider_id);
+                                if let Some(vm) = runtime_vm {
+                                    match snapshot_cap.list_snapshots(vm).await {
+                                        Ok(snaps) => {
+                                            let snap_exists = snaps.iter().any(|s| s.name == *snap_name);
+                                            if !snap_exists {
+                                                warn!(machine_id, snap_name, "Snapshot not found, marking failed");
+                                                let _ = machinery::update_machine_status(
+                                                    &self.db,
+                                                    machine_id,
+                                                    MachineStatusDb::Failed,
+                                                    Some("Clean snapshot not found in provider"),
+                                                )
+                                                .await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(machine_id, error = %e, "Failed to list snapshots, marking failed");
+                                            let _ = machinery::update_machine_status(
+                                                &self.db,
+                                                machine_id,
+                                                MachineStatusDb::Failed,
+                                                Some(&format!("Failed to verify snapshot: {e}")),
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        warn!(machine_id, "Ready machine missing provider_id, marking failed");
+                        let _ = machinery::update_machine_status(
+                            &self.db,
+                            machine_id,
+                            MachineStatusDb::Failed,
+                            Some("Missing provider_id"),
+                        )
+                        .await;
+                    }
+                }
+
+                // Deleting -> finish deletion
+                MachineStatusDb::Deleting => {
+                    warn!(machine_id, "Machine was mid-deletion, finishing cleanup");
+                    if let Some(ref provider_id) = db_machine.provider_id {
+                        let _ = self.deallocate_by_provider_id(provider_id).await;
+                    }
+                    let _ = machinery::delete_machine(&self.db, machine_id).await;
+                }
+
+                // Failed -> leave as-is
+                MachineStatusDb::Failed => {
+                    info!(machine_id, "Machine already failed, skipping");
+                }
+            }
+        }
+
+        info!("Reconciliation complete");
+        Ok(())
     }
 
-    /// Release a machine back to the pool.
+    /// Fetch a single machine by ID.
+    pub async fn get(&self, machine_id: i32) -> Result<Option<DbMachine>> {
+        machinery::fetch_machine(&self.db, machine_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))
+    }
+
+    /// List all machines.
+    pub async fn list(&self) -> Result<Vec<DbMachine>> {
+        machinery::fetch_all_machines(&self.db)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))
+    }
+
+    // ------------------------------------------------------------------
+    // Internal helpers
+    // ------------------------------------------------------------------
+
+    /// Full provisioning pipeline for a machine.
     ///
-    /// Pushes the machine ID back onto the available queue. The machine
-    /// must still exist in the machines Vec (i.e., it was not fully removed).
-    pub async fn release(&self, machine_id: &MachineId) -> Result<()> {
-        let machines = self.machines.read().await;
+    /// 1. Allocate VM from provider
+    /// 2. Wait for endpoint (IP)
+    /// 3. Update provider info in DB
+    /// 4. Run provisioner (if configured)
+    /// 5. Create clean snapshot (if provider supports snapshots)
+    /// 6. Mark ready
+    async fn provision_machine(&self, machine_id: i32, image_path: &str) -> Result<()> {
+        let allocate = self.provider.allocate();
 
-        // Check if machine exists in pool
-        let exists = machines.iter().any(|p| &p.machine.id == machine_id);
-        if !exists {
-            debug!(
-                "Machine {:?} not in pool (was removed via acquire)",
-                machine_id
-            );
-            return Ok(());
-        }
-        drop(machines);
+        // Update status to provisioning
+        machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Provisioning,
+            None,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
 
-        let mut available = self.available.write().await;
-        available.push_back(machine_id.clone());
+        // 1. Build spec and allocate VM
+        let spec = self.build_spec(machine_id, image_path);
+        let mut machine = allocate
+            .allocate(&spec)
+            .await
+            .map_err(|e| ResourceError::AllocationFailed(e.to_string()))?;
 
-        debug!("Machine {:?} released back to pool", machine_id);
+        // 2. Wait for endpoint
+        wait_for_endpoint(
+            allocate.as_ref(),
+            &mut machine,
+            std::time::Duration::from_secs(120),
+        )
+        .await?;
 
-        Ok(())
-    }
+        let ip_str = machine
+            .endpoint()
+            .map(|ep| ep.address.to_string())
+            .unwrap_or_default();
 
-    /// Shutdown the pool and deallocate all machines.
-    pub async fn shutdown(&self) -> Result<()> {
-        info!("Shutting down machine pool");
+        // 3. Update provider info in DB
+        machinery::set_machine_provider_info(
+            &self.db,
+            machine_id,
+            self.provider.name(),
+            &machine.id.0,
+            &ip_str,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
 
-        let mut machines = self.machines.write().await;
-
-        while let Some(pooled) = machines.pop() {
-            debug!("Deallocating machine {:?}", pooled.machine.id);
-            self.allocate
-                .deallocate(&pooled.machine)
-                .await
-                .map_err(|e| {
-                    warn!(
-                        "Failed to deallocate machine {:?}: {}",
-                        pooled.machine.id, e
-                    );
-                    ResourceError::DeallocationFailed(e.to_string())
+        // 4. Run provisioner if configured
+        if let Some(ref provisioner) = self.provisioner {
+            let endpoint = machine
+                .endpoint()
+                .ok_or_else(|| ResourceError::MachineNotReady {
+                    reason: "No endpoint available after readiness check".to_string(),
                 })?;
+
+            let context = ProvisionContext {
+                endpoint: endpoint.clone(),
+                spec: spec.clone(),
+                config: spec
+                    .provisioning
+                    .as_ref()
+                    .map(|p| p.config.clone())
+                    .unwrap_or(toml::Value::Table(toml::map::Map::new())),
+            };
+
+            info!(machine_id, provisioner = provisioner.name(), "Running provisioner");
+            let result = provisioner
+                .provision(&context)
+                .await
+                .map_err(|e| ResourceError::Provisioner(e.to_string()))?;
+
+            if result.status == ProvisionStatus::Failed {
+                return Err(ResourceError::Provisioner(format!(
+                    "Provisioner '{}' reported failure: {}",
+                    provisioner.name(),
+                    result.output.as_deref().unwrap_or("no output"),
+                )));
+            }
+        }
+
+        // 5. Create clean snapshot if provider supports it
+        if let Some(snapshot_cap) = self.provider.snapshot() {
+            let snap_id = snapshot_cap
+                .create_snapshot(&machine, &self.config.clean_snapshot_name)
+                .await
+                .map_err(|e| ResourceError::Provider(e.to_string()))?;
+
+            machinery::set_machine_snapshot(
+                &self.db,
+                machine_id,
+                &self.config.clean_snapshot_name,
+            )
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+            info!(machine_id, snapshot_id = %snap_id, "Clean snapshot created");
+        }
+
+        // 6. Mark ready
+        machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Ready,
+            None,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        self.machine_available.notify_waiters();
+        info!(machine_id, "Machine is ready");
+
+        Ok(())
+    }
+
+    /// Revert a machine to its clean state after task completion.
+    ///
+    /// If the provider supports snapshots and the machine has a recorded
+    /// snapshot, restores it.  Otherwise, deallocates and re-provisions
+    /// from the original image.
+    async fn revert_machine(&self, machine_id: i32) -> Result<()> {
+        let db_machine = self.require_machine(machine_id).await?;
+
+        // Try snapshot-based revert first
+        if let (Some(snapshot_cap), Some(snap_name), Some(provider_id)) = (
+            self.provider.snapshot(),
+            db_machine.clean_snapshot.as_deref(),
+            db_machine.provider_id.as_deref(),
+        ) {
+            // Find the runtime machine from the provider
+            let allocate = self.provider.allocate();
+            let provider_vms = allocate
+                .list()
+                .await
+                .map_err(|e| ResourceError::Provider(e.to_string()))?;
+
+            if let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == provider_id) {
+                // Find the snapshot by name
+                let snapshots = snapshot_cap
+                    .list_snapshots(runtime_vm)
+                    .await
+                    .map_err(|e| ResourceError::Provider(e.to_string()))?;
+
+                if let Some(snap_info) = snapshots.iter().find(|s| s.name == *snap_name) {
+                    // Restore snapshot
+                    snapshot_cap
+                        .restore_snapshot(runtime_vm, &snap_info.id)
+                        .await
+                        .map_err(|e| ResourceError::SnapshotRestoreFailed {
+                            id: machine_id,
+                            reason: e.to_string(),
+                        })?;
+
+                    // Mark ready
+                    machinery::update_machine_status(
+                        &self.db,
+                        machine_id,
+                        MachineStatusDb::Ready,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+                    self.machine_available.notify_waiters();
+                    info!(machine_id, "Machine reverted via snapshot");
+                    return Ok(());
+                }
+            }
+        }
+
+        // Fallback: deallocate and re-provision from image
+        info!(machine_id, "No snapshot available, re-provisioning from image");
+
+        // Deallocate existing VM if possible
+        if let Some(ref provider_id) = db_machine.provider_id {
+            let _ = self.deallocate_by_provider_id(provider_id).await;
+        }
+
+        // Resolve image path and re-provision
+        let image_path = self.resolve_image_path(&db_machine).await?;
+
+        // Reset to creating and re-provision
+        machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Creating,
+            None,
+        )
+        .await
+        .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        self.provision_machine(machine_id, &image_path).await
+    }
+
+    /// Build a `MachineSpec` for provider allocation.
+    fn build_spec(&self, machine_id: i32, image_path: &str) -> malbox_machinery::MachineSpec {
+        malbox_machinery::MachineSpec {
+            name: format!("malbox-machine-{}", machine_id),
+            platform: malbox_machinery::Platform::Linux, // TODO: map from DB
+            resources: malbox_machinery::Resources {
+                cpus: self.config.defaults.cpus,
+                memory_mb: self.config.defaults.memory as u32,
+            },
+            storage: malbox_machinery::Storage {
+                boot_disk_gb: 64,
+                disk_type: malbox_machinery::DiskType::Qcow2,
+            },
+            network: malbox_machinery::Network {
+                mode: malbox_machinery::NetworkMode::Nat,
+                ip: None,
+                mac: None,
+            },
+            base_image: Some(image_path.to_string()),
+            provisioning: None,
+        }
+    }
+
+    /// Fetch a machine from DB, returning an error if not found.
+    async fn require_machine(&self, machine_id: i32) -> Result<DbMachine> {
+        machinery::fetch_machine(&self.db, machine_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .ok_or_else(|| ResourceError::MachineNotFound {
+                id: machine_id.to_string(),
+            })
+    }
+
+    /// Resolve the image path for a machine from its `image_id`.
+    async fn resolve_image_path(&self, db_machine: &DbMachine) -> Result<String> {
+        let image_id = db_machine.image_id.ok_or_else(|| {
+            ResourceError::Internal("Machine has no image_id".to_string())
+        })?;
+
+        let image = images::fetch_image_by_id(&self.db, image_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .ok_or_else(|| ResourceError::Internal(format!(
+                "Image with id {} not found",
+                image_id,
+            )))?;
+
+        Ok(image.path)
+    }
+
+    /// Deallocate a VM by its provider-side ID.
+    async fn deallocate_by_provider_id(&self, provider_id: &str) -> Result<()> {
+        let allocate = self.provider.allocate();
+        let provider_vms = allocate
+            .list()
+            .await
+            .map_err(|e| ResourceError::Provider(e.to_string()))?;
+
+        if let Some(vm) = provider_vms.iter().find(|vm| vm.id.0 == provider_id) {
+            allocate
+                .deallocate(vm)
+                .await
+                .map_err(|e| ResourceError::DeallocationFailed(e.to_string()))?;
         }
 
         Ok(())
     }
 
-    /// Get pool statistics.
-    pub async fn stats(&self) -> PoolStats {
-        let machines = self.machines.read().await;
-        let available = self.available.read().await;
+    /// Attempt a snapshot-based revert during reconciliation.
+    ///
+    /// Returns `true` if the revert succeeded and the machine was marked ready.
+    async fn try_snapshot_revert(
+        &self,
+        machine_id: i32,
+        db_machine: &DbMachine,
+        provider_vms: &[malbox_machinery::Machine],
+    ) -> bool {
+        let snapshot_cap = match self.provider.snapshot() {
+            Some(cap) => cap,
+            None => return false,
+        };
 
-        PoolStats {
-            total: machines.len(),
-            available: available.len(),
-            in_use: machines.len().saturating_sub(available.len()),
+        let snap_name = match &db_machine.clean_snapshot {
+            Some(name) if !name.is_empty() => name,
+            _ => return false,
+        };
+
+        let provider_id = match &db_machine.provider_id {
+            Some(id) if !id.is_empty() => id,
+            _ => return false,
+        };
+
+        let runtime_vm = match provider_vms.iter().find(|vm| vm.id.0 == *provider_id) {
+            Some(vm) => vm,
+            None => return false,
+        };
+
+        let snapshots = match snapshot_cap.list_snapshots(runtime_vm).await {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let snap_info = match snapshots.iter().find(|s| s.name == *snap_name) {
+            Some(info) => info,
+            None => return false,
+        };
+
+        if snapshot_cap
+            .restore_snapshot(runtime_vm, &snap_info.id)
+            .await
+            .is_err()
+        {
+            return false;
+        }
+
+        if machinery::update_machine_status(
+            &self.db,
+            machine_id,
+            MachineStatusDb::Ready,
+            None,
+        )
+        .await
+        .is_ok()
+        {
+            self.machine_available.notify_waiters();
+            true
+        } else {
+            false
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct PoolStats {
-    pub total: usize,
-    pub available: usize,
-    pub in_use: usize,
 }
