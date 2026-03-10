@@ -23,11 +23,6 @@ pub enum MachineError {
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to truncate `machines` table")]
-    TruncateFailed {
-        #[source]
-        source: sqlx::Error,
-    },
     #[error("Failed to delete from `machines` table")]
     DeleteFailed {
         #[source]
