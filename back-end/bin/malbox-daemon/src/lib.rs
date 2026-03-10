@@ -13,7 +13,6 @@ use malbox_utils::SampleStore;
 use std::sync::Arc;
 
 pub mod error;
-mod image_store;
 mod providers;
 mod provisioners;
 
@@ -39,7 +38,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
     if let Some(ref images_config) = config.images {
         let store_path = std::path::PathBuf::from(&images_config.store_path);
         if store_path.exists() {
-            image_store::spawn_image_watcher(store_path, db.clone());
+            malbox_utils::image_store::spawn_image_watcher(store_path, db.clone());
         } else {
             tracing::warn!(
                 "Image store path does not exist: {}",

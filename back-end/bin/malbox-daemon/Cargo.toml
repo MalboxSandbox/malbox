@@ -36,4 +36,3 @@ color-eyre = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-notify = { workspace = true }
