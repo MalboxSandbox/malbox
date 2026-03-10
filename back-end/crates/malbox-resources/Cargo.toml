@@ -6,7 +6,10 @@ edition = "2024"
 [dependencies]
 malbox-machinery = { path = "../malbox-machinery" }
 malbox-config = { path = "../malbox-config" }
+malbox-database = { path = "../malbox-database" }
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
+sqlx = { workspace = true }
+uuid = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "fs"] }

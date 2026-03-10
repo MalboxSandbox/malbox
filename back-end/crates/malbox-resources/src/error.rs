@@ -49,6 +49,9 @@ pub enum ResourceError {
 
     #[error("Guest access not configured but required by task")]
     GuestAccessNotConfigured,
+
+    #[error("Database error: {0}")]
+    Database(String),
 }
 
 pub type Result<T> = std::result::Result<T, ResourceError>;

@@ -1,13 +1,14 @@
 //! Machine pooling for snapshot-capable providers
 //!
-//! This module implements a simple pool that manages pre-allocated machines.
-//! The pool itself does NOT handle allocation or provisioning - that's the
-//! responsibility of the MachineryManager. The pool just tracks machines
-//! and their clean snapshots.
+//! This module implements a DB-backed pool that manages pre-allocated machines.
+//! The pool keeps an in-memory cache (Vec<PooledMachine> + VecDeque<MachineId>)
+//! for fast acquisition, with the database as the source of truth for persistence
+//! across restarts.
 
 use crate::error::{ResourceError, Result};
 use crate::{Allocate, Machine, MachineId, Snapshot, SnapshotId};
-use std::collections::{HashMap, VecDeque};
+use malbox_database::PgPool;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -30,22 +31,24 @@ impl Default for PoolConfig {
     }
 }
 
-/// A machine in the pool with its clean snapshot.
-struct PooledMachine {
-    machine: Machine,
-    clean_snapshot: SnapshotId,
-    in_use: bool,
+/// A machine in the pool with its clean snapshot and DB row ID.
+pub struct PooledMachine {
+    pub machine: Machine,
+    pub clean_snapshot: SnapshotId,
+    pub db_id: i32,
 }
 
 /// Machine pool for snapshot-capable providers.
 ///
-/// This pool maintains a set of machines with their clean snapshots.
-/// It does NOT handle allocation or provisioning - just pool management.
+/// Maintains a set of machines with their clean snapshots, backed by a
+/// database for persistence. The in-memory cache provides fast acquisition
+/// while the DB is the source of truth for reconciliation on restart.
 pub struct MachinePool {
     snapshot: Arc<dyn Snapshot>,
     allocate: Arc<dyn Allocate>,
     config: PoolConfig,
-    machines: Arc<RwLock<HashMap<MachineId, PooledMachine>>>,
+    db: PgPool,
+    machines: Arc<RwLock<Vec<PooledMachine>>>,
     available: Arc<RwLock<VecDeque<MachineId>>>,
 }
 
@@ -55,14 +58,25 @@ impl MachinePool {
         snapshot: Arc<dyn Snapshot>,
         allocate: Arc<dyn Allocate>,
         config: PoolConfig,
+        db: PgPool,
     ) -> Self {
         Self {
             snapshot,
             allocate,
             config,
-            machines: Arc::new(RwLock::new(HashMap::new())),
+            db,
+            machines: Arc::new(RwLock::new(Vec::new())),
             available: Arc::new(RwLock::new(VecDeque::new())),
         }
+    }
+
+    /// Load existing pool machines from the database for reconciliation.
+    pub async fn load_from_db(
+        &self,
+    ) -> Result<Vec<malbox_database::repositories::machinery::Machine>> {
+        malbox_database::repositories::machinery::fetch_pool_machines(&self.db)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))
     }
 
     /// Add a pre-allocated and provisioned machine to the pool.
@@ -71,22 +85,23 @@ impl MachinePool {
         &self,
         machine: Machine,
         clean_snapshot: SnapshotId,
+        db_id: i32,
     ) -> Result<MachineId> {
         let machine_id = machine.id.clone();
 
         info!(
-            "Adding machine {:?} to pool with clean snapshot",
-            machine_id
+            "Adding machine {:?} to pool with clean snapshot (db_id={})",
+            machine_id, db_id
         );
 
         let pooled = PooledMachine {
             machine,
             clean_snapshot,
-            in_use: false,
+            db_id,
         };
 
         let mut machines = self.machines.write().await;
-        machines.insert(machine_id.clone(), pooled);
+        machines.push(pooled);
 
         let mut available = self.available.write().await;
         available.push_back(machine_id.clone());
@@ -112,8 +127,9 @@ impl MachinePool {
 
     /// Acquire a machine from the pool.
     ///
-    /// Removes the machine from the pool and returns ownership.
-    /// The machine must be re-added via add_machine() if it's to be returned to the pool.
+    /// Restores the machine to its clean snapshot and removes it from
+    /// the in-memory cache. The machine must be re-added via add_machine()
+    /// if it's to be returned to the pool.
     pub async fn acquire(&self) -> Result<Machine> {
         let mut available = self.available.write().await;
 
@@ -126,17 +142,19 @@ impl MachinePool {
         drop(available);
 
         let mut machines = self.machines.write().await;
-        let mut pooled =
-            machines
-                .remove(&machine_id)
-                .ok_or_else(|| ResourceError::MachineNotFound {
-                    id: format!("{:?}", machine_id),
-                })?;
+        let idx = machines
+            .iter()
+            .position(|p| p.machine.id == machine_id)
+            .ok_or_else(|| ResourceError::MachineNotFound {
+                id: format!("{:?}", machine_id),
+            })?;
+
+        let pooled = machines.remove(idx);
 
         // Restore to clean snapshot before returning
         debug!("Restoring machine {:?} to clean snapshot", machine_id);
         self.snapshot
-            .restore_snapshot(&mut pooled.machine, &pooled.clean_snapshot)
+            .restore_snapshot(&pooled.machine, &pooled.clean_snapshot)
             .await
             .map_err(|e| ResourceError::Provider(e.to_string()))?;
 
@@ -146,15 +164,14 @@ impl MachinePool {
 
     /// Release a machine back to the pool.
     ///
-    /// Note: This method expects the machine to already be in the pool (marked as in-use).
-    /// If the machine was removed via acquire(), it must be re-added via add_machine() instead.
+    /// Pushes the machine ID back onto the available queue. The machine
+    /// must still exist in the machines Vec (i.e., it was not fully removed).
     pub async fn release(&self, machine_id: &MachineId) -> Result<()> {
         let machines = self.machines.read().await;
 
         // Check if machine exists in pool
-        if !machines.contains_key(machine_id) {
-            // Machine was removed from pool (via acquire), cannot release
-            // This is expected behavior - just log and return Ok
+        let exists = machines.iter().any(|p| &p.machine.id == machine_id);
+        if !exists {
             debug!(
                 "Machine {:?} not in pool (was removed via acquire)",
                 machine_id
@@ -163,7 +180,6 @@ impl MachinePool {
         }
         drop(machines);
 
-        // Machine is in pool, mark as available
         let mut available = self.available.write().await;
         available.push_back(machine_id.clone());
 
@@ -177,19 +193,19 @@ impl MachinePool {
         info!("Shutting down machine pool");
 
         let mut machines = self.machines.write().await;
-        let machine_ids: Vec<_> = machines.keys().cloned().collect();
 
-        for machine_id in machine_ids {
-            if let Some(pooled) = machines.remove(&machine_id) {
-                debug!("Deallocating machine {:?}", machine_id);
-                self.allocate
-                    .deallocate(&pooled.machine)
-                    .await
-                    .map_err(|e| {
-                        warn!("Failed to deallocate machine {:?}: {}", machine_id, e);
-                        ResourceError::DeallocationFailed(e.to_string())
-                    })?;
-            }
+        while let Some(pooled) = machines.pop() {
+            debug!("Deallocating machine {:?}", pooled.machine.id);
+            self.allocate
+                .deallocate(&pooled.machine)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        "Failed to deallocate machine {:?}: {}",
+                        pooled.machine.id, e
+                    );
+                    ResourceError::DeallocationFailed(e.to_string())
+                })?;
         }
 
         Ok(())
@@ -203,7 +219,7 @@ impl MachinePool {
         PoolStats {
             total: machines.len(),
             available: available.len(),
-            in_use: machines.values().filter(|m| m.in_use).count(),
+            in_use: machines.len().saturating_sub(available.len()),
         }
     }
 }
