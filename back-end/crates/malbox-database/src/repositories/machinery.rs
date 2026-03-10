@@ -1,8 +1,10 @@
 use crate::error::{MachineError, Result};
 use malbox_config::types::Platform as MachinePlatformConfig;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool, Postgres, QueryBuilder, query, query_as};
+use sqlx::{FromRow, PgPool, Postgres, QueryBuilder};
+use time::OffsetDateTime;
 use time::PrimitiveDateTime;
+use uuid::Uuid;
 
 #[derive(sqlx::Type, Debug, Serialize, Deserialize, Default)]
 #[sqlx(type_name = "machine_arch", rename_all = "lowercase")]
@@ -18,6 +20,16 @@ pub enum MachinePlatform {
     #[default]
     Windows,
     Linux,
+}
+
+#[derive(sqlx::Type, Debug, Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
+#[sqlx(type_name = "provision_status", rename_all = "lowercase")]
+pub enum ProvisionStatusDb {
+    #[default]
+    Unprovisioned,
+    Provisioning,
+    Provisioned,
+    Failed,
 }
 
 impl From<MachinePlatformConfig> for MachinePlatform {
@@ -45,6 +57,14 @@ pub struct Machine {
     pub status: Option<String>,
     pub status_changed_on: Option<PrimitiveDateTime>,
     pub reserved: bool,
+    // Pool persistence fields
+    pub image_id: Option<Uuid>,
+    pub provision_status: Option<ProvisionStatusDb>,
+    pub clean_snapshot: Option<String>,
+    pub pool_member: Option<bool>,
+    pub provider: Option<String>,
+    pub provider_id: Option<String>,
+    pub last_seen: Option<OffsetDateTime>,
 }
 
 #[derive(Default)]
@@ -59,36 +79,46 @@ pub struct MachineFilter {
 }
 
 pub async fn insert_machine(pool: &PgPool, machine: Machine) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         INSERT into "machines" (
             name, label, arch, platform, ip, interface, tags,
             snapshot, locked, locked_changed_on, status, status_changed_on,
-            reserved
+            reserved, image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            $14, $15, $16, $17, $18, $19, $20
         )
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        machine.name,
-        machine.label,
-        machine.arch as MachineArch,
-        machine.platform as MachinePlatform,
-        machine.ip,
-        machine.interface,
-        machine.tags.as_deref(),
-        machine.snapshot,
-        machine.locked,
-        machine.locked_changed_on,
-        machine.status,
-        machine.status_changed_on,
-        machine.reserved
     )
+    .bind(machine.name.clone())
+    .bind(machine.label.clone())
+    .bind(machine.arch)
+    .bind(machine.platform)
+    .bind(machine.ip.clone())
+    .bind(machine.interface.clone())
+    .bind(machine.tags.clone())
+    .bind(machine.snapshot.clone())
+    .bind(machine.locked)
+    .bind(machine.locked_changed_on)
+    .bind(machine.status.clone())
+    .bind(machine.status_changed_on)
+    .bind(machine.reserved)
+    .bind(machine.image_id)
+    .bind(machine.provision_status)
+    .bind(machine.clean_snapshot.clone())
+    .bind(machine.pool_member)
+    .bind(machine.provider.clone())
+    .bind(machine.provider_id.clone())
+    .bind(machine.last_seen)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -102,19 +132,19 @@ pub async fn insert_machine(pool: &PgPool, machine: Machine) -> Result<Machine> 
 }
 
 pub async fn clean_machines(pool: &PgPool) -> Result<()> {
-    query!(
+    sqlx::query(
         r#"
         TRUNCATE "machines";
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| MachineError::TruncateFailed { source: e });
 
-    query!(
+    sqlx::query(
         r#"
         DELETE FROM "machines";
-        "#
+        "#,
     )
     .execute(pool)
     .await
@@ -129,9 +159,11 @@ pub async fn fetch_machines(pool: &PgPool, filter: Option<MachineFilter>) -> Res
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         SELECT
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         FROM "machines"
         "#,
     );
@@ -184,9 +216,11 @@ pub async fn fetch_machine(
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
         r#"
         SELECT
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         FROM "machines" WHERE 1 = 1
         "#,
     );
@@ -231,8 +265,7 @@ pub async fn fetch_machine(
 }
 
 pub async fn update_machine(pool: &PgPool, id: i32, machine: Machine) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         UPDATE "machines"
         SET
@@ -251,25 +284,27 @@ pub async fn update_machine(pool: &PgPool, id: i32, machine: Machine) -> Result<
             reserved = $13
         WHERE id = $14
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        machine.name,
-        machine.label,
-        machine.arch as MachineArch,
-        machine.platform as MachinePlatform,
-        machine.ip,
-        machine.interface,
-        machine.tags.as_deref(),
-        machine.snapshot,
-        machine.locked,
-        machine.locked_changed_on,
-        machine.status,
-        machine.status_changed_on,
-        machine.reserved,
-        id
     )
+    .bind(machine.name.clone())
+    .bind(machine.label.clone())
+    .bind(machine.arch)
+    .bind(machine.platform)
+    .bind(machine.ip.clone())
+    .bind(machine.interface.clone())
+    .bind(machine.tags.clone())
+    .bind(machine.snapshot.clone())
+    .bind(machine.locked)
+    .bind(machine.locked_changed_on)
+    .bind(machine.status.clone())
+    .bind(machine.status_changed_on)
+    .bind(machine.reserved)
+    .bind(id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -287,8 +322,7 @@ pub async fn update_machine_status(
     locked: bool,
     status: Option<&str>,
 ) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         UPDATE "machines"
         SET
@@ -298,14 +332,16 @@ pub async fn update_machine_status(
             status_changed_on = NOW()
         WHERE id = $3
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        locked,
-        status,
-        id
     )
+    .bind(locked)
+    .bind(status)
+    .bind(id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -326,20 +362,21 @@ pub async fn unlock_machine(pool: &PgPool, id: i32) -> Result<Machine> {
 }
 
 pub async fn assign_snapshot(pool: &PgPool, id: i32, snapshot: String) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         UPDATE "machines"
         SET snapshot = $1
         WHERE id = $2
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        snapshot,
-        id
     )
+    .bind(snapshot)
+    .bind(id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -352,20 +389,21 @@ pub async fn assign_snapshot(pool: &PgPool, id: i32, snapshot: String) -> Result
 }
 
 pub async fn update_machine_tags(pool: &PgPool, id: i32, tags: Vec<String>) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         UPDATE "machines"
         SET tags = $1
         WHERE id = $2
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        &tags,
-        id
     )
+    .bind(tags)
+    .bind(id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -383,8 +421,7 @@ pub async fn update_machine_network(
     ip: &str,
     interface: Option<&str>,
 ) -> Result<Machine> {
-    query_as!(
-        Machine,
+    sqlx::query_as::<_, Machine>(
         r#"
         UPDATE "machines"
         SET
@@ -392,14 +429,16 @@ pub async fn update_machine_network(
             interface = $2
         WHERE id = $3
         RETURNING
-            id, name, label, arch as "arch!: MachineArch", platform as "platform!: MachinePlatform",
+            id, name, label, arch, platform,
             ip, interface, tags, snapshot, locked, locked_changed_on, status,
-            status_changed_on, reserved
+            status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
         "#,
-        ip,
-        interface,
-        id
     )
+    .bind(ip)
+    .bind(interface)
+    .bind(id)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -409,4 +448,115 @@ pub async fn update_machine_network(
         }
         .into()
     })
+}
+
+pub async fn fetch_pool_machines(pool: &PgPool) -> Result<Vec<Machine>> {
+    sqlx::query_as::<_, Machine>(
+        r#"
+        SELECT
+            id, name, label, arch, platform, ip, interface, tags,
+            snapshot, locked, locked_changed_on, status, status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
+        FROM "machines"
+        WHERE pool_member = true
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| MachineError::FetchFailed { source: e }.into())
+}
+
+pub async fn upsert_pool_machine(
+    pool: &PgPool,
+    name: &str,
+    label: &str,
+    platform: MachinePlatform,
+    arch: MachineArch,
+    ip: &str,
+    image_id: Uuid,
+    provision_status: ProvisionStatusDb,
+    clean_snapshot: Option<&str>,
+    provider: &str,
+    provider_id: &str,
+) -> Result<Machine> {
+    sqlx::query_as::<_, Machine>(
+        r#"
+        INSERT INTO "machines" (
+            name, label, platform, arch, ip, locked, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
+        )
+        VALUES ($1, $2, $3, $4, $5, false, false, $6, $7, $8, true, $9, $10, now())
+        RETURNING
+            id, name, label, arch, platform, ip, interface, tags,
+            snapshot, locked, locked_changed_on, status, status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
+        "#,
+    )
+    .bind(name)
+    .bind(label)
+    .bind(platform)
+    .bind(arch)
+    .bind(ip)
+    .bind(image_id)
+    .bind(provision_status)
+    .bind(clean_snapshot)
+    .bind(provider)
+    .bind(provider_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        MachineError::InsertFailed {
+            name: name.to_string(),
+            message: "failed to upsert pool machine".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
+
+pub async fn update_provision_status(
+    pool: &PgPool,
+    id: i32,
+    status: ProvisionStatusDb,
+    clean_snapshot: Option<&str>,
+) -> Result<Machine> {
+    sqlx::query_as::<_, Machine>(
+        r#"
+        UPDATE "machines"
+        SET provision_status = $1, clean_snapshot = $2, last_seen = now()
+        WHERE id = $3
+        RETURNING
+            id, name, label, arch, platform, ip, interface, tags,
+            snapshot, locked, locked_changed_on, status, status_changed_on, reserved,
+            image_id, provision_status, clean_snapshot, pool_member,
+            provider, provider_id, last_seen
+        "#,
+    )
+    .bind(status)
+    .bind(clean_snapshot)
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        MachineError::UpdateFailed {
+            message: "Failed to update provision status".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
+
+pub async fn remove_pool_machine(pool: &PgPool, id: i32) -> Result<()> {
+    sqlx::query(r#"UPDATE "machines" SET pool_member = false WHERE id = $1"#)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| MachineError::UpdateFailed {
+            message: "Failed to remove from pool".to_string(),
+            source: e,
+        })?;
+    Ok(())
 }
