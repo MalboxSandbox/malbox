@@ -1,11 +1,4 @@
--- Image registry and pool state persistence
-
-CREATE TYPE provision_status AS ENUM (
-    'unprovisioned',
-    'provisioning',
-    'provisioned',
-    'failed'
-);
+-- Image registry
 
 CREATE TABLE "images" (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v1mc(),
@@ -22,12 +15,7 @@ CREATE TABLE "images" (
 
 SELECT trigger_updated_on('"images"');
 
--- Extend machines table for pool persistence
+-- Add foreign keys on machines that reference tables created in later migrations
 ALTER TABLE "machines"
-    ADD COLUMN image_id          UUID REFERENCES images(id),
-    ADD COLUMN provision_status  provision_status NOT NULL DEFAULT 'unprovisioned',
-    ADD COLUMN clean_snapshot    VARCHAR,
-    ADD COLUMN pool_member       BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN provider          VARCHAR,
-    ADD COLUMN provider_id       VARCHAR,
-    ADD COLUMN last_seen         TIMESTAMPTZ;
+    ADD CONSTRAINT machines_image_id_fkey FOREIGN KEY (image_id) REFERENCES images(id),
+    ADD CONSTRAINT machines_current_task_id_fkey FOREIGN KEY (current_task_id) REFERENCES tasks(id);
