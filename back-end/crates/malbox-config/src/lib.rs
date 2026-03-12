@@ -15,7 +15,7 @@ pub mod types;
 
 pub use core::Config;
 pub use error::ConfigError;
-pub use guest_access::GuestAccessConfig;
+pub use guest_access::{GuestAccessConfig, TransportKind};
 pub use images::ImagesConfig;
 pub use machinery::MachineryConfig;
 pub use plugins::PluginsConfig;

@@ -120,7 +120,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
             })?;
 
         tracing::info!(
-            transport = ga_config.transport.as_str(),
+            transport = ?ga_config.transport,
             "Guest access transport resolved"
         );
         Some(Arc::new(resolved))
@@ -129,7 +129,6 @@ pub async fn run(config: &Config) -> error::Result<()> {
         None
     };
 
-    // Initialize plugin registry
     let plugin_dir = &config.plugins.directory;
 
     // Ensure plugin directory exists
@@ -143,6 +142,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
         })?;
     }
 
+    // Initialize plugin registry
     let registry = Arc::new(
         malbox_plugin_internal::registry::PluginRegistry::new(plugin_dir.clone()).map_err(|e| {
             DaemonError::Internal(format!("Failed to initialize plugin registry: {}", e))
@@ -175,9 +175,10 @@ pub async fn run(config: &Config) -> error::Result<()> {
     ));
 
     // Reconcile DB machines against provider state on startup
-    machine_pool.reconcile().await.map_err(|e| {
-        DaemonError::Internal(format!("Failed to reconcile machine pool: {}", e))
-    })?;
+    machine_pool
+        .reconcile()
+        .await
+        .map_err(|e| DaemonError::Internal(format!("Failed to reconcile machine pool: {}", e)))?;
 
     // Initialize IPC event emitter for daemon → plugin communication
     let node = NodeBuilder::new()

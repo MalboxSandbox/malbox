@@ -1,5 +1,34 @@
 use serde::{Deserialize, Serialize};
 
+/// Which transport mechanism to use for guest communication.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum TransportKind {
+    /// Built-in gRPC transport over the network.
+    Grpc,
+    /// Provider-native transport (e.g., "virtio-serial", "qemu-guest-agent").
+    Provider(String),
+}
+
+impl From<String> for TransportKind {
+    fn from(s: String) -> Self {
+        if s == "grpc" {
+            TransportKind::Grpc
+        } else {
+            TransportKind::Provider(s)
+        }
+    }
+}
+
+impl From<TransportKind> for String {
+    fn from(kind: TransportKind) -> Self {
+        match kind {
+            TransportKind::Grpc => "grpc".to_string(),
+            TransportKind::Provider(name) => name,
+        }
+    }
+}
+
 /// Guest access configuration.
 ///
 /// Configures how the daemon communicates with guest VMs for file transfer
@@ -7,11 +36,7 @@ use serde::{Deserialize, Serialize};
 /// requiring it will fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuestAccessConfig {
-    /// Name of the transport to use (e.g., "virtio-serial", "grpc").
-    ///
-    /// This is resolved at startup: first checked against the provider's
-    /// native transports, then against registered standalone transports.
-    pub transport: String,
+    pub transport: TransportKind,
 
     /// Transport-specific configuration passed through to the transport.
     #[serde(default = "default_transport_config")]

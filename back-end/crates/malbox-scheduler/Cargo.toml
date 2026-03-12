@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 malbox-database = { path = "../malbox-database" }
 malbox-config = { path = "../malbox-config" }
+malbox-machinery = { path = "../malbox-machinery" }
 malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
 malbox-utils = { path = "../malbox-utils" }

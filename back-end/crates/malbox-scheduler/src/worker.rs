@@ -22,14 +22,16 @@ use malbox_config::MachineryConfig;
 use malbox_database::repositories::samples::fetch_sample_by_id;
 use malbox_database::repositories::tasks::TaskState;
 use malbox_plugin_internal::manager::PluginManager;
+use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::messages::events::{
     Event, Payload, TaskEvent, TaskEventPayload,
 };
 use malbox_plugin_internal::transport::traits::TransportEmitter;
-use malbox_resources::{
-    Machine as RuntimeMachine, MachineEndpoint, MachineId, MachinePool, MachineSpec, MachineState,
-    Platform, ResolvedTransport, Resources, Storage, DiskType, Network, NetworkMode,
+use malbox_machinery::{
+    Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineSpec, MachineState,
+    Platform, Resources, Storage, DiskType, Network, NetworkMode,
 };
+use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -229,7 +231,7 @@ impl Worker {
                 self.task_queue.enqueue(task_id, task.priority).await;
                 tokio::time::timeout(
                     std::time::Duration::from_secs(30),
-                    self.machine_pool.available_notifier().notified(),
+                    self.machine_pool.machine_available.notified(),
                 )
                 .await
                 .ok();
@@ -307,80 +309,86 @@ impl Worker {
             .update_task_state(task_id, TaskState::Running)
             .await?;
 
-        // Guest access phase: transfer sample, execute, collect results.
-        // Only activated when a transport is configured.
-        if let Some(ref transport) = self.transport {
-            match transport.open_session(&runtime_machine).await {
-                Ok(session) => {
-                    // Push sample file to guest if task has a sample
-                    if let Some(sample_id) = task.sample_id {
-                        let sample = fetch_sample_by_id(self.task_store.pool(), sample_id)
-                            .await
-                            .map_err(|e| {
-                                SchedulerError::Internal(format!(
-                                    "Failed to fetch sample {}: {}",
-                                    sample_id, e
-                                ))
-                            })?
-                            .ok_or_else(|| {
-                                SchedulerError::Internal(format!(
-                                    "Sample {} not found in database",
-                                    sample_id
-                                ))
-                            })?;
+        // Guest access phase: transfer sample to guest.
+        // Only activated when a transport is configured and task has a sample.
+        if let (Some(transport), Some(sample_id)) = (&self.transport, task.sample_id) {
+            let sample = fetch_sample_by_id(self.task_store.pool(), sample_id)
+                .await
+                .map_err(|e| {
+                    SchedulerError::Internal(format!("Failed to fetch sample {}: {}", sample_id, e))
+                })?
+                .ok_or_else(|| {
+                    SchedulerError::Internal(format!("Sample {} not found in database", sample_id))
+                })?;
 
-                        let host_path = self.sample_store.path(&sample.sha256).map_err(|e| {
+            let host_path = self.sample_store.path(&sample.sha256).map_err(|e| {
+                SchedulerError::Internal(format!("Failed to resolve sample path: {}", e))
+            })?;
+
+            info!(task_id, sample_id, path = %host_path.display(), "Pushing sample to guest");
+
+            let result = match transport.as_ref() {
+                ResolvedTransport::Native {
+                    guest_access,
+                    transport_name,
+                    config,
+                } => {
+                    let session = guest_access
+                        .open_session(transport_name, &runtime_machine, config)
+                        .await
+                        .map_err(|e| {
                             SchedulerError::Internal(format!(
-                                "Failed to resolve sample path: {}",
+                                "Failed to open native guest session: {}",
                                 e
                             ))
                         })?;
-
-                        info!(task_id, sample_id, path = %host_path.display(), "Pushing sample to guest");
-
-                        session
-                            .push_file(&host_path, &task.target)
-                            .await
-                            .map_err(|e| {
-                                SchedulerError::Internal(format!(
-                                    "Failed to push sample to guest: {}",
-                                    e
-                                ))
-                            })?;
-
-                        info!(
-                            task_id,
-                            dest = task.target.as_str(),
-                            "Sample transferred to guest"
-                        );
-                    } else {
-                        warn!(
-                            task_id,
-                            "Task has no sample_id, skipping guest file transfer"
-                        );
-                    }
-
+                    let r = session.push_file(&host_path, &task.target).await;
                     if let Err(e) = session.close().await {
                         warn!(task_id, error = %e, "Failed to close guest session cleanly");
                     }
+                    r.map_err(|e| {
+                        SchedulerError::Internal(format!("Failed to push sample to guest: {}", e))
+                    })
                 }
-                Err(e) => {
-                    error!(task_id, error = %e, "Failed to open guest session");
-                    self.task_store
-                        .update_task_state(task_id, TaskState::Failed)
-                        .await?;
-                    self.emit_task_event(TaskEvent::TaskFailed, task_id);
-
-                    // Still release the machine
-                    if let Err(rel_err) = self.machine_pool.release(machine_id).await {
-                        error!(task_id, machine_id, error = %rel_err, "Failed to release machine after guest session failure");
+                ResolvedTransport::Grpc { address } => {
+                    let mut client = GrpcClient::connect(address.as_str())
+                        .await
+                        .map_err(|e| {
+                            SchedulerError::Internal(format!(
+                                "Failed to connect gRPC transport: {}",
+                                e
+                            ))
+                        })?;
+                    let data = tokio::fs::read(&host_path).await.map_err(|e| {
+                        SchedulerError::Internal(format!("Failed to read sample file: {}", e))
+                    })?;
+                    let resp = client.push_file(&task.target, data).await.map_err(|e| {
+                        SchedulerError::Internal(format!("Failed to push sample to guest: {}", e))
+                    })?;
+                    if !resp.success {
+                        return Err(SchedulerError::Internal(format!(
+                            "Guest push_file failed: {}",
+                            resp.error_message
+                        )));
                     }
-                    return Err(SchedulerError::Internal(format!(
-                        "Guest session failed for task {}: {}",
-                        task_id, e
-                    )));
+                    Ok(())
                 }
+            };
+
+            if let Err(e) = result {
+                error!(task_id, error = %e, "Failed to push sample to guest");
+                self.task_store
+                    .update_task_state(task_id, TaskState::Failed)
+                    .await?;
+                self.emit_task_event(TaskEvent::TaskFailed, task_id);
+
+                if let Err(rel_err) = self.machine_pool.release(machine_id).await {
+                    error!(task_id, machine_id, error = %rel_err, "Failed to release machine after guest session failure");
+                }
+                return Err(e);
             }
+
+            info!(task_id, dest = task.target.as_str(), "Sample transferred to guest");
         }
 
         // --- Plugin execution phase ---
