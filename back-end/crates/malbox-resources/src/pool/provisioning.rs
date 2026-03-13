@@ -77,6 +77,15 @@ impl MachinePool {
                 .await
                 .map_err(|e| ResourceError::Provisioner(e.to_string()))?;
 
+            machinery::set_machine_provision_info(
+                &self.db,
+                machine_id,
+                provisioner.name(),
+                result.output.as_deref(),
+            )
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
             if result.status == ProvisionStatus::Failed {
                 return Err(ResourceError::Provisioner(format!(
                     "Provisioner '{}' reported failure: {}",

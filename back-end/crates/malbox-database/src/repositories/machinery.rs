@@ -56,6 +56,9 @@ pub struct Machine {
     pub clean_snapshot: Option<String>,
     pub provider: Option<String>,
     pub provider_id: Option<String>,
+    pub provisioned: bool,
+    pub provisioner: Option<String>,
+    pub provision_output: Option<serde_json::Value>,
     pub last_seen: Option<OffsetDateTime>,
     pub current_task_id: Option<i32>,
     pub error_message: Option<String>,
@@ -216,6 +219,45 @@ pub async fn set_machine_provider_info(
     .map_err(|e| {
         MachineError::UpdateFailed {
             message: "failed to set machine provider info".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
+
+/// Record provisioning details for a machine.
+///
+/// The output string is stored as JSONB. If it's valid JSON it's stored directly;
+/// otherwise it's wrapped as `{"raw": "..."}`.
+pub async fn set_machine_provision_info(
+    pool: &PgPool,
+    machine_id: i32,
+    provisioner: &str,
+    output: Option<&str>,
+) -> Result<Machine> {
+    let json_output: Option<serde_json::Value> = output.map(|s| {
+        serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!({ "raw": s }))
+    });
+
+    sqlx::query_as::<_, Machine>(
+        r#"
+        UPDATE "machines"
+        SET provisioned = true,
+            provisioner = $1,
+            provision_output = $2,
+            updated_at = NOW()
+        WHERE id = $3
+        RETURNING *
+        "#,
+    )
+    .bind(provisioner)
+    .bind(json_output)
+    .bind(machine_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        MachineError::UpdateFailed {
+            message: "failed to set machine provision info".to_string(),
             source: e,
         }
         .into()

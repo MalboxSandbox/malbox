@@ -7,4 +7,5 @@ edition = "2024"
 malbox-machinery = { path = "../malbox-machinery" }
 async-trait.workspace = true
 inventory.workspace = true
+serde_json.workspace = true
 tracing.workspace = true

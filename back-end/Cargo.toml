@@ -17,6 +17,7 @@ sqlx = { version = "0.8.6", features = [
     "postgres",
     "uuid",
     "time",
+    "json",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"

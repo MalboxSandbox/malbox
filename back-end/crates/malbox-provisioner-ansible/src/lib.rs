@@ -127,6 +127,7 @@ impl Provisioner for AnsibleProvisioner {
 
         // Build the ansible-playbook command.
         let mut cmd = tokio::process::Command::new(&self.config.ansible_bin);
+        cmd.env("ANSIBLE_STDOUT_CALLBACK", "json");
         cmd.arg("-i").arg(&inventory_path);
         cmd.arg(self.config.playbook.as_os_str());
 
