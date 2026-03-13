@@ -85,10 +85,7 @@ async fn list_machines(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-async fn get_machine(
-    State(state): State<AppState>,
-    Path(id): Path<i32>,
-) -> impl IntoResponse {
+async fn get_machine(State(state): State<AppState>, Path(id): Path<i32>) -> impl IntoResponse {
     match state.machine_pool.get(id).await {
         Ok(Some(machine)) => (StatusCode::OK, Json(serde_json::json!(machine))).into_response(),
         Ok(None) => (
@@ -100,20 +97,14 @@ async fn get_machine(
     }
 }
 
-async fn delete_machine(
-    State(state): State<AppState>,
-    Path(id): Path<i32>,
-) -> impl IntoResponse {
+async fn delete_machine(State(state): State<AppState>, Path(id): Path<i32>) -> impl IntoResponse {
     match state.machine_pool.delete_machine(id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => resource_error_response(e),
     }
 }
 
-async fn retry_machine(
-    State(state): State<AppState>,
-    Path(id): Path<i32>,
-) -> impl IntoResponse {
+async fn retry_machine(State(state): State<AppState>, Path(id): Path<i32>) -> impl IntoResponse {
     match state.machine_pool.retry(id).await {
         Ok(machine) => (StatusCode::OK, Json(serde_json::json!(machine))).into_response(),
         Err(e) => resource_error_response(e),

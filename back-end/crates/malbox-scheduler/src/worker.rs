@@ -21,16 +21,16 @@ use crate::task::store::TaskStore;
 use malbox_config::MachineryConfig;
 use malbox_database::repositories::samples::fetch_sample_by_id;
 use malbox_database::repositories::tasks::TaskState;
+use malbox_machinery::{
+    DiskType, Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineSpec, MachineState,
+    Network, NetworkMode, Platform, Resources, Storage,
+};
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::messages::events::{
     Event, Payload, TaskEvent, TaskEventPayload,
 };
 use malbox_plugin_internal::transport::traits::TransportEmitter;
-use malbox_machinery::{
-    Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineSpec, MachineState,
-    Platform, Resources, Storage, DiskType, Network, NetworkMode,
-};
 use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
 use std::sync::Arc;
@@ -286,10 +286,7 @@ impl Worker {
                 if let Ok(addr) = ip.parse() {
                     m.set_endpoint(Some(MachineEndpoint {
                         address: addr,
-                        id: db_machine
-                            .provider_id
-                            .clone()
-                            .unwrap_or_default(),
+                        id: db_machine.provider_id.clone().unwrap_or_default(),
                         platform: match db_machine.platform {
                             malbox_database::repositories::machinery::MachinePlatform::Windows => {
                                 Platform::Windows
@@ -351,14 +348,9 @@ impl Worker {
                     })
                 }
                 ResolvedTransport::Grpc { address } => {
-                    let mut client = GrpcClient::connect(address.as_str())
-                        .await
-                        .map_err(|e| {
-                            SchedulerError::Internal(format!(
-                                "Failed to connect gRPC transport: {}",
-                                e
-                            ))
-                        })?;
+                    let mut client = GrpcClient::connect(address.as_str()).await.map_err(|e| {
+                        SchedulerError::Internal(format!("Failed to connect gRPC transport: {}", e))
+                    })?;
                     let data = tokio::fs::read(&host_path).await.map_err(|e| {
                         SchedulerError::Internal(format!("Failed to read sample file: {}", e))
                     })?;
@@ -388,7 +380,11 @@ impl Worker {
                 return Err(e);
             }
 
-            info!(task_id, dest = task.target.as_str(), "Sample transferred to guest");
+            info!(
+                task_id,
+                dest = task.target.as_str(),
+                "Sample transferred to guest"
+            );
         }
 
         // --- Plugin execution phase ---

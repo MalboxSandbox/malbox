@@ -71,7 +71,11 @@ impl MachinePool {
                     .unwrap_or(toml::Value::Table(toml::map::Map::new())),
             };
 
-            info!(machine_id, provisioner = provisioner.name(), "Running provisioner");
+            info!(
+                machine_id,
+                provisioner = provisioner.name(),
+                "Running provisioner"
+            );
             let result = provisioner
                 .provision(&context)
                 .await

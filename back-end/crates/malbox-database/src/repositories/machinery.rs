@@ -235,9 +235,8 @@ pub async fn set_machine_provision_info(
     provisioner: &str,
     output: Option<&str>,
 ) -> Result<Machine> {
-    let json_output: Option<serde_json::Value> = output.map(|s| {
-        serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!({ "raw": s }))
-    });
+    let json_output: Option<serde_json::Value> =
+        output.map(|s| serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!({ "raw": s })));
 
     sqlx::query_as::<_, Machine>(
         r#"

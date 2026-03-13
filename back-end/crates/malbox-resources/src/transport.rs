@@ -33,18 +33,18 @@ pub fn resolve_transport(
 ) -> Result<ResolvedTransport> {
     match &guest_config.transport {
         TransportKind::Provider(name) => {
-            let guest_access = provider.guest_access().ok_or_else(|| {
-                ResourceError::UnknownTransport {
-                    name: name.clone(),
-                    provider: provider.name().to_string(),
-                    available: vec!["grpc".to_string()],
-                }
-            })?;
+            let guest_access =
+                provider
+                    .guest_access()
+                    .ok_or_else(|| ResourceError::UnknownTransport {
+                        name: name.clone(),
+                        provider: provider.name().to_string(),
+                        available: vec!["grpc".to_string()],
+                    })?;
 
             let supported = guest_access.supported_transports();
             if !supported.iter().any(|s| *s == name.as_str()) {
-                let mut available: Vec<String> =
-                    supported.iter().map(|s| s.to_string()).collect();
+                let mut available: Vec<String> = supported.iter().map(|s| s.to_string()).collect();
                 available.push("grpc".to_string());
                 return Err(ResourceError::UnknownTransport {
                     name: name.clone(),

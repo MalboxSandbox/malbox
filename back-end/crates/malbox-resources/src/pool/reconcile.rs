@@ -53,7 +53,10 @@ impl MachinePool {
                     warn!(machine_id, status = ?db_machine.status, "Machine was in-flight, attempting recovery");
                     let _ = machinery::release_machine(&self.db, machine_id).await;
 
-                    if self.try_snapshot_revert(machine_id, db_machine, &provider_vms).await {
+                    if self
+                        .try_snapshot_revert(machine_id, db_machine, &provider_vms)
+                        .await
+                    {
                         info!(machine_id, "Recovered machine via snapshot revert");
                     } else {
                         warn!(machine_id, "Could not recover, marking failed");
@@ -68,7 +71,8 @@ impl MachinePool {
                 }
 
                 MachineStatusDb::Ready => {
-                    self.reconcile_ready_machine(machine_id, db_machine, &provider_vms).await;
+                    self.reconcile_ready_machine(machine_id, db_machine, &provider_vms)
+                        .await;
                 }
 
                 MachineStatusDb::Deleting => {
@@ -98,7 +102,10 @@ impl MachinePool {
         let provider_id = match &db_machine.provider_id {
             Some(id) => id,
             None => {
-                warn!(machine_id, "Ready machine missing provider_id, marking failed");
+                warn!(
+                    machine_id,
+                    "Ready machine missing provider_id, marking failed"
+                );
                 let _ = machinery::update_machine_status(
                     &self.db,
                     machine_id,
@@ -203,14 +210,9 @@ impl MachinePool {
             return false;
         }
 
-        if machinery::update_machine_status(
-            &self.db,
-            machine_id,
-            MachineStatusDb::Ready,
-            None,
-        )
-        .await
-        .is_ok()
+        if machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Ready, None)
+            .await
+            .is_ok()
         {
             self.machine_available.notify_waiters();
             true

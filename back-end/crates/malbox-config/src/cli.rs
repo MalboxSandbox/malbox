@@ -1,5 +1,5 @@
-use crate::storage::PathConfig;
 use crate::error::ConfigError;
+use crate::storage::PathConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,11 +37,10 @@ pub fn load_cli_config() -> Result<CliConfig, ConfigError> {
         return Ok(CliConfig::default());
     }
 
-    let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| ConfigError::Parse {
-            file: config_path.display().to_string(),
-            error: e.to_string(),
-        })?;
+    let content = std::fs::read_to_string(&config_path).map_err(|e| ConfigError::Parse {
+        file: config_path.display().to_string(),
+        error: e.to_string(),
+    })?;
 
     toml::from_str(&content).map_err(|e| ConfigError::Parse {
         file: config_path.display().to_string(),

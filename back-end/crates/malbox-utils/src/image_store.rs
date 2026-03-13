@@ -23,7 +23,11 @@ pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool) {
         };
 
         if let Err(e) = watcher.watch(&store_path, RecursiveMode::Recursive) {
-            warn!("Failed to watch image store at {}: {}", store_path.display(), e);
+            warn!(
+                "Failed to watch image store at {}: {}",
+                store_path.display(),
+                e
+            );
             return;
         }
 

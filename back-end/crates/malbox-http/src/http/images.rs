@@ -39,7 +39,7 @@ async fn register_image(
             return Err(Error::unprocessable_entity([(
                 "platform",
                 "must be 'windows' or 'linux'",
-            )]))
+            )]));
         }
     };
 
@@ -50,7 +50,7 @@ async fn register_image(
             return Err(Error::unprocessable_entity([(
                 "arch",
                 "must be 'x64' or 'x86'",
-            )]))
+            )]));
         }
     };
 

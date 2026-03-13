@@ -2,18 +2,19 @@ use std::path::PathBuf;
 use tokio::sync::OnceCell;
 use tracing::info;
 
+pub mod cli;
 pub mod core;
 pub mod error;
 pub mod guest_access;
+pub mod images;
 pub mod machinery;
 pub mod plugins;
 pub mod providers;
-pub mod images;
 pub mod provisioning;
 pub mod storage;
 pub mod types;
-pub mod cli;
 
+pub use cli::CliConfig;
 pub use core::Config;
 pub use error::ConfigError;
 pub use guest_access::{GuestAccessConfig, TransportKind};
@@ -24,7 +25,6 @@ pub use providers::ProvidersConfig;
 pub use provisioning::ProvisioningConfig;
 pub use storage::PathConfig;
 pub use types::*;
-pub use cli::CliConfig;
 
 pub static CONFIG: OnceCell<Config> = OnceCell::const_new();
 

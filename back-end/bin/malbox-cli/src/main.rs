@@ -11,8 +11,8 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let config = malbox_config::load_config().await?;
-    let cli_config = malbox_config::cli::load_cli_config()
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+    let cli_config =
+        malbox_config::cli::load_cli_config().map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     let ctx = Context {
         config: config.clone(),

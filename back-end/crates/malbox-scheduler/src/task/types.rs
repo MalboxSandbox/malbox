@@ -76,4 +76,3 @@ impl Default for ResourceAllocation {
         }
     }
 }
-

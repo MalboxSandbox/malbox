@@ -154,7 +154,9 @@ impl MachinePool {
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or(ResourceError::MachineNotFound { id: machine_id.to_string() })?;
+            .ok_or(ResourceError::MachineNotFound {
+                id: machine_id.to_string(),
+            })?;
 
         if db_machine.status == MachineStatusDb::Assigned {
             return Err(ResourceError::MachineAssigned { id: machine_id });
@@ -183,7 +185,9 @@ impl MachinePool {
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or(ResourceError::MachineNotFound { id: machine_id.to_string() })?;
+            .ok_or(ResourceError::MachineNotFound {
+                id: machine_id.to_string(),
+            })?;
 
         if db_machine.status != MachineStatusDb::Failed {
             return Err(ResourceError::InvalidMachineState {
@@ -198,12 +202,15 @@ impl MachinePool {
                 .await
                 .map_err(|e| ResourceError::Database(e.to_string()))?;
 
-        let image_id = db_machine.image_id
+        let image_id = db_machine
+            .image_id
             .ok_or_else(|| ResourceError::Internal("Machine has no image_id".to_string()))?;
         let image_path = images::fetch_image_by_id(&self.db, image_id)
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or_else(|| ResourceError::Internal(format!("Image with id {} not found", image_id)))?
+            .ok_or_else(|| {
+                ResourceError::Internal(format!("Image with id {} not found", image_id))
+            })?
             .path;
 
         let pool = self.clone();

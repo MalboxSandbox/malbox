@@ -1,4 +1,7 @@
-use crate::{commands::{Command, Context}, error::Result};
+use crate::{
+    commands::{Command, Context},
+    error::Result,
+};
 use clap::Parser;
 
 #[derive(Parser)]
