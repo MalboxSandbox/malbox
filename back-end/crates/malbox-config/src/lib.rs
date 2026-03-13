@@ -12,6 +12,7 @@ pub mod images;
 pub mod provisioning;
 pub mod storage;
 pub mod types;
+pub mod cli;
 
 pub use core::Config;
 pub use error::ConfigError;
@@ -23,6 +24,7 @@ pub use providers::ProvidersConfig;
 pub use provisioning::ProvisioningConfig;
 pub use storage::PathConfig;
 pub use types::*;
+pub use cli::CliConfig;
 
 pub static CONFIG: OnceCell<Config> = OnceCell::const_new();
 

@@ -16,24 +16,24 @@ pub enum DatabaseError {
 
 #[derive(Error, Debug)]
 pub enum MachineError {
-    #[error("Failed to insert machine '{name}': {message}")]
+    #[error("Failed to insert machine '{name}': {message}: {source}")]
     InsertFailed {
         name: String,
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to delete from `machines` table")]
+    #[error("Failed to delete from `machines` table: {source}")]
     DeleteFailed {
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to fetch machines")]
+    #[error("Failed to fetch machines: {source}")]
     FetchFailed {
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to update machine: {message}")]
+    #[error("Failed to update machine: {message}: {source}")]
     UpdateFailed {
         message: String,
         #[source]
@@ -43,20 +43,20 @@ pub enum MachineError {
 
 #[derive(Error, Debug)]
 pub enum TaskError {
-    #[error("Failed to insert task '{name}': {message}")]
+    #[error("Failed to insert task '{name}': {message}: {source}")]
     InsertFailed {
         name: String,
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to fetch tasks")]
+    #[error("Failed to fetch tasks: {message}: {source}")]
     FetchFailed {
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to update task")]
+    #[error("Failed to update task {task_id}: {message}: {source}")]
     UpdateFailed {
         task_id: i32,
         message: String,
@@ -67,14 +67,14 @@ pub enum TaskError {
 
 #[derive(Error, Debug)]
 pub enum SampleError {
-    #[error("Failed to insert sample '{hash}': {message}")]
+    #[error("Failed to insert sample '{hash}': {message}: {source}")]
     InsertFailed {
         hash: String,
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to fetch sample: '{hash}': {message}")]
+    #[error("Failed to fetch sample '{hash}': {message}: {source}")]
     FetchFailed {
         hash: String,
         message: String,
@@ -85,25 +85,25 @@ pub enum SampleError {
 
 #[derive(Error, Debug)]
 pub enum ImageError {
-    #[error("Failed to insert image '{name}': {message}")]
+    #[error("Failed to insert image '{name}': {message}: {source}")]
     InsertFailed {
         name: String,
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to fetch image")]
+    #[error("Failed to fetch image: {source}")]
     FetchFailed {
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to update image: {message}")]
+    #[error("Failed to update image: {message}: {source}")]
     UpdateFailed {
         message: String,
         #[source]
         source: sqlx::Error,
     },
-    #[error("Failed to delete image '{name}'")]
+    #[error("Failed to delete image '{name}': {source}")]
     DeleteFailed {
         name: String,
         #[source]

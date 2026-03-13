@@ -24,6 +24,8 @@ CREATE TABLE "machines" (
     last_seen       TIMESTAMPTZ,
     current_task_id INTEGER,
     error_message   TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (id)
 );
 
