@@ -1,7 +1,6 @@
-use crate::commands::Command;
+use crate::commands::{Command, Context};
 use crate::error::Result;
 use clap::{Parser, Subcommand};
-use malbox_config::Config;
 
 mod init;
 mod playbook;
@@ -20,9 +19,9 @@ pub enum ConfigCommands {
 }
 
 impl Command for ConfigCommand {
-    async fn execute(self, config: &Config) -> Result<()> {
+    async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
-            ConfigCommands::Init(args) => args.execute(config).await,
+            ConfigCommands::Init(args) => args.execute(ctx).await,
         }
     }
 }

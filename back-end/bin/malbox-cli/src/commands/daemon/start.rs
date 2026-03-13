@@ -1,6 +1,5 @@
-use crate::{commands::Command, error::Result};
+use crate::{commands::{Command, Context}, error::Result};
 use clap::Parser;
-use malbox_config::Config;
 
 #[derive(Parser)]
 pub struct StartArgs {
@@ -13,7 +12,7 @@ pub struct StartArgs {
 // We might need to split the daemon `run` function into different parts to get more precise loading states.
 // It's also worth to consider making a Daemon struct in malbox-daemon, and implement the different methods there, instead of a single `run` function.
 impl Command for StartArgs {
-    async fn execute(self, config: &Config) -> Result<()> {
+    async fn execute(self, _ctx: &Context) -> Result<()> {
         todo!()
     }
 }

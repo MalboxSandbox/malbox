@@ -1,4 +1,4 @@
-use crate::commands::Command;
+use crate::commands::{Command, Context};
 use crate::error::Result;
 use clap::Parser;
 use malbox_config::{
@@ -23,7 +23,7 @@ pub struct InitArgs {
 }
 
 impl Command for InitArgs {
-    async fn execute(self, _config: &Config) -> Result<()> {
+    async fn execute(self, _ctx: &Context) -> Result<()> {
         // Determine output path
         let paths = PathConfig::new()?;
         let output_path = self
@@ -69,6 +69,22 @@ impl Command for InitArgs {
         println!("Configuration file generated successfully at:");
         println!("  {}", output_path.display());
         println!();
+
+        // Generate CLI config
+        let cli_config_path = config.paths.config_dir.join("cli.toml");
+        if !cli_config_path.exists() || self.force {
+            let cli_config = malbox_config::CliConfig::default();
+            let cli_toml_str = toml::to_string_pretty(&cli_config)?;
+            tokio::fs::write(&cli_config_path, cli_toml_str).await?;
+            println!("CLI configuration file generated at:");
+            println!("  {}", cli_config_path.display());
+        } else {
+            println!("CLI configuration already exists at:");
+            println!("  {}", cli_config_path.display());
+            println!("  (use --force to overwrite)");
+        }
+        println!();
+
         Ok(())
     }
 }

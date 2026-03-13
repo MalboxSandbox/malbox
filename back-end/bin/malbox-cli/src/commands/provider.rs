@@ -3,10 +3,9 @@
 //! Manages which provider crates are compiled into the malbox daemon.
 //! Providers are installed/uninstalled via Cargo features and configuration.
 
-use crate::commands::Command;
+use crate::commands::{Command, Context};
 use crate::error::Result;
 use clap::{Parser, Subcommand};
-use malbox_config::Config;
 
 pub mod install;
 pub mod list;
@@ -38,12 +37,12 @@ enum ProviderCommands {
 }
 
 impl Command for ProviderCommand {
-    async fn execute(self, config: &Config) -> Result<()> {
+    async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
-            ProviderCommands::List(cmd) => cmd.execute(config).await,
-            ProviderCommands::Install(cmd) => cmd.execute(config).await,
-            ProviderCommands::Uninstall(cmd) => cmd.execute(config).await,
-            ProviderCommands::Rebuild(cmd) => cmd.execute(config).await,
+            ProviderCommands::List(cmd) => cmd.execute(ctx).await,
+            ProviderCommands::Install(cmd) => cmd.execute(ctx).await,
+            ProviderCommands::Uninstall(cmd) => cmd.execute(ctx).await,
+            ProviderCommands::Rebuild(cmd) => cmd.execute(ctx).await,
         }
     }
 }

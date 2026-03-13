@@ -20,6 +20,10 @@ pub enum CliError {
     TomlSer(#[from] toml::ser::Error),
     #[error("Dialoguer error: {0}")]
     Dialoguer(#[from] dialoguer::Error),
+    #[error("API error: {0}")]
+    Api(String),
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;

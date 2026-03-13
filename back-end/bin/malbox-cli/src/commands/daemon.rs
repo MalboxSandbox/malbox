@@ -1,7 +1,6 @@
-use crate::commands::Command;
+use crate::commands::{Command, Context};
 use crate::error::Result;
 use clap::{Parser, Subcommand};
-use malbox_config::Config;
 
 mod start;
 use start::StartArgs;
@@ -18,9 +17,9 @@ pub enum DaemonCommands {
 }
 
 impl Command for DaemonCommand {
-    async fn execute(self, config: &Config) -> Result<()> {
+    async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
-            DaemonCommands::Start(cmd) => cmd.execute(config).await,
+            DaemonCommands::Start(cmd) => cmd.execute(ctx).await,
         }
     }
 }

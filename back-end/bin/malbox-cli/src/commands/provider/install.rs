@@ -1,9 +1,8 @@
 //! Install a provider.
 
-use crate::commands::Command;
+use crate::commands::{Command, Context};
 use crate::error::Result;
 use clap::Parser;
-use malbox_config::Config;
 
 #[derive(Parser)]
 #[command(about = "Install a provider (adds to config and rebuilds daemon)")]
@@ -17,7 +16,7 @@ pub struct InstallCommand {
 }
 
 impl Command for InstallCommand {
-    async fn execute(self, config: &Config) -> Result<()> {
+    async fn execute(self, _ctx: &Context) -> Result<()> {
         println!("Install provider command - TODO: Implement");
         Ok(())
     }
