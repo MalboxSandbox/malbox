@@ -9,7 +9,7 @@ host = []
 plugin = []
 
 [dependencies]
-malbox-plugin-transport = { path = "../malbox-plugin-transport" }
+malbox-plugin-transport = { path = "../malbox-plugin-transport", features = ["ipc"] }
 
 iceoryx2-loggers = { version = "0.8.1", default-features = false, features = ["std", "tracing"] }
 

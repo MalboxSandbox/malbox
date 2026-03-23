@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::error::ScanError;
-use super::manifest::parse_manifest;
+use super::manifest::{PluginTypeConfig, parse_manifest};
 use super::types::{PluginEntry, PluginId, PluginStatus};
 
 pub struct Scanner {
@@ -65,10 +65,12 @@ impl Scanner {
             .or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| manifest.plugin.name.clone());
 
-        let binary_path = dir.join(&binary_name);
+        let binary_path = resolve_binary_path(dir, &binary_name);
 
-        // Check binary exists and is executable
-        let status = match check_binary(&binary_path) {
+        let is_guest = manifest.plugin.plugin_type == PluginTypeConfig::Guest;
+
+        // Check binary exists and (for host plugins) is executable
+        let status = match check_binary(&binary_path, is_guest) {
             Ok(()) => PluginStatus::Registered,
             Err(reason) => PluginStatus::Invalid(reason),
         };
@@ -84,8 +86,27 @@ impl Scanner {
     }
 }
 
+/// Resolve the binary path, trying the bare name first, then with `.exe` extension.
+fn resolve_binary_path(dir: &Path, binary_name: &str) -> PathBuf {
+    let bare = dir.join(binary_name);
+    if bare.exists() {
+        return bare;
+    }
+
+    let with_exe = dir.join(format!("{binary_name}.exe"));
+    if with_exe.exists() {
+        return with_exe;
+    }
+
+    // Return the bare path so the error message references the expected name.
+    bare
+}
+
 /// Check that a binary exists and is executable.
-fn check_binary(path: &Path) -> Result<(), String> {
+///
+/// Guest plugins are Windows executables deployed into the VM, so only
+/// existence is verified — Unix permission bits are irrelevant.
+fn check_binary(path: &Path, is_guest: bool) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("binary not found: {}", path.display()));
     }
@@ -97,9 +118,11 @@ fn check_binary(path: &Path) -> Result<(), String> {
         return Err(format!("binary path is not a file: {}", path.display()));
     }
 
-    let permissions = metadata.permissions();
-    if permissions.mode() & 0o111 == 0 {
-        return Err(format!("binary is not executable: {}", path.display()));
+    if !is_guest {
+        let permissions = metadata.permissions();
+        if permissions.mode() & 0o111 == 0 {
+            return Err(format!("binary is not executable: {}", path.display()));
+        }
     }
 
     Ok(())
@@ -246,6 +269,57 @@ binary = "my-custom-binary"
         let entry = scanner.scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Registered));
         assert!(entry.binary_path.ends_with("my-custom-binary"));
+    }
+
+    fn guest_manifest(name: &str) -> String {
+        format!(
+            r#"
+[plugin]
+name = "{name}"
+version = "1.0.0"
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+"#
+        )
+    }
+
+    #[test]
+    fn scan_one_guest_plugin_with_exe_binary() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("guest-yara-scanner");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.toml"),
+            &guest_manifest("guest-yara-scanner"),
+        )
+        .unwrap();
+
+        // Only an .exe binary exists (no bare name)
+        let binary_path = dir.join("guest-yara-scanner.exe");
+        std::fs::write(&binary_path, b"MZ\x00").unwrap();
+
+        let scanner = Scanner::new(tmp.path().to_path_buf());
+        let entry = scanner.scan_one(&dir).unwrap();
+        assert!(matches!(entry.status, PluginStatus::Registered));
+        assert!(entry.binary_path.ends_with("guest-yara-scanner.exe"));
+    }
+
+    #[test]
+    fn scan_one_guest_plugin_no_exec_permission_still_valid() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("guest-plugin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.toml"), &guest_manifest("guest-plugin")).unwrap();
+
+        let binary_path = dir.join("guest-plugin.exe");
+        std::fs::write(&binary_path, b"MZ\x00").unwrap();
+        // Explicitly non-executable
+        std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let scanner = Scanner::new(tmp.path().to_path_buf());
+        let entry = scanner.scan_one(&dir).unwrap();
+        assert!(matches!(entry.status, PluginStatus::Registered));
     }
 
     #[test]

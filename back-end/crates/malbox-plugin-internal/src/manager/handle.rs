@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
@@ -114,10 +114,11 @@ impl PluginHandle {
         loop {
             match stream.message().await {
                 Ok(Some(result)) => {
-                    debug!(
+                    info!(
                         plugin = %self.plugin_id,
                         task_id = result.task_id,
                         result_name = %result.result_name,
+                        data_len = result.data.len(),
                         is_final = result.is_final,
                         "received task result from guest plugin"
                     );

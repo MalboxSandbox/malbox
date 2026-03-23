@@ -4,12 +4,15 @@
 //! subscriptions at initialization.
 
 use crate::error::{Result, TransportError};
+
+#[cfg(feature = "ipc")]
 use iceoryx2::prelude::ZeroCopySend;
 
 /// A wrapper around all system-wide events.
 /// This is the event type that is used in our transport event services.
 #[repr(C)]
-#[derive(Debug, ZeroCopySend)]
+#[derive(Debug)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum Event {
     Task(TaskEvent),
     Plugin(PluginEvent),
@@ -19,8 +22,10 @@ pub enum Event {
 
 /// Maximum number of variants per event category.
 /// Must be >= the largest variant count across all categories.
+#[cfg(feature = "ipc")]
 const VARIANTS_PER_CATEGORY: usize = 4;
 
+#[cfg(feature = "ipc")]
 impl Event {
     /// Convert to a unique event ID for the iceoryx2 notifier.
     ///
@@ -53,7 +58,8 @@ impl Event {
 /// A wrapper around all system-wide event payloads.
 /// This is the payload type that is used in our transport event services.
 #[repr(C)]
-#[derive(Debug, Clone, ZeroCopySend)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum Payload {
     Task(TaskEventPayload),
     Plugin(PluginEventPayload),
@@ -63,7 +69,8 @@ pub enum Payload {
 /// An enumeration of all avaiable task-related system-wide events,
 /// used for internal IPC event payloads.
 #[repr(C)]
-#[derive(Debug, ZeroCopySend, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum TaskEvent {
     /// A task has been created and queued.
     TaskCreated = 0,
@@ -78,7 +85,8 @@ pub enum TaskEvent {
 /// A payload representing the data that a plugin receives
 /// after it has been signaled with a task event.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, ZeroCopySend)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub struct TaskEventPayload {
     pub task_id: i32,
 }
@@ -86,7 +94,8 @@ pub struct TaskEventPayload {
 /// An enumeration of all avaiable plugin-related system-wide events,
 /// used for internal IPC event payloads.
 #[repr(C)]
-#[derive(Debug, ZeroCopySend, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum PluginEvent {
     /// A plugin has started.
     PluginStarted = 0,
@@ -99,7 +108,8 @@ pub enum PluginEvent {
 /// A payload representing the data that a plugin receives
 /// after it has been signaled with a plugin event.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, ZeroCopySend)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub struct PluginEventPayload {
     pub plugin_id: i32,
 }
@@ -107,7 +117,8 @@ pub struct PluginEventPayload {
 /// An enumeration of all avaiable sample-related system-wide events,
 /// used for internal IPC event payloads.
 #[repr(C)]
-#[derive(Debug, ZeroCopySend, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum SampleEvent {
     /// A plugin has started.
     PluginStarted = 0,
@@ -120,7 +131,8 @@ pub enum SampleEvent {
 /// A payload representing the data that a plugin receives
 /// after it has been signaled with a sample event.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, ZeroCopySend)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub struct SampleEventPayload {
     pub sample_id: i32,
 }
@@ -128,7 +140,8 @@ pub struct SampleEventPayload {
 /// An enumeration of all avaiable daemon-related system-wide events,
 /// used for internal IPC event payloads.
 #[repr(C)]
-#[derive(Debug, ZeroCopySend, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum DaemonEvent {
     DaemonShutdown = 0,
     ConfigReloaded = 1,

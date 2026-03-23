@@ -3,8 +3,12 @@ name = "malbox-plugin-transport"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+ipc = ["dep:iceoryx2"]
+
 [dependencies]
-iceoryx2 = { version = "0.8.1", default-features = false }
+iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
 
 tonic = "0.14.5"
 prost = "0.14.3"

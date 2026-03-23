@@ -44,6 +44,23 @@ impl GrpcEmitter {
     }
 }
 
+impl GrpcEmitter {
+    /// Send a raw `proto::TaskResult` through the gRPC streaming channel.
+    ///
+    /// This is used by the guest runtime to stream `PluginResult` items back
+    /// to the daemon after converting them to proto form. No-ops in Noop mode.
+    ///
+    /// Must be called from a blocking context (uses `blocking_send`).
+    pub fn send_task_result(&self, result: proto::TaskResult) -> Result<()> {
+        match &self.inner {
+            GrpcEmitterInner::Task { result_tx, .. } => result_tx
+                .blocking_send(Ok(result))
+                .map_err(|e| TransportError::Grpc(format!("channel send failed: {}", e))),
+            GrpcEmitterInner::Noop => Ok(()),
+        }
+    }
+}
+
 impl TransportEmitter for GrpcEmitter {
     fn emit(&self, event: Event, payload: Payload) -> Result<()> {
         match &self.inner {

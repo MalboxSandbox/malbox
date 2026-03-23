@@ -129,6 +129,21 @@ impl PluginManager {
                 ))
             }
             PluginStateConfig::Ephemeral => {
+                // Guest plugins registered via register_guest() are already in
+                // the instances map with a gRPC client. Use the existing
+                // instance instead of trying to spawn a local process.
+                if let Some(instance_lock) = self.instances.get(plugin_id) {
+                    let mut instance = instance_lock.value().lock().await;
+                    if instance.grpc_client.is_some() && instance.lifecycle.can_acquire() {
+                        instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
+                        return Ok(PluginHandle::new(
+                            plugin_id.clone(),
+                            Arc::clone(entry),
+                            Arc::clone(instance_lock.value()),
+                        ));
+                    }
+                }
+
                 info!(plugin = %plugin_id, "spawning ephemeral plugin instance");
                 let mut instance = spawn_host_plugin(entry).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
@@ -177,6 +192,16 @@ impl PluginManager {
         info!(plugin = %plugin_id, addr = %addr, "guest plugin registered");
 
         Ok(())
+    }
+
+    /// Remove a previously registered guest plugin instance.
+    ///
+    /// Called after task execution to clean up stale gRPC connections when the
+    /// VM that hosted the plugin is about to be reverted or destroyed.
+    pub fn unregister_guest(&self, plugin_id: &PluginId) {
+        if self.instances.remove(plugin_id).is_some() {
+            info!(plugin = %plugin_id, "guest plugin unregistered");
+        }
     }
 
     /// Reconcile the running instances with the current registry state.

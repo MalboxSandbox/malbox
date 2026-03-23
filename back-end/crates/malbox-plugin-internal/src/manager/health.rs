@@ -13,7 +13,7 @@ use dashmap::DashMap;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::registry::manifest::PluginTypeConfig;
@@ -72,7 +72,7 @@ pub fn spawn_health_check_loop(
                 instance.last_health_check = Some(Instant::now());
             }
 
-            debug!(
+            trace!(
                 "health check cycle complete for {} plugin(s)",
                 instances.len()
             );

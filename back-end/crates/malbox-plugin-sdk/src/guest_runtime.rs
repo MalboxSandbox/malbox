@@ -37,8 +37,13 @@ pub struct GuestRuntimeConfig {
 
 impl Default for GuestRuntimeConfig {
     fn default() -> Self {
+        let port: u16 = std::env::var("MALBOX_PLUGIN_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(50051);
+
         Self {
-            listen_addr: ([0, 0, 0, 0], 50051).into(),
+            listen_addr: ([0, 0, 0, 0], port).into(),
             work_dir: PathBuf::from("/tmp/malbox"),
         }
     }
@@ -201,18 +206,73 @@ where
         result_tx: mpsc::Sender<std::result::Result<proto::TaskResult, Status>>,
     ) {
         let plugin = self.plugin.clone();
+        // Resolve the sample path relative to the work directory so plugin
+        // handlers can read it via task.sample_bytes().
+        let full_sample_path = if Path::new(&sample_path).is_relative() && !sample_path.is_empty() {
+            self.work_dir.join(&sample_path)
+        } else {
+            PathBuf::from(&sample_path)
+        };
         let _ = tokio::task::spawn_blocking(move || {
             let emitter = GrpcEmitter::with_task(task_id, result_tx);
             let ctx = Context::new(&emitter);
 
-            let task = Task::new(task_id, PathBuf::from(sample_path), config);
+            let task = Task::new(task_id, full_sample_path, config);
 
             match plugin.__handle_task(task, &ctx) {
                 Ok(results) => {
-                    for result in &results {
-                        tracing::debug!("Produced result: {}", result.name());
+                    let total = results.len();
+                    for (i, result) in results.into_iter().enumerate() {
+                        let is_final = i == total - 1;
+                        let (result_name, data, format) = match result {
+                            crate::types::PluginResult::Json { name, data } => {
+                                (name, data, proto::ResultFormat::Json)
+                            }
+                            crate::types::PluginResult::Bytes { name, data } => {
+                                (name, data, proto::ResultFormat::Bytes)
+                            }
+                            crate::types::PluginResult::File { name, path } => {
+                                match std::fs::read(&path) {
+                                    Ok(data) => (name, data, proto::ResultFormat::Bytes),
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to read result file {}: {}",
+                                            path.display(),
+                                            e
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                        };
+
+                        tracing::debug!(result_name, is_final, "Streaming result back to daemon");
+
+                        let task_result = proto::TaskResult {
+                            task_id,
+                            result_name,
+                            data,
+                            format: format.into(),
+                            is_final,
+                        };
+
+                        if let Err(e) = emitter.send_task_result(task_result) {
+                            error!("Failed to stream result: {}", e);
+                            break;
+                        }
                     }
-                    // TODO: stream results back via emitter
+
+                    // If there were no results, send a final empty marker so the
+                    // daemon-side stream terminates cleanly.
+                    if total == 0 {
+                        let _ = emitter.send_task_result(proto::TaskResult {
+                            task_id,
+                            result_name: String::new(),
+                            data: vec![],
+                            format: proto::ResultFormat::Unspecified.into(),
+                            is_final: true,
+                        });
+                    }
                 }
                 Err(e) => {
                     error!("Plugin task handler error: {}", e);
@@ -364,12 +424,10 @@ fn resolve_path(work_dir: &Path, relative: &str) -> std::result::Result<PathBuf,
     }
 
     let joined = work_dir.join(relative);
-    let canonical_work_dir = work_dir
-        .canonicalize()
-        .map_err(|e| format!("work_dir not accessible: {}", e))?;
     let normalized = normalize_path(&joined);
+    let normalized_work_dir = normalize_path(work_dir);
 
-    if !normalized.starts_with(&canonical_work_dir) {
+    if !normalized.starts_with(&normalized_work_dir) {
         return Err(format!("path escapes work directory: {}", relative));
     }
 
