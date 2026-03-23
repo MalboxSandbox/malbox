@@ -1,114 +1,73 @@
-//! Machine types and specifications.
+//! Machine types — runtime representation of a provider-managed machine.
 //!
-//! Machine is a concrete struct that represents
-//! a running machine instance. It's provider-agnostic and can be
-//! passed between different capabilities.
+//! The provider-level `Machine` is a lightweight runtime handle: identity,
+//! state, and network endpoint. All persistent configuration (platform, arch,
+//! image, resources) lives in the database — the provider only needs enough
+//! information to manage the VM's lifecycle.
 
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-/// A running machine instance.
+/// A machine instance managed by a provider.
 ///
-/// This is a concrete type that represents a machine allocated by a provider.
-/// It's owned by strategies and passed to capabilities as needed.
+/// This is the provider's runtime view of a machine. It carries just enough
+/// state for lifecycle operations (start, stop, snapshot) and network access.
+/// Persistent data (platform, arch, resources, image) lives in the database.
 #[derive(Debug, Clone)]
 pub struct Machine {
-    /// Unique identifier for this machine.
+    /// Provider-assigned identifier (e.g., the libvirt domain name suffix).
     pub id: MachineId,
-    /// Specification used to create this machine.
-    pub spec: MachineSpec,
-    /// Current state of the machine.
+    /// Current power state.
     pub state: MachineState,
-    /// Network endpoint (if available).
+    /// Network endpoint, available once the machine has booted and obtained an IP.
     pub endpoint: Option<MachineEndpoint>,
 }
 
 impl Machine {
-    /// Create a new machine instance.
-    pub fn new(id: MachineId, spec: MachineSpec) -> Self {
+    /// Create a new machine handle in the `Creating` state with no endpoint.
+    pub fn new(id: MachineId) -> Self {
         Self {
             id,
-            spec,
             state: MachineState::Creating,
             endpoint: None,
         }
     }
 
-    /// Get the machine ID.
     pub fn id(&self) -> &MachineId {
         &self.id
     }
 
-    /// Get the machine specification.
-    pub fn spec(&self) -> &MachineSpec {
-        &self.spec
-    }
-
-    /// Get the current state.
     pub fn state(&self) -> MachineState {
         self.state
     }
 
-    /// Get the network endpoint (if available).
     pub fn endpoint(&self) -> Option<&MachineEndpoint> {
         self.endpoint.as_ref()
     }
 
-    /// Update the machine state.
     pub fn set_state(&mut self, state: MachineState) {
         self.state = state;
     }
 
-    /// Update the network endpoint.
     pub fn set_endpoint(&mut self, endpoint: Option<MachineEndpoint>) {
         self.endpoint = endpoint;
     }
 }
 
-/// Runtime endpoint information for provisioning.
+/// Network endpoint for connecting to a machine's management interface.
 #[derive(Debug, Clone)]
 pub struct MachineEndpoint {
-    /// Network address (IPv4 or IPv6).
+    /// IP address (v4 or v6) of the machine.
     pub address: IpAddr,
-    /// Machine identifier.
+    /// Provider-side identifier (same as `MachineId.0`).
     pub id: String,
-    /// Platform type.
+    /// OS platform — used to select connection method (WinRM vs SSH).
     pub platform: Platform,
 }
 
-/// Machine specification - describes the desired machine configuration.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MachineSpec {
-    pub name: String,
-    pub platform: Platform,
-    pub resources: Resources,
-    pub storage: Storage,
-    pub network: Network,
-    /// Optional base image/template identifier.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_image: Option<String>,
-    /// Optional provisioning configuration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provisioning: Option<Provisioning>,
-}
-
-/// Provisioning configuration attached to a machine spec.
+/// Provider-assigned machine identifier.
 ///
-/// Specifies which registered provisioner to use and its configuration.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Provisioning {
-    /// Name of the registered provisioner (e.g., "ansible", "native").
-    pub provisioner: String,
-    /// Provisioner-specific configuration (passed through as TOML).
-    #[serde(default = "default_toml_value")]
-    pub config: toml::Value,
-}
-
-fn default_toml_value() -> toml::Value {
-    toml::Value::Table(toml::map::Map::new())
-}
-
-/// Machine identifier.
+/// For libvirt this is the name suffix: domain `malbox-win10-test` → id `win10-test`.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct MachineId(pub String);
 
@@ -130,45 +89,7 @@ impl From<&str> for MachineId {
     }
 }
 
-/// Resource requirements.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Resources {
-    pub cpus: u32,
-    pub memory_mb: u32,
-}
-
-/// Storage configuration.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Storage {
-    pub boot_disk_gb: u32,
-    pub disk_type: DiskType,
-}
-
-/// Network configuration.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Network {
-    pub mode: NetworkMode,
-    pub ip: Option<IpAddr>,
-    pub mac: Option<String>,
-}
-
-/// Network mode options.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum NetworkMode {
-    Nat,
-    Isolated { subnet: String },
-    Bridged { interface: String },
-}
-
-/// Disk type options.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum DiskType {
-    Raw,
-    Qcow2,
-    Vmdk,
-}
-
-/// Machine state representation.
+/// Machine power state as reported by the provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineState {
     Creating,
@@ -180,9 +101,42 @@ pub enum MachineState {
     Failed,
 }
 
-/// Machine platform.
+/// Target OS platform.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Windows,
     Linux,
+}
+
+/// Machine architecture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Arch {
+    X64,
+    X86,
+}
+
+/// Parameters for creating a new machine via a provider.
+///
+/// Contains what the provider needs to define a VM. Provider-specific
+/// details are passed via `provider_config` and handled internally
+/// by each provider implementation.
+#[derive(Debug, Clone)]
+pub struct CreateMachineParams {
+    /// Machine name (provider prefixes this, e.g., `malbox-{name}`).
+    pub name: String,
+    /// Target OS platform.
+    pub platform: Platform,
+    /// Target architecture.
+    pub arch: Arch,
+    /// Number of virtual CPUs.
+    pub cpus: u32,
+    /// Memory in megabytes.
+    pub memory_mb: u32,
+    /// Disk size in megabytes.
+    pub disk_size_mb: u64,
+    /// Path to the base image. `None` for a blank disk.
+    pub base_image: Option<String>,
+    /// Opaque provider-specific config. Each provider deserializes
+    /// the keys it understands, ignores the rest.
+    pub provider_config: Option<toml::Value>,
 }

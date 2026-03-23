@@ -1,36 +1,47 @@
-//! Allocate capability module.
+//! Allocate capability — core machine lifecycle management.
 
-use crate::machine::{Machine, MachineEndpoint, MachineSpec};
+use crate::machine::{CreateMachineParams, Machine, MachineEndpoint};
 use async_trait::async_trait;
 use std::error::Error;
 
-/// Core capability: Allocate and deallocate machines.
-///
-/// Every provider must implement this capability in order to (de)allocate machines.
+/// Every provider must implement this capability. It covers creating,
+/// destroying, starting, stopping, listing, and resolving endpoints.
 #[async_trait]
 pub trait Allocate: Send + Sync {
-    /// Allocate a new machine with the given specification.
+    /// Create a new machine from the given parameters.
     ///
-    /// This should create a new machine (VM, container, etc.) according to the spec,
-    /// start it, and return a Machine handle once it's ready.
-    async fn allocate(&self, spec: &MachineSpec) -> Result<Machine, Box<dyn Error + Send + Sync>>;
+    /// Provisions resources but does **not** start
+    /// the machine. Call [`start`] afterwards to boot it.
+    async fn create(
+        &self,
+        params: &CreateMachineParams,
+    ) -> Result<Machine, Box<dyn Error + Send + Sync>>;
 
-    /// Deallocate an existing machine.
+    /// Destroy a machine and clean up all resources.
     ///
-    /// This should stop the machine and clean up all resources.
-    /// After this call, the machine should no longer exist.
-    async fn deallocate(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>>;
+    /// Stops the machine if running, then removes everything.
+    async fn destroy(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>>;
 
-    /// List all machines currently managed by this provider.
+    /// Start a stopped machine. No-op if already running.
+    async fn start(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>>;
+
+    /// Stop a running machine.
+    ///
+    /// With `force: false`, sends a graceful shutdown signal first and falls
+    /// back to force-kill if the guest doesn't respond.
+    /// With `force: true`, kills immediately.
+    async fn stop(
+        &self,
+        machine: &Machine,
+        force: bool,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
+
+    /// List all machines managed by this provider.
     async fn list(&self) -> Result<Vec<Machine>, Box<dyn Error + Send + Sync>>;
 
-    /// Resolve the network endpoint for an already-allocated machine.
+    /// Resolve the network endpoint for a machine, if available.
     ///
-    /// Returns `Ok(Some(endpoint))` if the endpoint is available, `Ok(None)` if the
-    /// machine is not yet ready (e.g., still booting), or `Err` on failure.
-    ///
-    /// The default implementation returns `Ok(None)`. Providers should override this
-    /// to query the machine's network address (e.g., via guest agent, DHCP lease).
+    /// Returns `Ok(None)` if the machine is not yet reachable (e.g., still booting).
     async fn resolve_endpoint(
         &self,
         _machine: &Machine,

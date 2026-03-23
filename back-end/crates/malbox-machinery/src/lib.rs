@@ -1,15 +1,15 @@
-//! This crate contains interfaces related to machinery (providers, provisioners, etc.)
+//! Machinery interfaces — providers, provisioners, and machine types.
 //!
-//! Contains machinery functionalities and provider interfaces. Actual implementations
-//! are found in the different `malbox-provider-*` and `malbox-provisioner-*` crates.
+//! This crate defines the traits and types that provider and provisioner
+//! implementations depend on. Actual implementations live in separate
+//! `malbox-provider-*` and `malbox-provisioner-*` crates.
 
 pub mod machine;
 pub mod provider;
 pub mod provisioner;
 
 pub use machine::{
-    DiskType, Machine, MachineEndpoint, MachineId, MachineSpec, MachineState, Network, NetworkMode,
-    Platform, Provisioning, Resources, Storage,
+    Arch, CreateMachineParams, Machine, MachineEndpoint, MachineId, MachineState, Platform,
 };
 pub use provider::capabilities::{
     Allocate, Clone, ExecOptions, ExecResult, GuestAccess, GuestSession, GuestStatus, Migrate,

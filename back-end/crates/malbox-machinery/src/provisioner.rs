@@ -6,27 +6,26 @@
 //!
 //! Registration uses the `inventory` crate, same pattern as providers.
 
-use crate::machine::{MachineEndpoint, MachineSpec};
+use crate::machine::MachineEndpoint;
 use async_trait::async_trait;
 use std::error::Error;
 
 pub mod config;
 
-// Re-export toml::Value so provisioners don't need to depend on toml directly
+// Re-export toml::Value so provisioners don't need to depend on toml directly.
 pub use toml::Value as TomlValue;
 
 /// Trait for machine provisioners.
 ///
-/// Provisioners receive a [`ProvisionContext`] with machine endpoint info
-/// and provisioner-specific configuration. They handle their own connectivity
-/// (SSH, guest agent, etc.).
+/// Provisioners receive a [`ProvisionContext`] with the machine's network
+/// endpoint and provisioner-specific configuration. They handle their own
+/// connectivity (WinRM, SSH, etc.).
 #[async_trait]
 pub trait Provisioner: Send + Sync {
-    /// Provision a machine after allocation.
+    /// Provision a machine.
     ///
-    /// Called once the machine is allocated and reachable. The provisioner
-    /// should perform all setup steps (install packages, run scripts, etc.)
-    /// and return when complete.
+    /// Called once the machine is running and reachable. The provisioner
+    /// should perform all setup steps and return when complete.
     async fn provision(
         &self,
         context: &ProvisionContext,
@@ -41,9 +40,7 @@ pub trait Provisioner: Send + Sync {
 pub struct ProvisionContext {
     /// Network endpoint of the machine (IP, id, platform).
     pub endpoint: MachineEndpoint,
-    /// Machine specification (resources, storage, etc.).
-    pub spec: MachineSpec,
-    /// Provisioner-specific configuration from TOML.
+    /// Provisioner-specific configuration from the step's TOML config.
     pub config: toml::Value,
 }
 
@@ -73,7 +70,7 @@ pub struct ProvisionerMetadata {
     pub create: fn(&toml::Value) -> Result<Box<dyn Provisioner>, Box<dyn Error + Send + Sync>>,
 }
 
-// Collect all registered provisioners at compile time
+// Collect all registered provisioners at compile time.
 inventory::collect!(ProvisionerMetadata);
 
 /// Get provisioner metadata by name.
@@ -89,8 +86,6 @@ pub fn list_provisioners() -> Vec<&'static str> {
 }
 
 /// Create a provisioner by name with configuration.
-///
-/// Looks up the provisioner in the registry and calls its factory function.
 pub fn create_provisioner(
     name: &str,
     config: &toml::Value,
