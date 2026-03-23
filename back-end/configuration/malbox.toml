@@ -63,36 +63,79 @@ uri = "qemu:///system"
 # storage_pool = "default"
 
 [machinery]
-# Name of the clean snapshot used to revert machines between tasks.
-# After a task completes, the machine is reverted to this snapshot.
-# If the provider doesn't support snapshots, the machine is re-provisioned instead.
-# clean_snapshot_name = "clean"
 
-[machinery.defaults]
-# Default resources for machines
-# cpus = 2
-# memory = 2048
-# video_memory = 128
+# All fields are required (no defaults). Remove a machine from this list
+# to destroy it on next daemon restart.
 
-# Default image (from the image registry) for new machines.
-# Can be overridden per-machine via the API.
+# [[machines]]
+# name = "win10-analysis-1"
 # image = "win10-base"
+# platform = "windows"
+# arch = "x64"
+# cpus = 2
+# memory = 4096          # MB
+# disk_size = 65536      # MB
+#
+# [[machines]]
+# name = "win10-analysis-2"
+# image = "win10-base"
+# platform = "windows"
+# arch = "x64"
+# cpus = 4
+# memory = 8192          # MB
+# disk_size = 65536      # MB
+# # Optional: provider-specific overrides (libvirt example)
+# [machines.provider_config]
+# nic_model = "virtio"
+# cpu_mode = "host-model"
+#
+# [[machines]]
+# name = "ubuntu-analysis"
+# image = "ubuntu-base"
+# platform = "linux"
+# arch = "x64"
+# cpus = 2
+# memory = 2048          # MB
+# disk_size = 32768      # MB
 
+# -----------------------------------------------------------------------------
+# Images
+# -----------------------------------------------------------------------------
 # Managed image store directory. When configured, the daemon watches this
-# directory for qcow2 files and automatically updates image availability
-# in the registry.
+# directory for image files and automatically registers them.
 
 # [images]
 # store_path = "/var/lib/malbox/images"
 
-# When configured, machines are provisioned after allocation.
-# Uncomment to enable.
+# -----------------------------------------------------------------------------
+# Provisioning
+# -----------------------------------------------------------------------------
+# Global provisioning pipeline. Each step runs a provisioner against every
+# machine after allocation. Steps with a `snapshot` key create a provider
+# snapshot recorded in the database.
 
-# [provisioning]
+[[provisioning.steps]]
+type = "native"
+snapshot = "base"
+
+# [[provisioning.steps]]
 # type = "ansible"
-# [provisioning.config]
-# playbook = "playbooks/setup.yml"
+# snapshot = "configured"
+# [provisioning.steps.config]
+# playbook = "playbooks/windows/windows.yml"
 
+# [[provisioning.steps]]
+# type = "ansible"
+# snapshot = "with-guest-plugin"
+# [provisioning.steps.config]
+# playbook = "playbooks/windows/deploy-guest-plugin.yml"
+# [provisioning.steps.config.extra_vars]
+# guest_plugin_binary = "/path/to/plugin.exe"
+# guest_plugin_toml = "/path/to/plugin.toml"
+
+# -----------------------------------------------------------------------------
+# Guest Access
+# -----------------------------------------------------------------------------
 # Configures how the daemon communicates with guest VMs for file transfer
 # and command execution. The transport is resolved against the provider's
 # native capabilities first, then standalone transports.
@@ -101,16 +144,19 @@ uri = "qemu:///system"
 # [guest_access]
 # transport = "virtio-serial"    # or "grpc", "qemu-guest-agent", etc.
 # [guest_access.config]
-# Transport-specific configuration goes here.
-# e.g., for grpc:
 # port = 9500
 
-# Directory containing plugin subdirectories. Each subdirectory should contain
-# a plugin.toml manifest and the plugin binary.
+# -----------------------------------------------------------------------------
+# Plugins
+# -----------------------------------------------------------------------------
 
 [plugins]
 # directory = "/home/user/.config/malbox/plugins"
 # watch = true
+
+# -----------------------------------------------------------------------------
+# Analysis
+# -----------------------------------------------------------------------------
 
 [analysis]
 timeout = 300
