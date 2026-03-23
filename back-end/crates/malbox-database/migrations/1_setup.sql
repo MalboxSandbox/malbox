@@ -20,14 +20,14 @@ create extension if not exists "uuid-ossp";
 -- While `created_at` can just be `default now()`, setting `updated_at` on update requires a trigger which
 -- is a lot of boilerplate. These two functions save us from writing that every time as instead we can just do
 --
--- select trigger_updated_at('<table name>');
+-- select trigger_updated_on('<table name>');
 --
 -- after a `CREATE TABLE`.
 create or replace function set_updated_on()
     returns trigger as
 $$
 begin
-    NEW.updated_on = now();
+    NEW.updated_at = now();
     return NEW;
 end;
 $$ language plpgsql;

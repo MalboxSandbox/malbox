@@ -13,7 +13,7 @@ CREATE TABLE "tasks" (
     created_on timestamp without time zone NOT NULL,
     started_on timestamp without time zone,
     completed_on timestamp without time zone,
-    updated_on timestamp without time zone, -- for debugging purposes
+    updated_at timestamp without time zone, -- for debugging purposes
     status task_state DEFAULT 'pending'::task_state NOT NULL,
     sample_id bigint,
     owner varchar,

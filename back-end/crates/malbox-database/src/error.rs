@@ -12,6 +12,10 @@ pub enum DatabaseError {
     Sample(#[from] SampleError),
     #[error("{0}")]
     Image(#[from] ImageError),
+    #[error("{0}")]
+    Snapshot(#[from] SnapshotError),
+    #[error("{0}")]
+    ProvisionRun(#[from] ProvisionRunError),
 }
 
 #[derive(Error, Debug)]
@@ -106,6 +110,54 @@ pub enum ImageError {
     #[error("Failed to delete image '{name}': {source}")]
     DeleteFailed {
         name: String,
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum SnapshotError {
+    #[error("Failed to insert snapshot '{name}' for machine {machine_id}: {source}")]
+    InsertFailed {
+        name: String,
+        machine_id: i32,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch snapshots: {source}")]
+    FetchFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to update snapshot: {message}: {source}")]
+    UpdateFailed {
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to delete snapshot: {source}")]
+    DeleteFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum ProvisionRunError {
+    #[error("Failed to insert provision run for machine {machine_id}: {source}")]
+    InsertFailed {
+        machine_id: i32,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to update provision run: {message}: {source}")]
+    UpdateFailed {
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch provision runs: {source}")]
+    FetchFailed {
         #[source]
         source: sqlx::Error,
     },

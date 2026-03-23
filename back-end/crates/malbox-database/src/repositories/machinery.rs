@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[sqlx(type_name = "machine_arch", rename_all = "lowercase")]
 pub enum MachineArch {
     X86,
@@ -42,6 +42,15 @@ impl From<MachinePlatformConfig> for MachinePlatform {
     }
 }
 
+impl From<malbox_config::Arch> for MachineArch {
+    fn from(a: malbox_config::Arch) -> Self {
+        match a {
+            malbox_config::Arch::X64 => MachineArch::X64,
+            malbox_config::Arch::X86 => MachineArch::X86,
+        }
+    }
+}
+
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct Machine {
     pub id: Option<i32>,
@@ -53,31 +62,40 @@ pub struct Machine {
     pub tags: Option<Vec<String>>,
     pub status: MachineStatusDb,
     pub image_id: Option<Uuid>,
-    pub clean_snapshot: Option<String>,
     pub provider: Option<String>,
     pub provider_id: Option<String>,
-    pub provisioned: bool,
-    pub provisioner: Option<String>,
-    pub provision_output: Option<serde_json::Value>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub last_seen: Option<OffsetDateTime>,
     pub current_task_id: Option<i32>,
     pub error_message: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
+    pub cpus: Option<i32>,
+    pub memory_mb: Option<i32>,
+    pub disk_size_mb: Option<i64>,
+    pub image_name: Option<String>,
+    pub provider_config_hash: Option<String>,
 }
 
-/// Insert a new machine in 'creating' status.
+/// Insert a new machine with full resource specs.
 pub async fn insert_machine(
     pool: &PgPool,
     name: &str,
     platform: MachinePlatform,
     arch: MachineArch,
     image_id: Uuid,
+    image_name: &str,
+    cpus: i32,
+    memory_mb: i32,
+    disk_size_mb: i64,
+    provider_config_hash: Option<&str>,
 ) -> Result<Machine> {
     sqlx::query_as::<_, Machine>(
         r#"
-        INSERT INTO "machines" (name, label, platform, arch, image_id, status)
-        VALUES ($1, $1, $2, $3, $4, 'creating')
+        INSERT INTO "machines" (name, label, platform, arch, image_id, image_name, cpus, memory_mb, disk_size_mb, provider_config_hash, status)
+        VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'creating')
         RETURNING *
         "#,
     )
@@ -85,6 +103,11 @@ pub async fn insert_machine(
     .bind(platform)
     .bind(arch)
     .bind(image_id)
+    .bind(image_name)
+    .bind(cpus)
+    .bind(memory_mb)
+    .bind(disk_size_mb)
+    .bind(provider_config_hash)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -225,72 +248,6 @@ pub async fn set_machine_provider_info(
     })
 }
 
-/// Record provisioning details for a machine.
-///
-/// The output string is stored as JSONB. If it's valid JSON it's stored directly;
-/// otherwise it's wrapped as `{"raw": "..."}`.
-pub async fn set_machine_provision_info(
-    pool: &PgPool,
-    machine_id: i32,
-    provisioner: &str,
-    output: Option<&str>,
-) -> Result<Machine> {
-    let json_output: Option<serde_json::Value> =
-        output.map(|s| serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!({ "raw": s })));
-
-    sqlx::query_as::<_, Machine>(
-        r#"
-        UPDATE "machines"
-        SET provisioned = true,
-            provisioner = $1,
-            provision_output = $2,
-            updated_at = NOW()
-        WHERE id = $3
-        RETURNING *
-        "#,
-    )
-    .bind(provisioner)
-    .bind(json_output)
-    .bind(machine_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        MachineError::UpdateFailed {
-            message: "failed to set machine provision info".to_string(),
-            source: e,
-        }
-        .into()
-    })
-}
-
-/// Record the clean snapshot name for a machine.
-pub async fn set_machine_snapshot(
-    pool: &PgPool,
-    machine_id: i32,
-    snapshot_name: &str,
-) -> Result<Machine> {
-    sqlx::query_as::<_, Machine>(
-        r#"
-        UPDATE "machines"
-        SET clean_snapshot = $1,
-            updated_at = NOW()
-        WHERE id = $2
-        RETURNING *
-        "#,
-    )
-    .bind(snapshot_name)
-    .bind(machine_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        MachineError::UpdateFailed {
-            message: "failed to set machine snapshot".to_string(),
-            source: e,
-        }
-        .into()
-    })
-}
-
 /// Fetch a single machine by ID.
 pub async fn fetch_machine(pool: &PgPool, machine_id: i32) -> Result<Option<Machine>> {
     sqlx::query_as::<_, Machine>(
@@ -314,6 +271,31 @@ pub async fn fetch_all_machines(pool: &PgPool) -> Result<Vec<Machine>> {
     .fetch_all(pool)
     .await
     .map_err(|e| MachineError::FetchFailed { source: e }.into())
+}
+
+/// Atomically transition a machine from Ready to Provisioning.
+/// Returns None if the machine is not in Ready status (prevents races).
+pub async fn transition_to_provisioning(pool: &PgPool, machine_id: i32) -> Result<Option<Machine>> {
+    sqlx::query_as::<_, Machine>(
+        r#"
+        UPDATE "machines"
+        SET status = 'provisioning',
+            error_message = NULL,
+            updated_at = NOW()
+        WHERE id = $1 AND status = 'ready'
+        RETURNING *
+        "#,
+    )
+    .bind(machine_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        MachineError::UpdateFailed {
+            message: "failed to transition to provisioning".to_string(),
+            source: e,
+        }
+        .into()
+    })
 }
 
 /// Delete a machine by ID.

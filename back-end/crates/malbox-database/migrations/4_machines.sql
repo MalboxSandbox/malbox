@@ -18,7 +18,6 @@ CREATE TABLE "machines" (
     tags            varchar[],
     status          machine_status NOT NULL DEFAULT 'creating',
     image_id        UUID,
-    clean_snapshot  VARCHAR,
     provider        VARCHAR,
     provider_id     VARCHAR,
     last_seen       TIMESTAMPTZ,
