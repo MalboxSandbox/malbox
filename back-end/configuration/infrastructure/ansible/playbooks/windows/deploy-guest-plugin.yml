@@ -1,0 +1,81 @@
+---
+- name: Deploy Guest Plugins
+  hosts: all
+  gather_facts: yes
+
+  vars:
+    malbox_plugins_dir: C:\malbox\plugins
+    malbox_work_dir: C:\malbox\work
+    malbox_logs_dir: C:\malbox\logs
+    # guest_plugins is injected by the ansible provisioner as an extra var.
+    # It is a list of objects: [{name, binary, toml, port}, ...]
+    guest_plugins: []
+
+  tasks:
+    - name: Create shared malbox directories
+      win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ malbox_work_dir }}"
+        - "{{ malbox_logs_dir }}"
+
+    - name: Create plugin directory
+      win_file:
+        path: "{{ malbox_plugins_dir }}\\{{ item.name }}"
+        state: directory
+      loop: "{{ guest_plugins }}"
+
+    - name: Copy guest plugin binary
+      win_copy:
+        src: "{{ item.binary }}"
+        dest: "{{ malbox_plugins_dir }}\\{{ item.name }}\\{{ item.name }}.exe"
+      loop: "{{ guest_plugins }}"
+
+    - name: Copy guest plugin manifest
+      win_copy:
+        src: "{{ item.toml }}"
+        dest: "{{ malbox_plugins_dir }}\\{{ item.name }}\\plugin.toml"
+      loop: "{{ guest_plugins }}"
+
+    - name: Create guest plugin startup script
+      win_copy:
+        content: |
+          @echo off
+          set RUST_LOG=info
+          set MALBOX_WORK_DIR={{ malbox_work_dir }}
+          set MALBOX_PLUGIN_PORT={{ item.port }}
+          "{{ malbox_plugins_dir }}\{{ item.name }}\{{ item.name }}.exe" >> "{{ malbox_logs_dir }}\{{ item.name }}.log" 2>&1
+        dest: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
+      loop: "{{ guest_plugins }}"
+
+    - name: Register guest plugin as scheduled task (auto-start on boot)
+      win_scheduled_task:
+        name: "malbox-{{ item.name }}"
+        description: "Malbox guest plugin: {{ item.name }}"
+        actions:
+          - path: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
+            working_directory: "{{ malbox_plugins_dir }}\\{{ item.name }}"
+        triggers:
+          - type: boot
+            delay: PT30S
+        username: SYSTEM
+        run_level: highest
+        state: present
+        enabled: yes
+      loop: "{{ guest_plugins }}"
+
+    - name: Start guest plugin now
+      win_command: >
+        schtasks /Run /TN "malbox-{{ item.name }}"
+      loop: "{{ guest_plugins }}"
+
+    - name: Allow inbound gRPC traffic for guest plugin
+      win_firewall_rule:
+        name: "Malbox Guest Plugin {{ item.name }} (TCP {{ item.port }})"
+        localport: "{{ item.port }}"
+        action: allow
+        direction: in
+        protocol: tcp
+        enabled: yes
+      loop: "{{ guest_plugins }}"

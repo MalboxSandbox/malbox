@@ -4,7 +4,7 @@
   gather_facts: yes
 
   tasks:
-    - name: Ensure Analysis Tools Directory exists
+    - name: Ensure Tools directory exists
       win_file:
         path: C:\Tools
         state: directory

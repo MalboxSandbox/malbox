@@ -73,6 +73,18 @@ variable "winrm_password" {
   description = "WinRM password for Packer communicator"
 }
 
+variable "guest_plugin_path" {
+  type        = string
+  default     = ""
+  description = "Path to a pre-built guest plugin .exe to bake into the image"
+}
+
+variable "guest_plugin_toml" {
+  type        = string
+  default     = ""
+  description = "Path to the guest plugin's plugin.toml manifest"
+}
+
 source "qemu" "windows" {
   vm_name          = var.name
   output_directory = var.output_directory
