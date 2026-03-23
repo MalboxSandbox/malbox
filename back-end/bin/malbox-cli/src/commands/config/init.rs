@@ -164,6 +164,7 @@ fn create_default_config(paths: PathConfig) -> Result<Config> {
         guest_access: None,
         plugins: Default::default(),
         analysis,
+        machines: Vec::new(),
     };
 
     Ok(config)

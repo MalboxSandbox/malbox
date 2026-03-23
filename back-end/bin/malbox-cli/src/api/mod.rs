@@ -1,5 +1,6 @@
 pub mod images;
 pub mod machines;
+pub mod plugins;
 pub mod tasks;
 
 use crate::error::{CliError, Result};

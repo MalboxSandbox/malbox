@@ -2,16 +2,6 @@ use super::ApiClient;
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct CreateMachineRequest {
-    pub name: String,
-    pub image: String,
-    pub platform: String,
-    pub arch: String,
-    pub cpus: Option<u32>,
-    pub memory_mb: Option<u64>,
-}
-
 #[derive(Deserialize, Debug)]
 pub struct Machine {
     pub id: Option<i32>,
@@ -25,23 +15,54 @@ pub struct Machine {
     pub image_id: Option<serde_json::Value>,
     pub provider: Option<String>,
     pub current_task_id: Option<i32>,
+    pub provider_id: Option<String>,
     pub error_message: Option<String>,
     pub created_at: Option<serde_json::Value>,
     pub updated_at: Option<serde_json::Value>,
 }
 
-impl ApiClient {
-    pub async fn create_machine(&self, request: CreateMachineRequest) -> Result<Machine> {
-        let response = self
-            .client
-            .post(self.url("/v1/machines"))
-            .json(&request)
-            .send()
-            .await?;
-        let response = self.check_response(response).await?;
-        Ok(response.json().await?)
-    }
+#[derive(Deserialize, Debug)]
+pub struct MachineSnapshot {
+    pub id: serde_json::Value,
+    pub machine_id: i32,
+    pub name: String,
+    pub provider_snapshot_id: String,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub is_active: bool,
+    pub created_at: Option<serde_json::Value>,
+}
 
+#[derive(Serialize)]
+pub struct ProvisionRequest {
+    pub provisioner: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revert_to: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ProvisionRunResponse {
+    pub id: serde_json::Value,
+    pub machine_id: i32,
+    pub provisioner: String,
+    pub status: String,
+    pub config: Option<serde_json::Value>,
+    pub output: Option<serde_json::Value>,
+    pub error_message: Option<String>,
+    pub snapshot_id: Option<serde_json::Value>,
+    pub created_at: Option<serde_json::Value>,
+    pub updated_at: Option<serde_json::Value>,
+}
+
+pub type ProvisionResponse = ProvisionRunResponse;
+
+impl ApiClient {
     pub async fn list_machines(&self) -> Result<Vec<Machine>> {
         let response = self.client.get(self.url("/v1/machines")).send().await?;
         let response = self.check_response(response).await?;
@@ -58,20 +79,35 @@ impl ApiClient {
         Ok(response.json().await?)
     }
 
-    pub async fn delete_machine(&self, id: i32) -> Result<()> {
+    pub async fn list_snapshots(&self, machine_id: i32) -> Result<Vec<MachineSnapshot>> {
         let response = self
             .client
-            .delete(self.url(&format!("/v1/machines/{}", id)))
+            .get(self.url(&format!("/v1/machines/{}/snapshots", machine_id)))
             .send()
             .await?;
-        self.check_response(response).await?;
-        Ok(())
+        let response = self.check_response(response).await?;
+        Ok(response.json().await?)
     }
 
-    pub async fn retry_machine(&self, id: i32) -> Result<Machine> {
+    pub async fn provision_machine(
+        &self,
+        machine_id: i32,
+        request: ProvisionRequest,
+    ) -> Result<ProvisionResponse> {
         let response = self
             .client
-            .post(self.url(&format!("/v1/machines/{}/retry", id)))
+            .post(self.url(&format!("/v1/machines/{}/provision", machine_id)))
+            .json(&request)
+            .send()
+            .await?;
+        let response = self.check_response(response).await?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn list_provision_runs(&self, machine_id: i32) -> Result<Vec<ProvisionRunResponse>> {
+        let response = self
+            .client
+            .get(self.url(&format!("/v1/machines/{}/provisions", machine_id)))
             .send()
             .await?;
         let response = self.check_response(response).await?;
