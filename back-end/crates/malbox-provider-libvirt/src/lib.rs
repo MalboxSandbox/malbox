@@ -10,7 +10,7 @@ mod snapshot_xml;
 pub use error::LibvirtError;
 
 use domain_xml::Domain as XmlDomain;
-use malbox_machinery::{MachineId, MachineSpec, Storage};
+use malbox_machinery::{CreateMachineParams, MachineId};
 use malbox_machinery_macros::RegisterProvider;
 
 /// Libvirt/KVM provider for managing virtual machines.
@@ -40,6 +40,24 @@ pub struct LibvirtConfig {
 
 fn default_storage_pool() -> String {
     "default".to_string()
+}
+
+/// Optional provider-specific overrides from machine config.
+/// Fields that are `None` use the provider's built-in defaults.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct LibvirtOverrides {
+    pub nic_model: Option<String>,
+    pub cpu_mode: Option<String>,
+    pub network: Option<String>,
+}
+
+impl LibvirtOverrides {
+    /// Deserialize from an opaque toml::Value, or return defaults if None.
+    pub fn from_provider_config(config: Option<&malbox_machinery::provider::TomlValue>) -> Self {
+        config
+            .and_then(|v| malbox_machinery::provider::config::deserialize(v).ok())
+            .unwrap_or_default()
+    }
 }
 
 impl LibvirtProvider {
@@ -109,35 +127,23 @@ impl LibvirtProvider {
 
 /// Helper methods for LibvirtProvider.
 impl LibvirtProvider {
-    /// Create a disk volume for a machine.
+    /// Create a qcow2 disk volume for a machine.
+    ///
+    /// If `base_image` is provided, creates a COW overlay backed by it.
+    /// Otherwise creates a blank 64GB qcow2 disk.
     pub(crate) async fn create_disk(
         &self,
         name: &str,
-        storage: &Storage,
         base_image: Option<&str>,
+        capacity_bytes: u64,
     ) -> Result<String, LibvirtError> {
-        use malbox_machinery::DiskType;
         use virt::storage_vol::StorageVol;
 
-        // Determine disk format
-        let format = match storage.disk_type {
-            DiskType::Qcow2 => "qcow2",
-            DiskType::Raw => "raw",
-            DiskType::Vmdk => "vmdk",
-        };
+        let vol_name = format!("{}.qcow2", name);
 
-        let vol_name = format!("{}.{}", name, format);
-
-        if let Some(base_image_path) = base_image {
-            // Clone from base image using qcow2 backing file
-            if !matches!(storage.disk_type, DiskType::Qcow2) {
-                return Err(LibvirtError::Libvirt(
-                    "Base image cloning only supported for qcow2 format".to_string(),
-                ));
-            }
-
+        let vol_xml = if let Some(base_image_path) = base_image {
             // Create qcow2 overlay with backing file
-            let vol_xml = format!(
+            format!(
                 r#"<volume>
   <name>{}</name>
   <capacity unit='bytes'>{}</capacity>
@@ -149,43 +155,62 @@ impl LibvirtProvider {
     <format type='qcow2'/>
   </backingStore>
 </volume>"#,
-                vol_name,
-                (storage.boot_disk_gb as u64) * 1024 * 1024 * 1024,
-                base_image_path
-            );
-
-            let vol = StorageVol::create_xml(&self.storage_pool, &vol_xml, 0)?;
-            let path = vol.get_path()?;
-            Ok(path)
+                vol_name, capacity_bytes, base_image_path
+            )
         } else {
             // Create blank disk
-            let capacity_bytes = (storage.boot_disk_gb as u64) * 1024 * 1024 * 1024;
-
-            let vol_xml = format!(
+            format!(
                 r#"<volume>
   <name>{}</name>
   <capacity unit='bytes'>{}</capacity>
   <target>
-    <format type='{}'/>
+    <format type='qcow2'/>
   </target>
 </volume>"#,
-                vol_name, capacity_bytes, format
-            );
+                vol_name, capacity_bytes
+            )
+        };
 
-            let vol = StorageVol::create_xml(&self.storage_pool, &vol_xml, 0)?;
-            let path = vol.get_path()?;
-            Ok(path)
-        }
+        let vol = StorageVol::create_xml(&self.storage_pool, &vol_xml, 0)?;
+        let path = vol.get_path()?;
+        Ok(path)
     }
 
-    /// Build domain XML from machine spec.
+    /// Get IP address from a domain via DHCP lease lookup.
+    ///
+    /// Requires a libvirt-managed DHCP network (e.g. the default NAT network).
+    /// Does not need anything installed inside the guest.
+    pub(crate) fn get_domain_ip(
+        domain: &virt::domain::Domain,
+    ) -> Result<std::net::IpAddr, LibvirtError> {
+        if let Ok(interfaces) = domain.interface_addresses(
+            virt::sys::VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE as u32,
+            0,
+        ) {
+            for iface in &interfaces {
+                for addr in &iface.addrs {
+                    if let Ok(ip) = addr.addr.parse::<std::net::IpAddr>() {
+                        if !ip.is_loopback() {
+                            return Ok(ip);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(LibvirtError::Libvirt(
+            "No DHCP lease available yet".to_string(),
+        ))
+    }
+
+    /// Build domain XML from creation parameters.
     pub(crate) fn build_domain_xml(
         &self,
         name: &str,
-        spec: &MachineSpec,
+        params: &CreateMachineParams,
         disk_path: &str,
     ) -> Result<String, LibvirtError> {
-        let domain = XmlDomain::from_spec(name.to_string(), spec, disk_path.to_string());
+        let domain = XmlDomain::from_params(name.to_string(), params, disk_path.to_string());
         domain
             .to_xml()
             .map_err(|e| LibvirtError::Libvirt(format!("XML serialization error: {}", e)))

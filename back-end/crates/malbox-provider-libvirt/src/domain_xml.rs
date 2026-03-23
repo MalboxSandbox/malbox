@@ -1,4 +1,4 @@
-use malbox_machinery::machine::{DiskType, MachineSpec, Network, NetworkMode, Platform};
+use malbox_machinery::machine::{Arch, CreateMachineParams};
 use serde::{Deserialize, Serialize};
 
 /// Domain structure that serializes/deserializes to/from libvirt XML format.
@@ -241,21 +241,20 @@ pub struct VideoModel {
 }
 
 impl Domain {
-    /// Build a Domain from a MachineSpec.
-    pub fn from_spec(name: String, spec: &MachineSpec, disk_path: String) -> Self {
-        let (os_type, arch, machine_type) = match spec.platform {
-            Platform::Windows => ("hvm", "x86_64", "pc-q35-5.2"),
-            Platform::Linux => ("hvm", "x86_64", "pc-q35-5.2"),
+    /// Build a libvirt domain XML from machine creation parameters.
+    ///
+    /// Uses sensible defaults for disk format (qcow2), network (NAT via
+    /// libvirt's default network), and device models. The disk bus is set
+    /// to virtio and the NIC model to e1000.
+    pub fn from_params(name: String, params: &CreateMachineParams, disk_path: String) -> Self {
+        let (os_type, arch_str, machine_type) = match params.arch {
+            Arch::X64 => ("hvm", "x86_64", "pc-q35-5.2"),
+            Arch::X86 => ("hvm", "i686", "pc-i440fx-5.2"),
         };
 
-        // TODO: Make disk bus configurable to support images built with different
-        // disk interfaces (virtio, sata, ide) depending on how the base image was built.
-        let (disk_bus, disk_dev) = ("virtio", "vda");
-
-        let disk_format = match spec.storage.disk_type {
-            DiskType::Qcow2 => "qcow2",
-            DiskType::Raw => "raw",
-            DiskType::Vmdk => "vmdk",
+        let emulator = match params.arch {
+            Arch::X64 => "/usr/bin/qemu-system-x86_64",
+            Arch::X86 => "/usr/bin/qemu-system-i386",
         };
 
         Domain {
@@ -263,15 +262,15 @@ impl Domain {
             name,
             memory: Memory {
                 unit: "MiB".to_string(),
-                value: spec.resources.memory_mb,
+                value: params.memory_mb,
             },
             vcpu: Vcpu {
                 placement: "static".to_string(),
-                count: spec.resources.cpus,
+                count: params.cpus,
             },
             os: Os {
                 os_type: OsType {
-                    arch: arch.to_string(),
+                    arch: arch_str.to_string(),
                     machine: machine_type.to_string(),
                     value: os_type.to_string(),
                 },
@@ -311,21 +310,32 @@ impl Domain {
             on_reboot: "restart".to_string(),
             on_crash: "destroy".to_string(),
             devices: Devices {
-                emulator: "/usr/bin/qemu-system-x86_64".to_string(),
+                emulator: emulator.to_string(),
                 disk: Disk {
                     disk_type: "file".to_string(),
                     device: "disk".to_string(),
                     driver: DiskDriver {
                         name: "qemu".to_string(),
-                        driver_type: disk_format.to_string(),
+                        driver_type: "qcow2".to_string(),
                     },
                     source: DiskSource { file: disk_path },
                     target: DiskTarget {
-                        dev: disk_dev.to_string(),
-                        bus: disk_bus.to_string(),
+                        dev: "vda".to_string(),
+                        bus: "virtio".to_string(),
                     },
                 },
-                interface: Self::build_interface(&spec.network),
+                // Default: NAT via libvirt's "default" network with e1000 NIC
+                interface: Interface {
+                    interface_type: "network".to_string(),
+                    mac: None,
+                    source: InterfaceSource {
+                        network: Some("default".to_string()),
+                        bridge: None,
+                    },
+                    model: InterfaceModel {
+                        model_type: "e1000".to_string(),
+                    },
+                },
                 console: Console {
                     console_type: "pty".to_string(),
                     target: ConsoleTarget {
@@ -359,45 +369,6 @@ impl Domain {
                         heads: "1".to_string(),
                     },
                 },
-            },
-        }
-    }
-
-    fn build_interface(network: &Network) -> Interface {
-        let (interface_type, source) = match &network.mode {
-            NetworkMode::Nat => (
-                "network",
-                InterfaceSource {
-                    network: Some("default".to_string()),
-                    bridge: None,
-                },
-            ),
-            NetworkMode::Isolated { subnet } => (
-                "network",
-                InterfaceSource {
-                    network: Some(format!("malbox-isolated-{}", subnet.replace('/', "-"))),
-                    bridge: None,
-                },
-            ),
-            NetworkMode::Bridged { interface } => (
-                "bridge",
-                InterfaceSource {
-                    network: None,
-                    bridge: Some(interface.clone()),
-                },
-            ),
-        };
-
-        Interface {
-            interface_type: interface_type.to_string(),
-            mac: network
-                .mac
-                .as_ref()
-                .map(|m| MacAddress { address: m.clone() }),
-            source,
-            // TODO: Make NIC model configurable to match how the base image was built.
-            model: InterfaceModel {
-                model_type: "e1000".to_string(),
             },
         }
     }
