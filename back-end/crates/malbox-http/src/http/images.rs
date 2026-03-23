@@ -54,20 +54,66 @@ async fn register_image(
         }
     };
 
-    if !std::path::Path::new(&request.path).exists() {
+    let src = std::path::Path::new(&request.path)
+        .canonicalize()
+        .map_err(|e| {
+            Error::unprocessable_entity([("path", format!("cannot resolve path: {}", e))])
+        })?;
+
+    if !src.exists() {
         return Err(Error::unprocessable_entity([(
             "path",
-            "file does not exist at the specified path",
+            "file does not exist at the specified path".to_string(),
         )]));
     }
+
+    // Move image to managed store directory
+    let format = request.format.unwrap_or_else(|| "qcow2".to_string());
+    let images_dir = state
+        .config
+        .images
+        .as_ref()
+        .map(|c| std::path::PathBuf::from(&c.store_path))
+        .unwrap_or_else(|| std::path::PathBuf::from("/var/lib/malbox/images"));
+    tokio::fs::create_dir_all(&images_dir)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to create images directory: {}", e)))?;
+
+    let filename = format!("{}.{}", &request.name, &format);
+    let dest = images_dir.join(&filename);
+
+    tracing::info!(
+        src = %src.display(),
+        dest = %dest.display(),
+        "Moving image to managed store"
+    );
+
+    if let Err(_) = tokio::fs::rename(&src, &dest).await {
+        // rename fails across filesystems — fall back to copy + remove
+        tokio::fs::copy(&src, &dest)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to copy image to store: {}", e)))?;
+        tokio::fs::remove_file(&src)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to remove source image: {}", e)))?;
+    }
+
+    let dest_canonical = dest
+        .canonicalize()
+        .map_err(|e| Error::Internal(format!("Failed to canonicalize destination path: {}", e)))?;
+
+    let dest_str = dest_canonical
+        .to_str()
+        .ok_or_else(|| Error::Internal("Image destination path is not valid UTF-8".to_string()))?
+        .to_string();
 
     let new_image = NewImage {
         name: request.name,
         platform,
         arch,
-        format: request.format.unwrap_or_else(|| "qcow2".to_string()),
+        format,
         description: request.description,
-        path: request.path,
+        path: dest_str,
     };
 
     let image = images::insert_image(&state.pool, new_image)
@@ -79,6 +125,7 @@ async fn register_image(
         Json(serde_json::json!({
             "id": image.id,
             "name": image.name,
+            "path": image.path,
             "available": image.available,
         })),
     ))

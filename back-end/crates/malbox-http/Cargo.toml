@@ -10,6 +10,7 @@ malbox-database = { path = "../malbox-database" }
 malbox-utils = { path = "../malbox-utils" }
 malbox-config = { path = "../malbox-config" }
 malbox-resources = { path = "../malbox-resources" }
+malbox-plugin-internal = { path = "../malbox-plugin-internal" }
 malbox-scheduler = { path = "../malbox-scheduler" }
 malbox-tracing = { path = "../malbox-tracing" }
 tokio = { workspace = true }
@@ -24,4 +25,5 @@ axum-macros = "0.5.0"
 axum_typed_multipart = "0.16.5"
 dotenvy = "0.15.7"
 serde_json = "1.0.116"
+toml.workspace = true
 tower-http = { version = "0.6.2", features = ["trace"] }

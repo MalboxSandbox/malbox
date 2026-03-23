@@ -152,7 +152,11 @@ async fn create_task(
         target: file_info.name.to_string(),
         timeout: request.timeout.unwrap_or(300),
         priority: request.priority.unwrap_or(1),
-        platform: MachinePlatform::Linux,
+        platform: match request.platform.as_deref() {
+            Some("windows") => MachinePlatform::Windows,
+            Some("linux") => MachinePlatform::Linux,
+            _ => MachinePlatform::Windows, // default to Windows for malware analysis
+        },
         tags: request
             .tags
             .clone()

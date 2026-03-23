@@ -1,11 +1,7 @@
-use axum::{
-    Router,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
-};
+use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use malbox_config::Config as MalboxConfig;
 use malbox_database::{PgPool, repositories::tasks::Task};
+use malbox_plugin_internal::registry::PluginRegistry;
 use malbox_resources::MachinePool;
 use malbox_utils::SampleStore;
 use std::sync::Arc;
@@ -16,6 +12,7 @@ use tower_http::trace::TraceLayer;
 mod error;
 mod images;
 mod machines;
+mod plugins;
 mod tasks;
 
 pub use error::Error;
@@ -28,6 +25,7 @@ struct AppState {
     task_tx: mpsc::Sender<Task>,
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
+    plugin_registry: Arc<PluginRegistry>,
 }
 
 pub async fn serve(
@@ -36,6 +34,7 @@ pub async fn serve(
     task_tx: mpsc::Sender<Task>,
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
+    plugin_registry: Arc<PluginRegistry>,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
         config: conf,
@@ -43,6 +42,7 @@ pub async fn serve(
         task_tx,
         sample_store,
         machine_pool,
+        plugin_registry,
     };
 
     let app = api_router()
@@ -71,6 +71,7 @@ fn api_router() -> Router<AppState> {
         .merge(tasks::create::router())
         .merge(images::router())
         .merge(machines::router())
+        .merge(plugins::router())
 }
 
 async fn root() -> &'static str {
