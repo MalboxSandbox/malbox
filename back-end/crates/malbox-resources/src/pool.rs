@@ -5,37 +5,17 @@ mod reconcile;
 mod revert;
 
 use crate::error::{ResourceError, Result};
-use malbox_config::machinery::MachineDefaults;
 use malbox_database::PgPool;
-use malbox_database::repositories::images;
-use malbox_database::repositories::machinery::{
-    self, MachineArch, MachinePlatform, MachineStatusDb,
-};
+use malbox_database::repositories::machinery::{self, MachinePlatform, MachineStatusDb};
 use malbox_machinery::ProviderHandle;
-use malbox_machinery::provisioner::Provisioner;
+use malbox_machinery::machine::MachineEndpoint;
+use malbox_machinery::{Machine as RuntimeMachine, MachineId, Platform};
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
 pub type DbMachine = machinery::Machine;
-
-/// Configuration extracted from `MachineryConfig` for pool use.
-#[derive(Debug, Clone)]
-pub struct MachinePoolConfig {
-    pub clean_snapshot_name: String,
-    pub defaults: MachineDefaults,
-}
-
-/// Request payload for creating a new machine.
-#[derive(Debug, Clone)]
-pub struct CreateMachineRequest {
-    pub name: String,
-    pub image: String,
-    pub platform: MachinePlatform,
-    pub arch: MachineArch,
-    pub cpus: Option<u32>,
-    pub memory_mb: Option<u64>,
-}
 
 /// Central machine pool that owns all lifecycle operations.
 ///
@@ -45,69 +25,17 @@ pub struct CreateMachineRequest {
 #[derive(Clone)]
 pub struct MachinePool {
     pub(crate) provider: Arc<ProviderHandle>,
-    pub(crate) provisioner: Option<Arc<dyn Provisioner>>,
     pub(crate) db: PgPool,
-    pub(crate) config: MachinePoolConfig,
     pub machine_available: Arc<Notify>,
 }
 
 impl MachinePool {
-    pub fn new(
-        provider: Arc<ProviderHandle>,
-        provisioner: Option<Arc<dyn Provisioner>>,
-        db: PgPool,
-        config: MachinePoolConfig,
-    ) -> Self {
+    pub fn new(provider: Arc<ProviderHandle>, db: PgPool) -> Self {
         Self {
             provider,
-            provisioner,
             db,
-            config,
             machine_available: Arc::new(Notify::new()),
         }
-    }
-
-    /// Create a new machine.
-    ///
-    /// Validates that the requested image exists, inserts a DB row in
-    /// `creating` status, and spawns background provisioning. Returns the
-    /// DB row immediately so the caller can track progress.
-    pub async fn create_machine(&self, request: CreateMachineRequest) -> Result<DbMachine> {
-        let image = images::fetch_image_by_name(&self.db, &request.image)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or_else(|| {
-                ResourceError::Internal(format!("Image '{}' not found", request.image,))
-            })?;
-
-        let db_machine = machinery::insert_machine(
-            &self.db,
-            &request.name,
-            request.platform,
-            request.arch,
-            image.id,
-        )
-        .await
-        .map_err(|e| ResourceError::Database(e.to_string()))?;
-
-        let machine_id = db_machine.id.expect("insert_machine always returns id");
-        let image_path = image.path.clone();
-
-        let pool = self.clone();
-        tokio::spawn(async move {
-            if let Err(e) = pool.provision_machine(machine_id, &image_path).await {
-                error!(machine_id, error = %e, "Background provisioning failed");
-                let _ = machinery::update_machine_status(
-                    &pool.db,
-                    machine_id,
-                    MachineStatusDb::Failed,
-                    Some(&e.to_string()),
-                )
-                .await;
-            }
-        });
-
-        Ok(db_machine)
     }
 
     /// Acquire a ready machine for a task.
@@ -146,90 +74,6 @@ impl MachinePool {
         Ok(())
     }
 
-    /// Delete a machine.
-    ///
-    /// Rejects the request if the machine is currently assigned.  Otherwise,
-    /// marks `deleting`, deallocates from the provider, and removes the DB row.
-    pub async fn delete_machine(&self, machine_id: i32) -> Result<()> {
-        let db_machine = machinery::fetch_machine(&self.db, machine_id)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or(ResourceError::MachineNotFound {
-                id: machine_id.to_string(),
-            })?;
-
-        if db_machine.status == MachineStatusDb::Assigned {
-            return Err(ResourceError::MachineAssigned { id: machine_id });
-        }
-
-        machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Deleting, None)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
-
-        if let Some(ref provider_id) = db_machine.provider_id {
-            if let Err(e) = revert::deallocate_by_provider_id(&self.provider, provider_id).await {
-                warn!(machine_id, error = %e, "Failed to deallocate from provider during delete (continuing)");
-            }
-        }
-
-        machinery::delete_machine(&self.db, machine_id)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
-
-        info!(machine_id, "Machine deleted");
-        Ok(())
-    }
-
-    /// Retry provisioning of a failed machine.
-    pub async fn retry(&self, machine_id: i32) -> Result<DbMachine> {
-        let db_machine = machinery::fetch_machine(&self.db, machine_id)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or(ResourceError::MachineNotFound {
-                id: machine_id.to_string(),
-            })?;
-
-        if db_machine.status != MachineStatusDb::Failed {
-            return Err(ResourceError::InvalidMachineState {
-                id: machine_id,
-                status: format!("{:?}", db_machine.status),
-                expected: "failed".to_string(),
-            });
-        }
-
-        let updated =
-            machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
-                .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?;
-
-        let image_id = db_machine
-            .image_id
-            .ok_or_else(|| ResourceError::Internal("Machine has no image_id".to_string()))?;
-        let image_path = images::fetch_image_by_id(&self.db, image_id)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
-            .ok_or_else(|| {
-                ResourceError::Internal(format!("Image with id {} not found", image_id))
-            })?
-            .path;
-
-        let pool = self.clone();
-        tokio::spawn(async move {
-            if let Err(e) = pool.provision_machine(machine_id, &image_path).await {
-                error!(machine_id, error = %e, "Retry provisioning failed");
-                let _ = machinery::update_machine_status(
-                    &pool.db,
-                    machine_id,
-                    MachineStatusDb::Failed,
-                    Some(&e.to_string()),
-                )
-                .await;
-            }
-        });
-
-        Ok(updated)
-    }
-
     /// Fetch a single machine by ID.
     pub async fn get(&self, machine_id: i32) -> Result<Option<DbMachine>> {
         machinery::fetch_machine(&self.db, machine_id)
@@ -242,5 +86,108 @@ impl MachinePool {
         machinery::fetch_all_machines(&self.db)
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))
+    }
+
+    /// Fetch the guest plugin names from the active snapshot for a machine.
+    ///
+    /// Returns an empty list if there is no active snapshot or the snapshot
+    /// has no guest plugins recorded.
+    pub async fn get_active_snapshot_guest_plugins(&self, machine_id: i32) -> Result<Vec<String>> {
+        use malbox_database::repositories::snapshots;
+
+        let snap = snapshots::fetch_active_snapshot(&self.db, machine_id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        let plugins = snap
+            .and_then(|s| s.guest_plugins)
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+            .unwrap_or_default();
+
+        Ok(plugins)
+    }
+
+    /// Start an acquired machine's VM and wait for the guest plugin gRPC port
+    /// (50051) to become reachable.
+    ///
+    /// After a snapshot revert the VM is stopped. Workers must call this before
+    /// attempting to connect to guest plugins.
+    pub async fn start_and_wait(&self, db_machine: &DbMachine) -> Result<()> {
+        let provider_id = db_machine
+            .provider_id
+            .as_deref()
+            .ok_or_else(|| ResourceError::Internal("Machine has no provider_id".into()))?;
+
+        let ip: IpAddr = db_machine
+            .ip
+            .as_deref()
+            .ok_or_else(|| ResourceError::Internal("Machine has no IP".into()))?
+            .parse()
+            .map_err(|e| ResourceError::Internal(format!("Invalid IP: {}", e)))?;
+
+        let platform = match db_machine.platform {
+            MachinePlatform::Windows => Platform::Windows,
+            MachinePlatform::Linux => Platform::Linux,
+        };
+
+        // Build a runtime machine so the provider can look up the domain.
+        let mut runtime_machine = RuntimeMachine::new(MachineId(provider_id.to_string()));
+        runtime_machine.set_endpoint(Some(MachineEndpoint {
+            address: ip,
+            id: provider_id.to_string(),
+            platform,
+        }));
+
+        // Start the VM (idempotent if already running).
+        let allocate = self.provider.allocate();
+        allocate
+            .start(&runtime_machine)
+            .await
+            .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {}", e)))?;
+
+        info!(
+            machine_id = db_machine.id,
+            %ip,
+            "VM started, waiting for guest plugin port"
+        );
+
+        // Wait for the guest plugin gRPC port (50051) to become reachable.
+        let addr = std::net::SocketAddr::new(ip, 50051);
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(120);
+        let connect_timeout = std::time::Duration::from_secs(5);
+        let mut interval = std::time::Duration::from_secs(3);
+        let max_interval = std::time::Duration::from_secs(10);
+
+        loop {
+            match tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(addr)).await
+            {
+                Ok(Ok(_)) => {
+                    info!(
+                        %addr,
+                        elapsed_secs = start.elapsed().as_secs(),
+                        "Guest plugin port reachable"
+                    );
+                    return Ok(());
+                }
+                Ok(Err(_)) | Err(_) => {}
+            }
+
+            if start.elapsed() >= timeout {
+                return Err(ResourceError::Timeout(format!(
+                    "Guest plugin at {} not reachable within {}s",
+                    addr,
+                    timeout.as_secs(),
+                )));
+            }
+
+            warn!(
+                %addr,
+                elapsed_secs = start.elapsed().as_secs(),
+                "Waiting for guest plugin..."
+            );
+            tokio::time::sleep(interval).await;
+            interval = (interval * 2).min(max_interval);
+        }
     }
 }

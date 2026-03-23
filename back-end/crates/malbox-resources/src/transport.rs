@@ -5,7 +5,7 @@
 
 use crate::error::{ResourceError, Result};
 use malbox_config::{GuestAccessConfig, TransportKind};
-use malbox_machinery::{GuestAccess, NetworkMode, ProviderHandle};
+use malbox_machinery::{GuestAccess, ProviderHandle};
 use std::sync::Arc;
 
 /// A resolved transport configuration.
@@ -25,11 +25,13 @@ pub enum ResolvedTransport {
 
 /// Resolve the configured transport against the provider and gRPC.
 ///
-/// Called once at daemon startup.
+/// Called once at daemon startup. The `network_isolated` flag indicates
+/// whether machines are on an isolated network (no host connectivity),
+/// which prevents gRPC from working.
 pub fn resolve_transport(
     provider: &ProviderHandle,
     guest_config: &GuestAccessConfig,
-    default_network_mode: &NetworkMode,
+    network_isolated: bool,
 ) -> Result<ResolvedTransport> {
     match &guest_config.transport {
         TransportKind::Provider(name) => {
@@ -60,10 +62,10 @@ pub fn resolve_transport(
             })
         }
         TransportKind::Grpc => {
-            if matches!(default_network_mode, NetworkMode::Isolated { .. }) {
+            if network_isolated {
                 return Err(ResourceError::IncompatibleTransport {
                     transport: "grpc".to_string(),
-                    reason: "gRPC requires network connectivity but network mode is Isolated"
+                    reason: "gRPC requires network connectivity but network mode is isolated"
                         .to_string(),
                 });
             }

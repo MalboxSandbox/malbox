@@ -8,5 +8,5 @@ pub mod pool;
 pub mod transport;
 
 pub use error::{ResourceError, Result};
-pub use pool::{CreateMachineRequest, MachinePool, MachinePoolConfig};
+pub use pool::MachinePool;
 pub use transport::{ResolvedTransport, resolve_transport};
