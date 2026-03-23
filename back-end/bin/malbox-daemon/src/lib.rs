@@ -2,12 +2,11 @@ use malbox_config::Config;
 use malbox_database::init_database;
 use malbox_http::http;
 use malbox_machinery::provider::{create_provider, list_providers};
-use malbox_machinery::provisioner::{create_provisioner, list_provisioners};
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::transport::ipc::{
     EventEmitter, IpcService, NodeBuilder, daemon_channel,
 };
-use malbox_resources::{MachinePool, MachinePoolConfig, resolve_transport};
+use malbox_resources::{MachinePool, resolve_transport};
 use malbox_scheduler::init_scheduler;
 use malbox_utils::SampleStore;
 use std::sync::Arc;
@@ -31,6 +30,9 @@ pub async fn run(config: &Config) -> error::Result<()> {
         .providers
         .validate(&compiled_providers)
         .map_err(|e| DaemonError::Internal(e.to_string()))?;
+
+    malbox_config::validate_machine_configs(&config.machines)
+        .map_err(|e| DaemonError::Configuration(format!("Invalid machine config: {}", e)))?;
 
     let db = init_database(&config.database).await;
 
@@ -78,46 +80,14 @@ pub async fn run(config: &Config) -> error::Result<()> {
         ))
     })?;
 
-    // Create provisioner if configured
-    let provisioner: Option<Arc<dyn malbox_machinery::Provisioner>> = if let Some(ref prov_config) =
-        config.provisioning
-    {
-        let compiled_provisioners = list_provisioners();
-        tracing::info!(
-            "Provisioners compiled into daemon: {:?}",
-            compiled_provisioners
-        );
-
-        tracing::info!("Using provisioner: {}", prov_config.provisioner_type);
-
-        let provisioner = create_provisioner(&prov_config.provisioner_type, &prov_config.config)
-            .map_err(|e| {
-                DaemonError::Internal(format!(
-                    "Failed to create provisioner '{}': {}",
-                    prov_config.provisioner_type, e
-                ))
-            })?;
-
-        Some(Arc::from(provisioner))
-    } else {
-        tracing::info!("No provisioning configured");
-        None
-    };
-
     // Create machine pool
     let provider_arc = Arc::new(provider);
 
     // Resolve guest access transport (if configured)
     let transport = if let Some(ref ga_config) = config.guest_access {
-        let default_network_mode = malbox_machinery::NetworkMode::Nat;
-
-        let resolved =
-            resolve_transport(&provider_arc, ga_config, &default_network_mode).map_err(|e| {
-                DaemonError::Configuration(format!(
-                    "Guest access transport resolution failed: {}",
-                    e
-                ))
-            })?;
+        let resolved = resolve_transport(&provider_arc, ga_config, false).map_err(|e| {
+            DaemonError::Configuration(format!("Guest access transport resolution failed: {}", e))
+        })?;
 
         tracing::info!(
             transport = ?ga_config.transport,
@@ -164,21 +134,18 @@ pub async fn run(config: &Config) -> error::Result<()> {
         );
     }
 
-    let machine_pool = Arc::new(MachinePool::new(
-        Arc::clone(&provider_arc),
-        provisioner,
-        db.clone(),
-        MachinePoolConfig {
-            clean_snapshot_name: config.machinery.clean_snapshot_name.clone(),
-            defaults: config.machinery.defaults.clone(),
-        },
-    ));
+    let machine_pool = Arc::new(MachinePool::new(Arc::clone(&provider_arc), db.clone()));
 
     // Reconcile DB machines against provider state on startup
     machine_pool
         .reconcile()
         .await
         .map_err(|e| DaemonError::Internal(format!("Failed to reconcile machine pool: {}", e)))?;
+
+    machine_pool
+        .reconcile_config(&config.machines)
+        .await
+        .map_err(|e| DaemonError::Internal(format!("Config reconciliation failed: {}", e)))?;
 
     // Initialize IPC event emitter for daemon → plugin communication
     let node = NodeBuilder::new()
@@ -208,7 +175,6 @@ pub async fn run(config: &Config) -> error::Result<()> {
     let (task_tx, _shutdown_tx) = init_scheduler(
         db.clone(),
         Arc::clone(&machine_pool),
-        config.machinery.clone(),
         Arc::clone(&plugin_manager),
         config.general.worker_threads,
         transport,
@@ -218,7 +184,14 @@ pub async fn run(config: &Config) -> error::Result<()> {
     .map_err(|e| DaemonError::Internal(e.to_string()))?;
 
     // Start HTTP server (this blocks until shutdown)
-    http::serve(config.clone(), db, task_tx, sample_store, machine_pool)
-        .await
-        .map_err(|e| DaemonError::Internal(e.to_string()))
+    http::serve(
+        config.clone(),
+        db,
+        task_tx,
+        sample_store,
+        machine_pool,
+        registry,
+    )
+    .await
+    .map_err(|e| DaemonError::Internal(e.to_string()))
 }
