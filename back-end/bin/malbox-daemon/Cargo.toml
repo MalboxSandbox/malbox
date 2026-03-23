@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["provider-libvirt", "provisioner-ansible", "provisioner-native"]
+default = ["provider-libvirt", "provisioner-ansible"]
 provider-libvirt = ["dep:malbox-provider-libvirt"]
 # Add more providers here as they're implemented:
 # provider-vmware = ["dep:malbox-provider-vmware"]
 # provider-virtualbox = ["dep:malbox-provider-virtualbox"]
 provisioner-ansible = ["dep:malbox-provisioner-ansible"]
-provisioner-native = ["dep:malbox-provisioner-native"]
 
 [dependencies]
 malbox-database = { path = "../../crates/malbox-database" }
@@ -30,7 +29,6 @@ malbox-provider-libvirt = { path = "../../crates/malbox-provider-libvirt", optio
 
 # Provisioner implementations (optional, feature-gated)
 malbox-provisioner-ansible = { path = "../../crates/malbox-provisioner-ansible", optional = true }
-malbox-provisioner-native = { path = "../../crates/malbox-provisioner-native", optional = true }
 
 color-eyre = { workspace = true }
 tokio = { workspace = true }

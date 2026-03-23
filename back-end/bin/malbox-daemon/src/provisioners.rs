@@ -6,12 +6,8 @@
 //!
 //! Provisioners are enabled via Cargo features:
 //! - `provisioner-ansible` - Ansible provisioner
-//! - `provisioner-native` - Native provisioner (stub)
 
 #![allow(unused_imports)]
 
 #[cfg(feature = "provisioner-ansible")]
 use malbox_provisioner_ansible as _;
-
-#[cfg(feature = "provisioner-native")]
-use malbox_provisioner_native as _;
