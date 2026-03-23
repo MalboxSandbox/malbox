@@ -18,12 +18,10 @@ pub use job::Job;
 use crate::error::{Result, SchedulerError};
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
-use malbox_config::MachineryConfig;
 use malbox_database::repositories::samples::fetch_sample_by_id;
 use malbox_database::repositories::tasks::TaskState;
 use malbox_machinery::{
-    DiskType, Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineSpec, MachineState,
-    Network, NetworkMode, Platform, Resources, Storage,
+    Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineState, Platform,
 };
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::transport::daemon::GrpcClient;
@@ -38,6 +36,15 @@ use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+/// Outcome of a single `execute_task` call.
+#[derive(Debug)]
+enum TaskOutcome {
+    /// Task ran to completion (plugins executed, machine released).
+    Completed,
+    /// No machine was available — task was re-enqueued for a later attempt.
+    Requeued,
+}
 
 /// Unique identifier for a worker instance.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -72,7 +79,6 @@ pub struct Worker {
     task_queue: Arc<TaskQueue>,
     task_store: Arc<TaskStore>,
     machine_pool: Arc<MachinePool>,
-    machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     event_tx: mpsc::Sender<WorkerEvent>,
     transport: Option<Arc<ResolvedTransport>>,
@@ -85,7 +91,6 @@ impl Worker {
         task_queue: Arc<TaskQueue>,
         task_store: Arc<TaskStore>,
         machine_pool: Arc<MachinePool>,
-        machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         event_tx: mpsc::Sender<WorkerEvent>,
         transport: Option<Arc<ResolvedTransport>>,
@@ -96,7 +101,6 @@ impl Worker {
             task_queue,
             task_store,
             machine_pool,
-            machinery_config,
             plugin_manager,
             event_tx,
             transport,
@@ -160,7 +164,7 @@ impl Worker {
             let duration = start.elapsed();
 
             match result {
-                Ok(Ok(())) => {
+                Ok(Ok(TaskOutcome::Completed)) => {
                     info!(worker_id = %self.id, task_id, duration = ?duration, "Task completed successfully");
                     let _ = self
                         .event_tx
@@ -170,6 +174,10 @@ impl Worker {
                             duration,
                         })
                         .await;
+                }
+                Ok(Ok(TaskOutcome::Requeued)) => {
+                    // Task was re-enqueued because no machine was available.
+                    // Not a completion — just continue the loop.
                 }
                 Ok(Err(e)) => {
                     error!(worker_id = %self.id, task_id, error = %e, "Task execution failed");
@@ -205,7 +213,11 @@ impl Worker {
     }
 
     /// Execute the full lifecycle of a single task.
-    async fn execute_task(&self, task_id: i32) -> Result<()> {
+    ///
+    /// Returns `Ok(TaskOutcome::Completed)` when the task ran to completion,
+    /// or `Ok(TaskOutcome::Requeued)` when no machine was available and the
+    /// task was put back on the queue.
+    async fn execute_task(&self, task_id: i32) -> Result<TaskOutcome> {
         // --- Initializing ---
         self.task_store
             .update_task_state(task_id, TaskState::Initializing)
@@ -235,7 +247,7 @@ impl Worker {
                 )
                 .await
                 .ok();
-                return Ok(());
+                return Ok(TaskOutcome::Requeued);
             }
             Err(e) => {
                 error!(task_id, error = %e, "Machine acquisition failed");
@@ -249,52 +261,25 @@ impl Worker {
         let machine_id = db_machine.id.expect("acquired machine has id");
         info!(task_id, machine_id, "Machine acquired");
 
-        // Build a runtime Machine from the DbMachine so transport can use it.
+        // Build a lightweight runtime Machine from the DB record.
         let runtime_machine = {
-            let spec = MachineSpec {
-                name: db_machine.name.clone(),
-                platform: match db_machine.platform {
-                    malbox_database::repositories::machinery::MachinePlatform::Windows => {
-                        Platform::Windows
-                    }
-                    malbox_database::repositories::machinery::MachinePlatform::Linux => {
-                        Platform::Linux
-                    }
-                },
-                resources: Resources {
-                    cpus: self.machinery_config.defaults.cpus,
-                    memory_mb: self.machinery_config.defaults.memory as u32,
-                },
-                storage: Storage {
-                    boot_disk_gb: 64,
-                    disk_type: DiskType::Qcow2,
-                },
-                network: Network {
-                    mode: NetworkMode::Nat,
-                    ip: None,
-                    mac: None,
-                },
-                base_image: None,
-                provisioning: None,
+            let platform = match db_machine.platform {
+                malbox_database::repositories::machinery::MachinePlatform::Windows => {
+                    Platform::Windows
+                }
+                malbox_database::repositories::machinery::MachinePlatform::Linux => Platform::Linux,
             };
-            let mut m = RuntimeMachine::new(
-                MachineId(db_machine.provider_id.clone().unwrap_or_default()),
-                spec,
-            );
+
+            let mut m = RuntimeMachine::new(MachineId(
+                db_machine.provider_id.clone().unwrap_or_default(),
+            ));
             m.set_state(MachineState::Running);
             if let Some(ref ip) = db_machine.ip {
                 if let Ok(addr) = ip.parse() {
                     m.set_endpoint(Some(MachineEndpoint {
                         address: addr,
                         id: db_machine.provider_id.clone().unwrap_or_default(),
-                        platform: match db_machine.platform {
-                            malbox_database::repositories::machinery::MachinePlatform::Windows => {
-                                Platform::Windows
-                            }
-                            malbox_database::repositories::machinery::MachinePlatform::Linux => {
-                                Platform::Linux
-                            }
-                        },
+                        platform,
                     }));
                 }
             }
@@ -305,6 +290,12 @@ impl Worker {
         self.task_store
             .update_task_state(task_id, TaskState::Running)
             .await?;
+
+        // Start the VM and wait for the guest plugin port to become reachable.
+        // After a snapshot revert the VM is stopped, so we must boot it first.
+        if let Err(e) = self.machine_pool.start_and_wait(&db_machine).await {
+            warn!(task_id, machine_id, error = %e, "Failed to start VM, proceeding anyway");
+        }
 
         // Guest access phase: transfer sample to guest.
         // Only activated when a transport is configured and task has a sample.
@@ -347,10 +338,25 @@ impl Worker {
                         SchedulerError::Internal(format!("Failed to push sample to guest: {}", e))
                     })
                 }
-                ResolvedTransport::Grpc { address } => {
-                    let mut client = GrpcClient::connect(address.as_str()).await.map_err(|e| {
-                        SchedulerError::Internal(format!("Failed to connect gRPC transport: {}", e))
-                    })?;
+                ResolvedTransport::Grpc { .. } => {
+                    // Use the acquired machine's IP and the base guest plugin
+                    // port (first plugin's port from sequential assignment).
+                    let machine_addr = format!(
+                        "http://{}:{}",
+                        db_machine.ip.as_deref().ok_or_else(|| {
+                            SchedulerError::Internal("Machine has no IP for gRPC transport".into())
+                        })?,
+                        50051u16, // base port — always the first plugin
+                    );
+                    let mut client =
+                        GrpcClient::connect(machine_addr.as_str())
+                            .await
+                            .map_err(|e| {
+                                SchedulerError::Internal(format!(
+                                    "Failed to connect gRPC transport: {}",
+                                    e
+                                ))
+                            })?;
                     let data = tokio::fs::read(&host_path).await.map_err(|e| {
                         SchedulerError::Internal(format!("Failed to read sample file: {}", e))
                     })?;
@@ -388,16 +394,69 @@ impl Worker {
         }
 
         // --- Plugin execution phase ---
-        // Run all registered plugins for this task via the plugin manager.
+        // Fetch guest plugins deployed on this machine's active snapshot.
+        // Only these plugins are registered — not all guest plugins from the
+        // host registry. Port is derived from the plugin's index in the list
+        // (base_port + index).
+        let snapshot_guest_plugins = self
+            .machine_pool
+            .get_active_snapshot_guest_plugins(machine_id)
+            .await
+            .unwrap_or_default();
+
         let snapshot = self.plugin_manager.registry().snapshot();
-        // TODO: Filter plugins based on task type, scope, manifest config
+        let mut registered_guests = Vec::new();
+        let base_port: u16 = 50051;
+
+        if let Some(ref ip) = db_machine.ip {
+            for (i, plugin_name) in snapshot_guest_plugins.iter().enumerate() {
+                let plugin_id = malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
+                let port = base_port + i as u16;
+                let addr = format!("http://{}:{}", ip, port);
+                match self
+                    .plugin_manager
+                    .register_guest(&plugin_id, addr.clone())
+                    .await
+                {
+                    Ok(()) => {
+                        info!(
+                            task_id,
+                            plugin_id = plugin_name.as_str(),
+                            addr = addr.as_str(),
+                            "Registered guest plugin"
+                        );
+                        registered_guests.push(plugin_id);
+                    }
+                    Err(e) => {
+                        warn!(task_id, plugin_id = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
+                    }
+                }
+            }
+        }
+
+        // Run plugins for this task. Guest plugins not in the active snapshot
+        // are skipped — they weren't deployed on this VM.
         for entry in snapshot.list() {
             let plugin_id = &entry.id;
+
+            if entry.manifest.plugin.plugin_type
+                == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
+                && !snapshot_guest_plugins
+                    .iter()
+                    .any(|n| n == plugin_id.as_str())
+            {
+                info!(
+                    task_id,
+                    plugin_id = plugin_id.as_str(),
+                    "Skipping guest plugin not in active snapshot"
+                );
+                continue;
+            }
 
             match self.plugin_manager.acquire(plugin_id).await {
                 Ok(handle) => {
                     let config = std::collections::HashMap::new(); // TODO: build from task config
-                    match handle.execute_task(task_id, "", config).await {
+                    match handle.execute_task(task_id, &task.target, config).await {
                         Ok(_results) => {
                             info!(
                                 task_id,
@@ -418,6 +477,11 @@ impl Worker {
             }
         }
 
+        // Unregister guest plugins before machine revert destroys the VM state.
+        for plugin_id in &registered_guests {
+            self.plugin_manager.unregister_guest(plugin_id);
+        }
+
         // --- Stopping ---
         self.task_store
             .update_task_state(task_id, TaskState::Stopping)
@@ -434,7 +498,7 @@ impl Worker {
             .await?;
         self.emit_task_event(TaskEvent::TaskCompleted, task_id);
 
-        Ok(())
+        Ok(TaskOutcome::Completed)
     }
 
     /// Handle task timeout: transition to Failed and emit event.

@@ -9,7 +9,6 @@ use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
 use crate::worker::pool::WorkerPool;
-use malbox_config::MachineryConfig;
 use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
@@ -24,7 +23,6 @@ pub struct Scheduler {
     task_queue: Arc<TaskQueue>,
     task_store: Arc<TaskStore>,
     machine_pool: Arc<MachinePool>,
-    machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     worker_pool: WorkerPool,
     worker_count: usize,
@@ -37,7 +35,6 @@ impl Scheduler {
     pub fn new(
         db_pool: PgPool,
         machine_pool: Arc<MachinePool>,
-        machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         worker_count: usize,
         transport: Option<Arc<ResolvedTransport>>,
@@ -47,7 +44,6 @@ impl Scheduler {
             task_queue: Arc::new(TaskQueue::new()),
             task_store: Arc::new(TaskStore::new(db_pool)),
             machine_pool,
-            machinery_config,
             plugin_manager,
             worker_pool: WorkerPool::new(worker_count),
             worker_count,
@@ -97,7 +93,6 @@ impl Scheduler {
             Arc::clone(&self.task_queue),
             Arc::clone(&self.task_store),
             Arc::clone(&self.machine_pool),
-            self.machinery_config.clone(),
             Arc::clone(&self.plugin_manager),
             event_tx,
             self.transport.clone(),

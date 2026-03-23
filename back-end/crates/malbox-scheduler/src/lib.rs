@@ -4,7 +4,6 @@
 //! Workers are independent tokio tasks that compete for tasks from a shared
 //! priority queue.
 
-use malbox_config::MachineryConfig;
 use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
@@ -30,7 +29,6 @@ pub use task::{PluginContext, PluginResult, PluginStatus, ResourceAllocation, Ta
 pub async fn init_scheduler(
     db_pool: PgPool,
     machine_pool: Arc<MachinePool>,
-    machinery_config: MachineryConfig,
     plugin_manager: Arc<PluginManager>,
     worker_count: usize,
     transport: Option<Arc<ResolvedTransport>>,
@@ -46,7 +44,6 @@ pub async fn init_scheduler(
     let scheduler = scheduler::Scheduler::new(
         db_pool,
         machine_pool,
-        machinery_config,
         plugin_manager,
         worker_count,
         transport,

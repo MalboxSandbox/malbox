@@ -6,7 +6,6 @@ use super::Worker;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
-use malbox_config::MachineryConfig;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::SampleStore;
@@ -45,7 +44,6 @@ impl WorkerPool {
         task_queue: Arc<TaskQueue>,
         task_store: Arc<TaskStore>,
         machine_pool: Arc<MachinePool>,
-        machinery_config: MachineryConfig,
         plugin_manager: Arc<PluginManager>,
         event_tx: mpsc::Sender<WorkerEvent>,
         transport: Option<Arc<ResolvedTransport>>,
@@ -58,7 +56,6 @@ impl WorkerPool {
                 Arc::clone(&task_queue),
                 Arc::clone(&task_store),
                 Arc::clone(&machine_pool),
-                machinery_config.clone(),
                 Arc::clone(&plugin_manager),
                 event_tx.clone(),
                 transport.clone(),
