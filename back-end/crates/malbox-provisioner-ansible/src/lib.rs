@@ -21,6 +21,19 @@ use malbox_machinery::provisioner::{
 
 use crate::error::AnsibleError;
 
+/// Resolved plugin info injected by the server.
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct PluginInfo {
+    binary: String,
+    manifest: String,
+    #[serde(default = "default_plugin_port")]
+    port: u16,
+}
+
+fn default_plugin_port() -> u16 {
+    50051
+}
+
 /// Configuration for the Ansible provisioner.
 ///
 /// Deserialized from the TOML provisioner config block.
@@ -37,6 +50,12 @@ struct AnsibleConfig {
     /// Extra variables passed to `ansible-playbook --extra-vars`.
     #[serde(default)]
     extra_vars: HashMap<String, String>,
+
+    /// Resolved plugins from the server's plugin registry.
+    /// Each key is a plugin name, value has `binary` and `manifest` paths.
+    /// These are flattened into extra_vars as `{name}_binary` and `{name}_toml`.
+    #[serde(default)]
+    plugins: HashMap<String, PluginInfo>,
 
     /// Timeout in seconds for the ansible-playbook process.
     #[serde(default = "default_timeout")]
@@ -103,9 +122,19 @@ impl Provisioner for AnsibleProvisioner {
         );
 
         // Determine inventory source.
-        // If "dynamic", create a temp file with [malbox]\n<machine_ip>.
+        // If "dynamic", create a temp file with the machine IP and
+        // platform-specific connection variables.
         let temp_inventory = if self.config.inventory == "dynamic" {
-            let content = format!("[malbox]\n{}\n", machine_ip);
+            let host_vars = match context.endpoint.platform {
+                malbox_machinery::Platform::Windows => {
+                    format!(
+                        "{} ansible_connection=winrm ansible_winrm_transport=ntlm ansible_winrm_server_cert_validation=ignore ansible_port=5986 ansible_user=Administrator ansible_password=packer",
+                        machine_ip
+                    )
+                }
+                malbox_machinery::Platform::Linux => machine_ip.clone(),
+            };
+            let content = format!("[malbox]\n{}\n", host_vars);
             let temp = tempfile::Builder::new()
                 .prefix("malbox-ansible-inventory-")
                 .suffix(".ini")
@@ -113,6 +142,7 @@ impl Provisioner for AnsibleProvisioner {
             std::fs::write(temp.path(), &content)?;
             debug!(
                 path = %temp.path().display(),
+                platform = ?context.endpoint.platform,
                 "Generated dynamic inventory"
             );
             Some(temp)
@@ -131,9 +161,37 @@ impl Provisioner for AnsibleProvisioner {
         cmd.arg("-i").arg(&inventory_path);
         cmd.arg(self.config.playbook.as_os_str());
 
-        // Append extra vars if any are configured.
-        if !self.config.extra_vars.is_empty() {
-            let vars_json = serde_json::to_string(&self.config.extra_vars)?;
+        // Build extra vars: explicit extra_vars + guest_plugins list.
+        let mut all_vars: serde_json::Value = serde_json::to_value(&self.config.extra_vars)?;
+
+        // Build guest_plugins as a JSON array for the playbook to loop over.
+        if !self.config.plugins.is_empty() {
+            let guest_plugins: Vec<serde_json::Value> = self
+                .config
+                .plugins
+                .iter()
+                .map(|(name, plugin)| {
+                    debug!(
+                        plugin = name.as_str(),
+                        port = plugin.port,
+                        binary = plugin.binary.as_str(),
+                        manifest = plugin.manifest.as_str(),
+                        "Including plugin in guest_plugins list"
+                    );
+                    serde_json::json!({
+                        "name": name,
+                        "binary": plugin.binary,
+                        "toml": plugin.manifest,
+                        "port": plugin.port,
+                    })
+                })
+                .collect();
+
+            all_vars["guest_plugins"] = serde_json::Value::Array(guest_plugins);
+        }
+
+        if all_vars != serde_json::json!({}) {
+            let vars_json = serde_json::to_string(&all_vars)?;
             cmd.arg("--extra-vars").arg(&vars_json);
         }
 
