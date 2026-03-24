@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO task_results (task_id, plugin_name, result_name, format, size_bytes, file_path)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, task_id, plugin_name, result_name,\n                  format AS \"format: ResultFormat\",\n                  size_bytes, file_path, created_on\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "plugin_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "result_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "format: ResultFormat",
+        "type_info": {
+          "Custom": {
+            "name": "result_format",
+            "kind": {
+              "Enum": [
+                "json",
+                "bytes"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "result_format",
+            "kind": {
+              "Enum": [
+                "json",
+                "bytes"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf802e2d80d0b32fef91a6de57449b3f96b62d342f8e59362d835d6bee760f16"
+}
