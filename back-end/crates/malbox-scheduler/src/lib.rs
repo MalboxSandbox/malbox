@@ -8,7 +8,7 @@ use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
-use malbox_utils::SampleStore;
+use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
@@ -33,6 +33,7 @@ pub async fn init_scheduler(
     worker_count: usize,
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
+    result_store: Arc<ResultStore>,
 ) -> Result<(mpsc::Sender<Task>, oneshot::Sender<()>)> {
     info!("Initializing scheduler");
 
@@ -48,6 +49,7 @@ pub async fn init_scheduler(
         worker_count,
         transport,
         sample_store,
+        result_store,
     );
 
     tokio::spawn(async move {

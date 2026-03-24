@@ -8,7 +8,7 @@ use malbox_plugin_internal::transport::ipc::{
 };
 use malbox_resources::{MachinePool, resolve_transport};
 use malbox_scheduler::init_scheduler;
-use malbox_utils::SampleStore;
+use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 
 pub mod error;
@@ -168,8 +168,9 @@ pub async fn run(config: &Config) -> error::Result<()> {
         .map_err(|e| DaemonError::Internal(format!("Failed to create plugin manager: {}", e)))?,
     );
 
-    // Initialize sample store for file uploads and worker access
+    // Initialize sample and result stores for file uploads and worker access
     let sample_store = Arc::new(SampleStore::new(&config.paths.data_dir));
+    let result_store = Arc::new(ResultStore::new(&config.paths.data_dir));
 
     // Initialize scheduler and keep channels alive
     let (task_tx, _shutdown_tx) = init_scheduler(
@@ -179,6 +180,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
         config.general.worker_threads,
         transport,
         Arc::clone(&sample_store),
+        Arc::clone(&result_store),
     )
     .await
     .map_err(|e| DaemonError::Internal(e.to_string()))?;

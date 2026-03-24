@@ -3,4 +3,5 @@ pub mod machinery;
 pub mod provision_runs;
 pub mod samples;
 pub mod snapshots;
+pub mod task_results;
 pub mod tasks;

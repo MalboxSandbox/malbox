@@ -8,7 +8,7 @@ use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
-use malbox_utils::SampleStore;
+use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -48,6 +48,7 @@ impl WorkerPool {
         event_tx: mpsc::Sender<WorkerEvent>,
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
+        result_store: Arc<ResultStore>,
     ) {
         for _ in 0..self.max_workers {
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -60,6 +61,7 @@ impl WorkerPool {
                 event_tx.clone(),
                 transport.clone(),
                 Arc::clone(&sample_store),
+                Arc::clone(&result_store),
             );
 
             let worker_id = worker.id().clone();

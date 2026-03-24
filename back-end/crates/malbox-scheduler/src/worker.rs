@@ -20,18 +20,20 @@ use crate::error::{Result, SchedulerError};
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use malbox_database::repositories::samples::fetch_sample_by_id;
+use malbox_database::repositories::task_results::{self, ResultFormat as DbResultFormat};
 use malbox_database::repositories::tasks::TaskState;
 use malbox_machinery::{
     Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineState, Platform,
 };
 use malbox_plugin_internal::manager::PluginManager;
+use malbox_plugin_internal::manager::handle::OutputFormat;
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::messages::events::{
     Event, Payload, TaskEvent, TaskEventPayload,
 };
 use malbox_plugin_internal::transport::traits::TransportEmitter;
 use malbox_resources::{MachinePool, ResolvedTransport};
-use malbox_utils::SampleStore;
+use malbox_utils::{ResultFormat, ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
@@ -84,6 +86,7 @@ pub struct Worker {
     event_tx: mpsc::Sender<WorkerEvent>,
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
+    result_store: Arc<ResultStore>,
 }
 
 impl Worker {
@@ -96,6 +99,7 @@ impl Worker {
         event_tx: mpsc::Sender<WorkerEvent>,
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
+        result_store: Arc<ResultStore>,
     ) -> Self {
         Self {
             id: WorkerId::new(),
@@ -106,6 +110,7 @@ impl Worker {
             event_tx,
             transport,
             sample_store,
+            result_store,
         }
     }
 
@@ -494,13 +499,69 @@ impl Worker {
                 Ok(handle) => {
                     let config = std::collections::HashMap::new(); // TODO: build from task config
                     match handle.execute_task(task_id, &task.target, config).await {
-                        Ok(_results) => {
+                        Ok(outputs) => {
                             info!(
                                 task_id,
                                 plugin_id = plugin_id.as_str(),
+                                result_count = outputs.len(),
                                 "Plugin execution completed"
                             );
-                            // TODO: collect results into TaskResult
+
+                            // Persist each result to filesystem + DB.
+                            let plugin_name = plugin_id.as_str();
+                            for output in &outputs {
+                                let fs_format = match output.format {
+                                    OutputFormat::Json => ResultFormat::Json,
+                                    OutputFormat::Bytes => ResultFormat::Bytes,
+                                };
+                                let db_format = match output.format {
+                                    OutputFormat::Json => DbResultFormat::Json,
+                                    OutputFormat::Bytes => DbResultFormat::Bytes,
+                                };
+
+                                match self
+                                    .result_store
+                                    .store(
+                                        task_id,
+                                        plugin_name,
+                                        &output.result_name,
+                                        fs_format,
+                                        &output.data,
+                                    )
+                                    .await
+                                {
+                                    Ok(rel_path) => {
+                                        if let Err(e) = task_results::insert_task_result(
+                                            self.task_store.pool(),
+                                            task_id,
+                                            plugin_name,
+                                            &output.result_name,
+                                            db_format,
+                                            output.data.len() as i64,
+                                            &rel_path,
+                                        )
+                                        .await
+                                        {
+                                            error!(
+                                                task_id,
+                                                plugin_name,
+                                                result_name = output.result_name.as_str(),
+                                                error = %e,
+                                                "Failed to insert task result into DB"
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            task_id,
+                                            plugin_name,
+                                            result_name = output.result_name.as_str(),
+                                            error = %e,
+                                            "Failed to store task result to filesystem"
+                                        );
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             error!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Plugin execution failed");

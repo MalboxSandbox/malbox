@@ -1,5 +1,6 @@
 pub mod error;
 pub mod paths;
+pub mod results;
 
 use error::{Result, StorageError};
 use std::path::{Path, PathBuf};

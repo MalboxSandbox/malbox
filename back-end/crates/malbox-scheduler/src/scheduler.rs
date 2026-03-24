@@ -13,7 +13,7 @@ use malbox_database::PgPool;
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
-use malbox_utils::SampleStore;
+use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
@@ -28,6 +28,7 @@ pub struct Scheduler {
     worker_count: usize,
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
+    result_store: Arc<ResultStore>,
 }
 
 impl Scheduler {
@@ -39,6 +40,7 @@ impl Scheduler {
         worker_count: usize,
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
+        result_store: Arc<ResultStore>,
     ) -> Self {
         Self {
             task_queue: Arc::new(TaskQueue::new()),
@@ -49,6 +51,7 @@ impl Scheduler {
             worker_count,
             transport,
             sample_store,
+            result_store,
         }
     }
 
@@ -97,6 +100,7 @@ impl Scheduler {
             event_tx,
             self.transport.clone(),
             Arc::clone(&self.sample_store),
+            Arc::clone(&self.result_store),
         );
 
         info!(workers = self.worker_count, "Scheduler running");

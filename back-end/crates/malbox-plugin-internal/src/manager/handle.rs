@@ -14,7 +14,21 @@ use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
-use crate::transport::messages::events::Payload;
+
+/// Format of a plugin output payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    Json,
+    Bytes,
+}
+
+/// A single named result produced by a plugin during task execution.
+#[derive(Debug, Clone)]
+pub struct PluginOutput {
+    pub result_name: String,
+    pub data: Vec<u8>,
+    pub format: OutputFormat,
+}
 
 /// A handle to a running plugin instance, used by workers to execute tasks.
 ///
@@ -53,17 +67,17 @@ impl PluginHandle {
         &self.entry
     }
 
-    /// Execute a task on the plugin and collect the resulting payloads.
+    /// Execute a task on the plugin and collect the resulting outputs.
     ///
     /// This dispatches the task to the plugin process via the appropriate
     /// transport (IPC for host plugins, gRPC for guest plugins) and waits
-    /// for the plugin to produce its result payloads.
+    /// for the plugin to produce its result outputs.
     pub async fn execute_task(
         &self,
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
-    ) -> Result<Vec<Payload>> {
+    ) -> Result<Vec<PluginOutput>> {
         let plugin_type = self.entry.manifest.plugin.plugin_type;
 
         match plugin_type {
@@ -78,9 +92,9 @@ impl PluginHandle {
         _task_id: i32,
         _sample_path: &str,
         _config: HashMap<String, String>,
-    ) -> Result<Vec<Payload>> {
+    ) -> Result<Vec<PluginOutput>> {
         // TODO: Implement host IPC task execution — emit TaskStarting event
-        // over iceoryx2, wait for result events, and collect into Vec<Payload>.
+        // over iceoryx2, wait for result events, and collect into Vec<PluginOutput>.
         warn!(plugin = %self.plugin_id, "host IPC task execution not yet implemented");
         Ok(vec![])
     }
@@ -91,8 +105,8 @@ impl PluginHandle {
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
-    ) -> Result<Vec<Payload>> {
-        use crate::transport::messages::events::TaskEventPayload;
+    ) -> Result<Vec<PluginOutput>> {
+        use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
 
         let mut instance = self.instance.lock().await;
         let client = instance.grpc_client.as_mut().ok_or_else(|| {
@@ -109,7 +123,7 @@ impl PluginHandle {
             .await
             .map_err(|e| ManagerError::ExecutionFailed(self.plugin_id.clone(), e.to_string()))?;
 
-        let mut payloads = Vec::new();
+        let mut outputs = Vec::new();
 
         loop {
             match stream.message().await {
@@ -123,9 +137,18 @@ impl PluginHandle {
                         "received task result from guest plugin"
                     );
 
-                    payloads.push(Payload::Task(TaskEventPayload {
-                        task_id: result.task_id,
-                    }));
+                    let format = match ProtoFormat::try_from(result.format) {
+                        Ok(ProtoFormat::Json) => OutputFormat::Json,
+                        _ => OutputFormat::Bytes,
+                    };
+
+                    if !result.result_name.is_empty() {
+                        outputs.push(PluginOutput {
+                            result_name: result.result_name,
+                            data: result.data,
+                            format,
+                        });
+                    }
 
                     if result.is_final {
                         break;
@@ -149,7 +172,7 @@ impl PluginHandle {
             }
         }
 
-        Ok(payloads)
+        Ok(outputs)
     }
 
     /// Release the plugin instance, transitioning it to the appropriate

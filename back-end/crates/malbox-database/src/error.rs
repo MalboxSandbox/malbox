@@ -16,6 +16,8 @@ pub enum DatabaseError {
     Snapshot(#[from] SnapshotError),
     #[error("{0}")]
     ProvisionRun(#[from] ProvisionRunError),
+    #[error("{0}")]
+    TaskResult(#[from] TaskResultError),
 }
 
 #[derive(Error, Debug)]
@@ -158,6 +160,23 @@ pub enum ProvisionRunError {
     },
     #[error("Failed to fetch provision runs: {source}")]
     FetchFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum TaskResultError {
+    #[error("Failed to insert result for task {task_id} ({message}): {source}")]
+    InsertFailed {
+        task_id: i32,
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch results for task {task_id}: {source}")]
+    FetchFailed {
+        task_id: i32,
         #[source]
         source: sqlx::Error,
     },
