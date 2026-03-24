@@ -47,9 +47,9 @@ pub fn event_to_proto(event: &Event, payload: &Payload) -> Result<proto::EventNo
                 _ => 0,
             };
             let event_type: i32 = match sample_evt {
-                SampleEvent::PluginStarted => proto::SampleEventType::Started.into(),
-                SampleEvent::PluginStopped => proto::SampleEventType::Stopped.into(),
-                SampleEvent::PluginResultProduced => proto::SampleEventType::ResultProduced.into(),
+                SampleEvent::SampleStarted => proto::SampleEventType::Started.into(),
+                SampleEvent::SampleStopped => proto::SampleEventType::Stopped.into(),
+                SampleEvent::SampleResultProduced => proto::SampleEventType::ResultProduced.into(),
             };
             proto::event_notification::Event::Sample(proto::SampleEventProto {
                 event_type,
@@ -118,9 +118,9 @@ pub fn proto_to_event(notification: proto::EventNotification) -> Result<(Event, 
         }
         proto::event_notification::Event::Sample(sample_proto) => {
             let sample_event = match proto::SampleEventType::try_from(sample_proto.event_type) {
-                Ok(proto::SampleEventType::Started) => SampleEvent::PluginStarted,
-                Ok(proto::SampleEventType::Stopped) => SampleEvent::PluginStopped,
-                Ok(proto::SampleEventType::ResultProduced) => SampleEvent::PluginResultProduced,
+                Ok(proto::SampleEventType::Started) => SampleEvent::SampleStarted,
+                Ok(proto::SampleEventType::Stopped) => SampleEvent::SampleStopped,
+                Ok(proto::SampleEventType::ResultProduced) => SampleEvent::SampleResultProduced,
                 Ok(proto::SampleEventType::Unspecified) | Err(_) => {
                     return Err(TransportError::Grpc(format!(
                         "unknown SampleEventType value: {}",
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_sample_event_roundtrip() {
-        let event = Event::Sample(SampleEvent::PluginStarted);
+        let event = Event::Sample(SampleEvent::SampleStarted);
         let payload = Payload::Sample(SampleEventPayload { sample_id: 99 });
 
         let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
@@ -275,8 +275,8 @@ mod tests {
             proto_to_event(proto_notif).expect("proto_to_event should succeed");
 
         match event_back {
-            Event::Sample(SampleEvent::PluginStarted) => {}
-            other => panic!("expected SampleEvent::PluginStarted, got {:?}", other),
+            Event::Sample(SampleEvent::SampleStarted) => {}
+            other => panic!("expected SampleEvent::SampleStarted, got {:?}", other),
         }
         match payload_back {
             Payload::Sample(ref sp) => assert_eq!(sp.sample_id, 99),

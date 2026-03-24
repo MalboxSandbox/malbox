@@ -120,12 +120,12 @@ pub struct PluginEventPayload {
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "ipc", derive(ZeroCopySend))]
 pub enum SampleEvent {
-    /// A plugin has started.
-    PluginStarted = 0,
-    /// A plugin has stopped.
-    PluginStopped = 1,
-    /// A plugin has produced a result.
-    PluginResultProduced = 2,
+    /// A sample has started.
+    SampleStarted = 0,
+    /// A sample has stopped.
+    SampleStopped = 1,
+    /// A sample has produced a result.
+    SampleResultProduced = 2,
 }
 
 /// A payload representing the data that a plugin receives
@@ -175,9 +175,9 @@ impl PluginEvent {
 impl SampleEvent {
     pub fn from_u8(v: u8) -> Result<Self> {
         match v {
-            0 => Ok(Self::PluginStarted),
-            1 => Ok(Self::PluginStopped),
-            2 => Ok(Self::PluginResultProduced),
+            0 => Ok(Self::SampleStarted),
+            1 => Ok(Self::SampleStopped),
+            2 => Ok(Self::SampleResultProduced),
             _ => Err(TransportError::InvalidEventId(v as usize)),
         }
     }
