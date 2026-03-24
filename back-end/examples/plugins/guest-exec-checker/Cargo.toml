@@ -1,0 +1,10 @@
+[package]
+name = "guest-exec-checker"
+version = "0.1.0"
+edition = "2024"
+description = "Guest plugin that verifies sample execution by checking for running processes"
+publish = false
+
+[dependencies]
+malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["guest"] }
+serde = { version = "1", features = ["derive"] }

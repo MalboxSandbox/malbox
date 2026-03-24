@@ -1,0 +1,14 @@
+[plugin]
+name = "guest-exec-checker"
+version = "0.1.0"
+description = "Verifies that the submitted sample is executing on the guest OS"
+authors = ["Malbox Team"]
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+
+[results.exec_status]
+description = "Sample execution status: whether the process was found running"
+user_visible = true
+display_name = "Execution Status"
+render = "json"
