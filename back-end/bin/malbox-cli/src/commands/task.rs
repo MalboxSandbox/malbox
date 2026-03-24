@@ -15,6 +15,8 @@ pub struct TaskCommand {
 enum TaskCommands {
     /// Submit a file for analysis
     Submit(SubmitArgs),
+    /// Show results for a completed task
+    Results(ResultsArgs),
 }
 
 #[derive(Parser)]
@@ -50,10 +52,17 @@ struct SubmitArgs {
     enforce_timeout: bool,
 }
 
+#[derive(Parser)]
+struct ResultsArgs {
+    /// Task ID
+    id: i32,
+}
+
 impl Command for TaskCommand {
     async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
             TaskCommands::Submit(args) => submit(&ctx.api, args).await,
+            TaskCommands::Results(args) => results(&ctx.api, args).await,
         }
     }
 }
@@ -76,5 +85,30 @@ async fn submit(api: &ApiClient, args: SubmitArgs) -> Result<()> {
 
     println!("Task submitted successfully.");
     println!("  Task ID: {}", response.task_id);
+    Ok(())
+}
+
+async fn results(api: &ApiClient, args: ResultsArgs) -> Result<()> {
+    let results = api.get_task_results(args.id).await?;
+
+    if results.is_empty() {
+        println!("No results for task {}.", args.id);
+        return Ok(());
+    }
+
+    println!(
+        "{:<6} {:<25} {:<20} {:<8} {:<10} {}",
+        "ID", "PLUGIN", "RESULT", "FORMAT", "SIZE", "PATH"
+    );
+    println!("{}", "-".repeat(90));
+
+    for r in &results {
+        println!(
+            "{:<6} {:<25} {:<20} {:<8} {:<10} {}",
+            r.id, r.plugin_name, r.result_name, r.format, r.size_bytes, r.file_path,
+        );
+    }
+
+    println!("\nTotal: {} result(s)", results.len());
     Ok(())
 }

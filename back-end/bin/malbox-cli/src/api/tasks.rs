@@ -9,6 +9,18 @@ pub struct TaskResponse {
     pub task_id: i32,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct TaskResultInfo {
+    pub id: i32,
+    pub task_id: i32,
+    pub plugin_name: String,
+    pub result_name: String,
+    pub format: String,
+    pub size_bytes: i64,
+    pub file_path: String,
+    pub created_on: String,
+}
+
 pub struct SubmitTaskRequest {
     pub file_path: String,
     pub package: Option<String>,
@@ -69,6 +81,16 @@ impl ApiClient {
             .client
             .post(self.url("/v1/tasks/create/file"))
             .multipart(form)
+            .send()
+            .await?;
+        let response = self.check_response(response).await?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn get_task_results(&self, task_id: i32) -> Result<Vec<TaskResultInfo>> {
+        let response = self
+            .client
+            .get(self.url(&format!("/v1/tasks/{}/results", task_id)))
             .send()
             .await?;
         let response = self.check_response(response).await?;
