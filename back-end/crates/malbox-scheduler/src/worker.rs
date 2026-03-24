@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod event;
+pub mod execution;
 pub mod handle;
 pub mod job;
 pub mod pool;
@@ -261,15 +262,15 @@ impl Worker {
         let machine_id = db_machine.id.expect("acquired machine has id");
         info!(task_id, machine_id, "Machine acquired");
 
+        // Resolve the target platform from the DB record — used both for
+        // building the runtime Machine and for sample execution dispatch.
+        let platform = match db_machine.platform {
+            malbox_database::repositories::machinery::MachinePlatform::Windows => Platform::Windows,
+            malbox_database::repositories::machinery::MachinePlatform::Linux => Platform::Linux,
+        };
+
         // Build a lightweight runtime Machine from the DB record.
         let runtime_machine = {
-            let platform = match db_machine.platform {
-                malbox_database::repositories::machinery::MachinePlatform::Windows => {
-                    Platform::Windows
-                }
-                malbox_database::repositories::machinery::MachinePlatform::Linux => Platform::Linux,
-            };
-
             let mut m = RuntimeMachine::new(MachineId(
                 db_machine.provider_id.clone().unwrap_or_default(),
             ));
@@ -393,6 +394,41 @@ impl Worker {
             );
         }
 
+        // --- Sample execution phase ---
+        // Execute the sample on the guest OS before running analysis plugins.
+        // Uses the first guest plugin's ExecuteCommand RPC to spawn the process
+        // in the background so plugins can observe it while it runs.
+        {
+            let ip = db_machine.ip.as_deref().ok_or_else(|| {
+                SchedulerError::Internal("Machine has no IP for sample execution".into())
+            })?;
+            let exec_addr = format!("http://{}:{}", ip, 50051u16);
+            let mut client = GrpcClient::connect(&exec_addr).await.map_err(|e| {
+                SchedulerError::Internal(format!("Failed to connect for sample execution: {}", e))
+            })?;
+            let params = execution::resolve_exec_params(&task.target, platform);
+            client
+                .execute_command(
+                    &params.command,
+                    &params.args,
+                    params.cwd.as_deref(),
+                    &params.env,
+                    None,
+                    params.background,
+                )
+                .await
+                .map_err(|e| {
+                    SchedulerError::Internal(format!("Failed to execute sample on guest: {}", e))
+                })?;
+
+            info!(
+                task_id,
+                command = params.command.as_str(),
+                target = task.target.as_str(),
+                "Sample execution started on guest"
+            );
+        }
+
         // --- Plugin execution phase ---
         // Fetch guest plugins deployed on this machine's active snapshot.
         // Only these plugins are registered — not all guest plugins from the
@@ -413,6 +449,7 @@ impl Worker {
                 let plugin_id = malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
                 let port = base_port + i as u16;
                 let addr = format!("http://{}:{}", ip, port);
+
                 match self
                     .plugin_manager
                     .register_guest(&plugin_id, addr.clone())
