@@ -62,6 +62,13 @@
                         ]
                     },
                     {
+                        "group": "Plugin Development",
+                        "pages": [
+                            "plugin-guides/creating-a-rust-plugin",
+                            "plugin-guides/creating-a-cpp-plugin"
+                        ]
+                    },
+                    {
                         "group": "Contributing",
                         "pages": ["contributing/first-contribution"]
                     }
@@ -79,7 +86,11 @@
                     },
                     {
                         "group": "Plugin SDK",
-                        "pages": ["reference/plugin-sdk/events"]
+                        "pages": [
+                        "reference/plugin-sdk/rust",
+                        "reference/plugin-sdk/cpp",
+                        "reference/plugin-sdk/events"
+                    ]
                     }
                 ]
             }

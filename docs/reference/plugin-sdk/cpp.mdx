@@ -1,0 +1,406 @@
+---
+title: "C++"
+description: "API reference for the Malbox C++ Plugin SDK"
+---
+
+Complete API reference for the Malbox C++20 Plugin SDK. For a step-by-step walkthrough, see the [Creating a C++ Plugin](/plugin-guides/creating-a-cpp-plugin) guide.
+
+## Plugin Base Class
+
+Every plugin subclasses `malbox::Plugin` and implements `on_task` at minimum. All other methods have default no-op implementations.
+
+```cpp
+#include <malbox/plugin.hpp>
+
+class MyPlugin final : public malbox::Plugin {
+    std::vector<PluginResult> on_task(const Task& task, const Context& ctx) override;
+};
+```
+
+### Lifecycle Methods
+
+#### `on_task` (required)
+
+Called for each assigned analysis task. This is where your analysis logic lives.
+
+```cpp
+virtual std::vector<PluginResult> on_task(const Task& task, const Context& ctx) = 0;
+```
+
+<ResponseField name="task" type="const Task&" required>
+  Handle to the current task. Provides access to the sample and task configuration. Non-owning, do not store.
+</ResponseField>
+<ResponseField name="ctx" type="const Context&" required>
+  Runtime communication handle for emitting progress, warnings, and events. Non-owning, do not store.
+</ResponseField>
+<ResponseField name="return" type="std::vector<PluginResult>">
+  One or more analysis results. Each result name should match a `[results.*]` entry in your `plugin.toml`.
+</ResponseField>
+
+#### `on_start`
+
+Called once before any tasks arrive. Use for initialization.
+
+```cpp
+virtual void on_start(const std::unordered_map<std::string, std::string>& config);
+```
+
+<ResponseField name="config" type="const std::unordered_map<std::string, std::string>&">
+  Key-value configuration map from the daemon and `plugin.toml` settings.
+</ResponseField>
+
+#### `on_stop`
+
+Called once on shutdown. Clean up resources here.
+
+```cpp
+virtual void on_stop();
+```
+
+#### `health_check`
+
+Called periodically by the runtime to check plugin health.
+
+```cpp
+virtual HealthStatus health_check();
+```
+
+<ResponseField name="return" type="HealthStatus">
+  A struct with `ready` (bool) and `reason` (string) fields.
+</ResponseField>
+
+### Event Handlers
+
+Override these to react to system events. All are optional and default to no-ops. See the [Events Reference](/reference/plugin-sdk/events) for the full list of events in each category.
+
+#### `on_daemon_event`
+
+Triggered by system-wide events such as shutdown or configuration reload.
+
+```cpp
+virtual void on_daemon_event(DaemonEvent event, const Context& ctx);
+```
+
+<ResponseField name="event" type="DaemonEvent" required>
+  The daemon event that occurred (`DaemonShutdown` or `ConfigReloaded`).
+</ResponseField>
+<ResponseField name="ctx" type="const Context&" required>
+  Runtime communication handle.
+</ResponseField>
+
+#### `on_task_event`
+
+Triggered by task lifecycle events (created, starting, completed, failed).
+
+```cpp
+virtual void on_task_event(TaskEvent event, const TaskEventPayload& payload, const Context& ctx);
+```
+
+<ResponseField name="event" type="TaskEvent" required>
+  The task event that occurred.
+</ResponseField>
+<ResponseField name="payload" type="const TaskEventPayload&" required>
+  Contains the `task_id` of the affected task.
+</ResponseField>
+<ResponseField name="ctx" type="const Context&" required>
+  Runtime communication handle.
+</ResponseField>
+
+#### `on_plugin_event`
+
+Triggered by plugin process events (started, stopped, result produced).
+
+```cpp
+virtual void on_plugin_event(PluginEvent event, const PluginEventPayload& payload, const Context& ctx);
+```
+
+<ResponseField name="event" type="PluginEvent" required>
+  The plugin event that occurred.
+</ResponseField>
+<ResponseField name="payload" type="const PluginEventPayload&" required>
+  Contains the `plugin_id` of the affected plugin.
+</ResponseField>
+<ResponseField name="ctx" type="const Context&" required>
+  Runtime communication handle.
+</ResponseField>
+
+#### `on_sample_event`
+
+Triggered by sample processing events (started, stopped, result produced).
+
+```cpp
+virtual void on_sample_event(SampleEvent event, const SampleEventPayload& payload, const Context& ctx);
+```
+
+<ResponseField name="event" type="SampleEvent" required>
+  The sample event that occurred.
+</ResponseField>
+<ResponseField name="payload" type="const SampleEventPayload&" required>
+  Contains the `sample_id` of the affected sample.
+</ResponseField>
+<ResponseField name="ctx" type="const Context&" required>
+  Runtime communication handle.
+</ResponseField>
+
+## Task
+
+Provides access to the current analysis task. `Task` is a non-owning handle, valid only during the `on_task` callback. Do not store it.
+
+### `id()`
+
+```cpp
+int32_t id();
+```
+
+<ResponseField name="return" type="int32_t">
+  Unique identifier for this task.
+</ResponseField>
+
+### `sample_path()`
+
+```cpp
+std::string sample_path();
+```
+
+<ResponseField name="return" type="std::string">
+  Absolute path to the sample on disk.
+</ResponseField>
+
+### `sample_bytes()`
+
+Reads the entire sample file into memory. Throws `malbox::Error` on I/O failure.
+
+```cpp
+std::vector<uint8_t> sample_bytes();
+```
+
+<ResponseField name="return" type="std::vector<uint8_t>">
+  The raw bytes of the sample file.
+</ResponseField>
+
+### `config()`
+
+```cpp
+std::unordered_map<std::string, std::string> config();
+```
+
+<ResponseField name="return" type="std::unordered_map<std::string, std::string>">
+  All configuration key-value pairs for this task.
+</ResponseField>
+
+### `config_value()`
+
+```cpp
+std::optional<std::string> config_value(const std::string& key);
+```
+
+<ResponseField name="key" type="const std::string&" required>
+  The configuration key to look up.
+</ResponseField>
+<ResponseField name="return" type="std::optional<std::string>">
+  The value if found, or `std::nullopt`.
+</ResponseField>
+
+## Context
+
+Used to communicate with the runtime during task execution. `Context` is a non-owning handle, valid only during the callback. Do not store it.
+
+### `emit_progress()`
+
+Reports task progress to the runtime.
+
+```cpp
+void emit_progress(double fraction, const std::string& message);
+```
+
+<ResponseField name="fraction" type="double" required>
+  Progress value clamped to `[0.0, 1.0]`.
+</ResponseField>
+<ResponseField name="message" type="const std::string&" required>
+  Human-readable status message (e.g. `"scanning signatures"`).
+</ResponseField>
+
+### `warn()`
+
+Attaches a warning message to the task report.
+
+```cpp
+void warn(const std::string& message);
+```
+
+<ResponseField name="message" type="const std::string&" required>
+  The warning message to attach.
+</ResponseField>
+
+### `emit_event()`
+
+Emits a raw system event. This is an advanced escape hatch for custom event routing.
+
+```cpp
+void emit_event(Event event, Payload payload);
+```
+
+<ResponseField name="event" type="Event" required>
+  The event to emit.
+</ResponseField>
+<ResponseField name="payload" type="Payload" required>
+  The event payload.
+</ResponseField>
+
+## PluginResult
+
+Returned from `on_task` to report analysis findings. Each result name should correspond to a `[results.*]` entry in your `plugin.toml`.
+
+### `PluginResult::json()`
+
+Creates a JSON-encoded result from raw UTF-8 bytes.
+
+```cpp
+static PluginResult json(const std::string& name, std::span<const uint8_t> data);
+```
+
+<ResponseField name="name" type="const std::string&" required>
+  Result identifier matching a `[results.*]` key in `plugin.toml`.
+</ResponseField>
+<ResponseField name="data" type="std::span<const uint8_t>" required>
+  Raw UTF-8 encoded JSON bytes.
+</ResponseField>
+
+### `PluginResult::bytes()`
+
+Creates a raw binary result.
+
+```cpp
+static PluginResult bytes(const std::string& name, std::span<const uint8_t> data);
+```
+
+<ResponseField name="name" type="const std::string&" required>
+  Result identifier matching a `[results.*]` key in `plugin.toml`.
+</ResponseField>
+<ResponseField name="data" type="std::span<const uint8_t>" required>
+  Raw binary data.
+</ResponseField>
+
+### `PluginResult::file()`
+
+Creates a result referencing a file on disk. The runtime reads the file contents.
+
+```cpp
+static PluginResult file(const std::string& name, const std::string& path);
+```
+
+<ResponseField name="name" type="const std::string&" required>
+  Result identifier matching a `[results.*]` key in `plugin.toml`.
+</ResponseField>
+<ResponseField name="path" type="const std::string&" required>
+  Absolute filesystem path to the result file.
+</ResponseField>
+
+## PluginMeta
+
+Metadata passed to the runtime at startup. All string fields must be null-terminated string literals with static lifetime.
+
+<ResponseField name="name" type="const char*" required>
+  Plugin identifier. Must be alphanumeric with `-` and `_` only.
+</ResponseField>
+<ResponseField name="version" type="const char*" required>
+  Semver version string (e.g. `"0.1.0"`).
+</ResponseField>
+<ResponseField name="description" type="const char*">
+  Human-readable description. Nullable.
+</ResponseField>
+<ResponseField name="authors" type="const char*" required>
+  Author name(s).
+</ResponseField>
+<ResponseField name="plugin_type" type="PluginType" required>
+  `PluginType::Host` or `PluginType::Guest`.
+</ResponseField>
+<ResponseField name="state" type="PluginState" required>
+  `PluginState::Persistent`, `PluginState::Ephemeral`, or `PluginState::Scoped`.
+</ResponseField>
+<ResponseField name="execution" type="ExecutionContext" required>
+  `ExecutionContext::Exclusive`, `Sequential`, `Parallel`, or `Unrestricted`.
+</ResponseField>
+
+## Enums
+
+<Tabs>
+  <Tab title="PluginType">
+    | Value | Description |
+    |-------|-------------|
+    | `PluginType::Guest` | Runs inside a VM/container, communicates via gRPC |
+    | `PluginType::Host` | Runs on the daemon machine, communicates via IPC |
+  </Tab>
+  <Tab title="PluginState">
+    | Value | Description |
+    |-------|-------------|
+    | `PluginState::Persistent` | Stays running between tasks |
+    | `PluginState::Ephemeral` | Spawned per task, torn down after |
+    | `PluginState::Scoped` | Lives for a batch of related tasks |
+  </Tab>
+  <Tab title="ExecutionContext">
+    | Value | Description |
+    |-------|-------------|
+    | `ExecutionContext::Exclusive` | Only one instance runs across the entire daemon |
+    | `ExecutionContext::Sequential` | Tasks dispatched one at a time, in order |
+    | `ExecutionContext::Parallel` | Multiple tasks may run concurrently |
+    | `ExecutionContext::Unrestricted` | No constraints on concurrency or ordering |
+  </Tab>
+</Tabs>
+
+## Runtime Entry Points
+
+<CodeGroup>
+```cpp Guest plugin
+malbox::run_guest_plugin(std::make_unique<MyPlugin>(), meta);
+```
+```cpp Host plugin
+malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
+```
+</CodeGroup>
+
+Both functions block until the runtime shuts down. They throw `malbox::Error` on failure.
+
+<ResponseField name="plugin" type="std::unique_ptr<Plugin>" required>
+  Owning pointer to your plugin instance.
+</ResponseField>
+<ResponseField name="meta" type="PluginMeta" required>
+  Plugin metadata describing name, version, type, state, and execution context.
+</ResponseField>
+
+## Error Handling
+
+Plugin methods can throw `malbox::Error` to signal failures. The SDK catches exceptions at the FFI boundary and reports them to the runtime.
+
+```cpp
+#include <malbox/error.hpp>
+
+throw malbox::Error(-1, "analysis failed: corrupt sample");
+```
+
+<ResponseField name="code" type="int32_t" required>
+  Numeric error code. Use `-1` for generic failures.
+</ResponseField>
+<ResponseField name="message" type="const char*" required>
+  Human-readable error description.
+</ResponseField>
+
+SDK methods (like `task.sample_bytes()`) also throw `malbox::Error` on failure.
+
+## Thread Safety
+
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. Health checks may also arrive on a different thread regardless of execution context.
+
+## Headers
+
+| Header | Contents |
+|--------|----------|
+| `malbox/plugin.hpp` | Umbrella header (include this one) |
+| `malbox/error.hpp` | `malbox::Error` exception class |
+| `malbox/types.hpp` | Enums, `PluginMeta`, `HealthStatus` |
+| `malbox/events.hpp` | Event types and payloads |
+| `malbox/task.hpp` | `malbox::Task` wrapper |
+| `malbox/context.hpp` | `malbox::Context` wrapper |
+| `malbox/result.hpp` | `malbox::PluginResult` |
+| `malbox/handlers.hpp` | `malbox::Plugin` base class |
+| `malbox/runtime.hpp` | Entry points and trampolines |

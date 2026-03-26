@@ -1,0 +1,281 @@
+---
+title: "Creating a C++ Plugin"
+description: "Step-by-step guide to building analysis plugins in C++ using the Malbox Plugin SDK"
+---
+
+## Prerequisites
+
+- C++20 compiler (GCC 11+, Clang 13+, or MSVC 2019 16.10+)
+- CMake 3.20+
+- The pre-built Malbox C++ SDK distribution
+- For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
+
+## Get the SDK
+
+If you have the Rust toolchain available (e.g., you're a Malbox contributor):
+
+```bash
+cd back-end
+
+# Linux SDK
+cargo xtask dist-cpp-sdk
+
+# Windows SDK
+cargo xtask dist-cpp-sdk --target windows
+```
+
+This produces the SDK at `crates/malbox-plugin-sdk-cpp/dist-linux/` or `dist-windows/`.
+
+Otherwise, download the pre-built SDK archive from a release.
+
+## Create your plugin
+
+Your plugin project needs three files: a CMake build file, a plugin manifest, and your source code.
+
+### `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my-plugin LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(MalboxPluginSDK REQUIRED)
+
+add_executable(my-plugin src/main.cpp)
+target_link_libraries(my-plugin PRIVATE MalboxPluginSDK::MalboxPluginSDK)
+```
+
+### `plugin.toml`
+
+Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin.
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "My analysis plugin"
+authors = ["Your Name"]
+type = "guest"                    # or "host"
+state = "ephemeral"               # or "persistent", "scoped"
+execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
+
+[results.my_result]
+description = "What this result contains"
+user_visible = true
+display_name = "My Result"
+render = "json"
+```
+
+See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
+
+### `src/main.cpp`
+
+```cpp
+#include <malbox/plugin.hpp>
+
+class MyPlugin final : public malbox::Plugin {
+public:
+    void on_start(const std::unordered_map<std::string, std::string>& config) override {
+        // Called once before tasks arrive. Use config for initialization.
+    }
+
+    std::vector<malbox::PluginResult> on_task(
+        const malbox::Task& task,
+        const malbox::Context& ctx
+    ) override {
+        // Read the sample
+        auto sample = task.sample_bytes();
+        ctx.emit_progress(0.5, "analyzing");
+
+        // ... perform analysis ...
+
+        // Return results
+        std::string json = R"({"status": "clean"})";
+        auto data = std::span<const uint8_t>{
+            reinterpret_cast<const uint8_t*>(json.data()),
+            json.size()
+        };
+        return { malbox::PluginResult::json("my_result", data) };
+    }
+
+    void on_stop() override {
+        // Called once on shutdown. Clean up resources.
+    }
+};
+
+int main() {
+    malbox::PluginMeta meta{};
+    meta.name        = "my-plugin";
+    meta.version     = "0.1.0";
+    meta.description = "My analysis plugin";
+    meta.authors     = "Your Name";
+    meta.plugin_type = malbox::PluginType::Guest;
+    meta.state       = malbox::PluginState::Ephemeral;
+    meta.execution   = malbox::ExecutionContext::Exclusive;
+
+    malbox::run_guest_plugin(std::make_unique<MyPlugin>(), meta);
+}
+```
+
+Your plugin subclasses `malbox::Plugin` and implements `on_task` at minimum. The `on_start` and `on_stop` lifecycle hooks are optional.
+
+For a **host** plugin, change the metadata and entry point:
+
+```cpp
+meta.plugin_type = malbox::PluginType::Host;
+malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
+```
+
+## Handler methods
+
+Override virtual methods on the `malbox::Plugin` base class:
+
+| Method | Signature | Required |
+|--------|-----------|----------|
+| `on_task` | `(const Task&, const Context&) -> std::vector<PluginResult>` | Yes |
+| `on_start` | `(const std::unordered_map<std::string, std::string>&) -> void` | No |
+| `on_stop` | `() -> void` | No |
+| `health_check` | `() -> HealthStatus` | No |
+| `on_daemon_event` | `(DaemonEvent, const Context&) -> void` | No |
+| `on_task_event` | `(TaskEvent, const TaskEventPayload&, const Context&) -> void` | No |
+| `on_plugin_event` | `(PluginEvent, const PluginEventPayload&, const Context&) -> void` | No |
+| `on_sample_event` | `(SampleEvent, const SampleEventPayload&, const Context&) -> void` | No |
+
+Only `on_task` is required (pure virtual). All other handlers default to no-ops.
+
+## Returning results
+
+Your `on_task` method returns a `std::vector<malbox::PluginResult>`. There are three result types:
+
+```cpp
+// JSON-encoded result (pass raw UTF-8 bytes)
+PluginResult::json("name", byte_span);
+
+// Raw binary result
+PluginResult::bytes("name", byte_span);
+
+// Reference a file on disk (runtime reads it)
+PluginResult::file("name", "/path/to/file");
+```
+
+Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Handling errors
+
+Plugin methods can throw `malbox::Error` to signal failures. The SDK catches exceptions at the FFI boundary and reports them to the runtime.
+
+```cpp
+#include <malbox/error.hpp>
+
+// In your on_task:
+if (something_wrong) {
+    throw malbox::Error(-1, "analysis failed: corrupt sample");
+}
+```
+
+SDK methods like `task.sample_bytes()` also throw `malbox::Error` on failure.
+
+## Subscribing to events
+
+Beyond task processing, your plugin can react to system events by overriding the event handler methods:
+
+```cpp
+class MyPlugin final : public malbox::Plugin {
+public:
+    std::vector<malbox::PluginResult> on_task(
+        const malbox::Task& task, const malbox::Context& ctx
+    ) override {
+        // ...
+    }
+
+    void on_task_event(
+        TaskEvent event,
+        const TaskEventPayload& payload,
+        const Context& ctx
+    ) override {
+        // React to task lifecycle events
+    }
+
+    void on_sample_event(
+        SampleEvent event,
+        const SampleEventPayload& payload,
+        const Context& ctx
+    ) override {
+        // React to sample processing events
+    }
+};
+```
+
+See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
+
+## Thread safety
+
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar synchronization primitives. Health checks may also arrive on a different thread regardless of execution context.
+
+## Build
+
+### Linux
+
+Host plugins always target Linux (they run on the daemon machine). Guest plugins targeting a Linux guest VM also use this:
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/malbox-plugin-sdk/dist
+cmake --build build
+```
+
+### Windows (cross-compile)
+
+Guest plugins that run inside a Windows analysis VM need to be cross-compiled. The Malbox devenv provides a MinGW toolchain and a CMake toolchain file for this:
+
+```bash
+cmake -B build-win \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/malbox-plugin-sdk/cmake/mingw-w64-x86_64.cmake \
+  -DCMAKE_PREFIX_PATH=/path/to/malbox-plugin-sdk/dist-windows
+cmake --build build-win
+```
+
+This produces a statically linked `.exe` binary with no runtime DLL dependencies.
+
+<Note>
+The MinGW toolchain file reads `MINGW_LIB_PATH` and `MINGW_INCLUDE_PATH` environment variables for library and header search paths. The Malbox devenv sets these automatically.
+</Note>
+
+## Deploy
+
+### Host plugins
+
+Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
+
+```
+~/.config/malbox/plugins/
+└── my-plugin/
+    ├── my-plugin          # Linux binary
+    └── plugin.toml
+```
+
+### Guest plugins
+
+Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
+
+```
+~/.config/malbox/plugins/
+└── my-plugin/
+    ├── my-plugin.exe      # Windows binary (or Linux binary for Linux guests)
+    └── plugin.toml
+```
+
+Provision into the VM using the deploy playbook:
+
+```bash
+cargo run -p malbox-cli machine provision <machine_id> \
+  --provisioner ansible \
+  --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
+  --snapshot <snapshot_name> \
+  --plugins my-plugin
+```
+
+## Examples
+
+See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).

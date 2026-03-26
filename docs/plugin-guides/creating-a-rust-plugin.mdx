@@ -1,0 +1,283 @@
+---
+title: "Creating a Rust Plugin"
+description: "Step-by-step guide to building analysis plugins in Rust using the Malbox Plugin SDK"
+---
+
+## Prerequisites
+
+- Rust toolchain (stable, 2024 edition)
+- The `malbox-plugin-sdk` crate (path dependency or from a release)
+- For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
+
+## Get the SDK
+
+If you have the Rust toolchain available (e.g., you're a Malbox contributor), the SDK is available as a path dependency at `crates/malbox-plugin-sdk`.
+
+Otherwise, download the SDK crate from a release and reference it as a path or published dependency.
+
+## Create your plugin
+
+### `Cargo.toml`
+
+Create a new binary crate and add the SDK as a dependency. Enable the `host` or `guest` feature depending on your plugin type.
+
+For a **guest** plugin:
+
+```toml
+[package]
+name = "my-plugin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["guest"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+For a **host** plugin, swap the feature:
+
+```toml
+malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["host"] }
+```
+
+### `plugin.toml`
+
+Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin.
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "My analysis plugin"
+authors = ["Your Name"]
+type = "guest"                    # or "host"
+state = "ephemeral"               # or "persistent", "scoped"
+execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
+
+[results.my_result]
+description = "What this result contains"
+user_visible = true
+display_name = "My Result"
+render = "json"
+```
+
+See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
+
+### `src/main.rs`
+
+The SDK uses attribute macros to wire your plugin into the runtime. You annotate your struct and impl block instead of manually implementing traits.
+
+```rust
+extern crate malbox_plugin_sdk as malbox;
+
+use malbox::prelude::*;
+
+#[malbox::guest_plugin]
+#[malbox(state = "ephemeral", execution = "exclusive")]
+struct MyPlugin;
+
+#[malbox::handlers]
+impl MyPlugin {
+    #[malbox::on_start]
+    fn init(&self) -> Result<()> {
+        info!("Plugin ready - waiting for tasks");
+        Ok(())
+    }
+
+    #[malbox::on_task]
+    fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+        let sample = task.sample_bytes()?;
+        ctx.emit_progress(0.5, "analyzing")?;
+
+        // ... perform analysis ...
+
+        Ok(vec![PluginResult::json("my_result", &serde_json::json!({
+            "status": "clean"
+        }))?])
+    }
+
+    #[malbox::on_stop]
+    fn shutdown(&self) -> Result<()> {
+        info!("Plugin shutting down");
+        Ok(())
+    }
+}
+```
+
+The `#[malbox::handlers]` macro scans your impl block for annotated methods and generates the necessary trait implementations. Your method names can be anything you like - the attributes determine their role.
+
+## Plugin struct macros
+
+Use one of these on your struct to declare the plugin type:
+
+| Macro | Description |
+|-------|-------------|
+| `#[malbox::host_plugin]` | Host plugin - runs on the daemon machine via IPC |
+| `#[malbox::guest_plugin]` | Guest plugin - runs inside a VM/container via gRPC |
+
+Configure state and execution on the same struct:
+
+```rust
+#[malbox::host_plugin]
+#[malbox(state = "persistent", execution = "parallel")]
+struct MyPlugin;
+```
+
+## Handler methods
+
+Annotate methods inside a `#[malbox::handlers]` impl block:
+
+| Attribute | Signature | Required |
+|-----------|-----------|----------|
+| `#[malbox::on_task]` | `fn(&self, Task, &Context) -> Result<Vec<PluginResult>>` | Yes |
+| `#[malbox::on_start]` | `fn(&self) -> Result<()>` | No |
+| `#[malbox::on_stop]` | `fn(&self) -> Result<()>` | No |
+| `#[malbox::health_check]` | `fn(&self) -> HealthStatus` | No |
+| `#[malbox::on_event(...)]` | Varies (see [Subscribing to events](#subscribing-to-events)) | No |
+
+Only `#[malbox::on_task]` is required. All other handlers are optional and default to no-ops.
+
+## Returning results
+
+Your `on_task` handler returns `Result<Vec<PluginResult>>`. There are three result types:
+
+```rust
+// JSON - automatically serializes any serde::Serialize type
+PluginResult::json("name", &my_struct)?
+
+// Raw bytes
+PluginResult::bytes("name", raw_data)
+
+// File reference - the runtime reads the file
+PluginResult::file("name", "/path/to/file")
+```
+
+Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Handling errors
+
+The SDK uses its own `Result<T>` type aliased to `std::result::Result<T, SdkError>`. Handler methods that return `Result<()>` or `Result<Vec<PluginResult>>` can use `?` to propagate errors naturally.
+
+```rust
+#[malbox::on_task]
+fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+    let sample = task.sample_bytes()?;  // propagates SdkError::Io on failure
+
+    if sample.is_empty() {
+        return Err(SdkError::Plugin(anyhow::anyhow!("empty sample")));
+    }
+
+    Ok(vec![PluginResult::json("result", &"ok")?])
+}
+```
+
+## Subscribing to events
+
+Use `#[malbox::on_event(...)]` to react to system events. Specify the event variant as the argument:
+
+```rust
+#[malbox::handlers]
+impl MyPlugin {
+    #[malbox::on_event(TaskEvent::TaskCompleted)]
+    fn on_task_done(&self, payload: TaskEventPayload, ctx: &Context) -> Result<()> {
+        info!(task_id = payload.task_id, "Task completed");
+        Ok(())
+    }
+
+    #[malbox::on_event(DaemonEvent::ConfigReloaded)]
+    fn on_config_reload(&self) {
+        info!("Configuration reloaded");
+    }
+
+    #[malbox::on_event(PluginEvent::PluginResultProduced, from = ["host-file-info"])]
+    fn on_result(&self, payload: PluginEventPayload, _ctx: &Context) -> Result<()> {
+        info!(plugin_id = payload.plugin_id, "Got result from watched plugin");
+        Ok(())
+    }
+}
+```
+
+The `from` filter narrows plugin events to results from specific named plugins. You can also declare event subscriptions in `plugin.toml`:
+
+```toml
+[events]
+subscribe = ["TaskCreated", "TaskStarting"]
+```
+
+See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
+
+## Holding state
+
+Your plugin struct can hold fields. For concurrent access with `ExecutionContext::Parallel`, wrap mutable state in `Mutex` or similar:
+
+```rust
+#[malbox::host_plugin]
+#[malbox(state = "persistent", execution = "parallel")]
+struct MyPlugin {
+    cache: Mutex<HashMap<String, String>>,
+}
+```
+
+## Thread safety
+
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. The SDK requires `Send + Sync` for guest plugins. Protect shared mutable state with `Mutex`, `RwLock`, or atomic types. Health checks may also arrive on a different thread regardless of execution context.
+
+## Build
+
+### Linux
+
+Host plugins always target Linux (they run on the daemon machine). Guest plugins targeting a Linux guest VM also use this:
+
+```bash
+cargo build --release
+```
+
+### Windows (cross-compile)
+
+Guest plugins that run inside a Windows analysis VM need to be cross-compiled:
+
+```bash
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+<Note>
+The Malbox devenv automatically configures the MinGW linker and library paths for the `x86_64-pc-windows-gnu` target. No additional setup is needed if you're using `devenv shell`.
+</Note>
+
+## Deploy
+
+### Host plugins
+
+Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
+
+```
+~/.config/malbox/plugins/
+└── my-plugin/
+    ├── my-plugin          # Linux binary
+    └── plugin.toml
+```
+
+### Guest plugins
+
+Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
+
+```
+~/.config/malbox/plugins/
+└── my-plugin/
+    ├── my-plugin.exe      # Windows binary (or Linux binary for Linux guests)
+    └── plugin.toml
+```
+
+Provision into the VM using the deploy playbook:
+
+```bash
+cargo run -p malbox-cli machine provision <machine_id> \
+  --provisioner ansible \
+  --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
+  --snapshot <snapshot_name> \
+  --plugins my-plugin
+```
+
+## Examples
+
+See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).
