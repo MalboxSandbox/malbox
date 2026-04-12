@@ -1,4 +1,4 @@
-name: devenv - rust build and test
+name: devenv - Rust build and test
 
 on:
   push:
@@ -13,8 +13,11 @@ on:
       - '.github/workflows/devenv-rust.yml'
 
 jobs:
-  build:
+  rust:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
 
     steps:
     - uses: actions/checkout@v6
@@ -26,20 +29,28 @@ jobs:
     - name: Install devenv
       run: nix profile install nixpkgs#devenv
 
-    - name: Run rustfmt
-      run: devenv shell -- cargo fmt --all --manifest-path back-end/Cargo.toml -- --check
+    - name: Check formatting
+      run: devenv shell -- cargo fmt --all -- --check
 
     # - name: Run linter
-    #   run: devenv shell -- cargo clippy --manifest-path back-end/Cargo.toml --all-targets --all -- -D warnings
+    #   run: devenv shell -- cargo clippy --all-targets --all -- -D warnings
 
     - name: Build project
-      run: SQLX_OFFLINE=true devenv shell -- cargo build --manifest-path back-end/Cargo.toml --verbose
+      run: SQLX_OFFLINE=true devenv shell -- cargo build --verbose
 
-    - name: Tests
-      run: SQLX_OFFLINE=true devenv shell -- cargo nextest run --manifest-path back-end/Cargo.toml --all --no-tests pass
+    - name: Run tests
+      run: SQLX_OFFLINE=true devenv shell -- cargo nextest run --all --no-tests pass
 
-    - name: Doctests
-      run: SQLX_OFFLINE=true devenv shell -- cargo test --manifest-path back-end/Cargo.toml --doc
+    - name: Run doctests
+      run: SQLX_OFFLINE=true devenv shell -- cargo test --doc
 
     - name: Generate documentation
-      run: SQLX_OFFLINE=true devenv shell -- cargo doc --manifest-path back-end/Cargo.toml --no-deps --document-private-items
+      run: SQLX_OFFLINE=true devenv shell -- cargo doc --no-deps --document-private-items
+
+    - name: Cross-compile Rust SDK (Windows)
+      run: >
+        SQLX_OFFLINE=true devenv shell --
+        cargo build
+        -p malbox-plugin-sdk
+        --target x86_64-pc-windows-gnu
+        --no-default-features --features guest

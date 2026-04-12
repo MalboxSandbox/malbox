@@ -1,0 +1,51 @@
+name: devenv - C++ SDK build and test
+
+on:
+  push:
+    branches: ["main", "dev*"]
+    paths:
+      - 'back-end/crates/malbox-plugin-sdk-cpp/**'
+      - 'back-end/crates/malbox-plugin-sdk/**'
+      - 'back-end/crates/malbox-plugin-transport/**'
+      - 'back-end/xtask/**'
+      - '.github/workflows/devenv-cpp-sdk.yml'
+  pull_request:
+    branches: ["main", "dev*"]
+    paths:
+      - 'back-end/crates/malbox-plugin-sdk-cpp/**'
+      - 'back-end/crates/malbox-plugin-sdk/**'
+      - 'back-end/crates/malbox-plugin-transport/**'
+      - 'back-end/xtask/**'
+      - '.github/workflows/devenv-cpp-sdk.yml'
+
+jobs:
+  cpp-sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+
+    steps:
+    - uses: actions/checkout@v6
+    - uses: cachix/install-nix-action@v31
+    - uses: cachix/cachix-action@v17
+      with:
+        name: devenv
+
+    - name: Install devenv
+      run: nix profile install nixpkgs#devenv
+
+    - name: Build C++ SDK distribution (Linux)
+      run: SQLX_OFFLINE=true devenv shell -- cargo xtask dist-cpp-sdk --target linux
+
+    - name: Run C++ SDK tests
+      run: |
+        devenv shell -- bash -c '
+          cd crates/malbox-plugin-sdk-cpp/tests/cpp
+          cmake -B build
+          cmake --build build
+          cd build && ctest --output-on-failure
+        '
+
+    - name: Cross-compile C++ SDK (Windows)
+      run: SQLX_OFFLINE=true devenv shell -- cargo xtask dist-cpp-sdk --target windows
