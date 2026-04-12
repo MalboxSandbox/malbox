@@ -9,6 +9,7 @@ exclude = [
     "examples/plugins/guest-yara-scanner",
     "examples/plugins/guest-exec-checker",
     "examples/plugins/host-event-reactor",
+    "xtask",
 ]
 [workspace.dependencies]
 tokio = { version = "1.49.0", features = ["full", "fs"] }
