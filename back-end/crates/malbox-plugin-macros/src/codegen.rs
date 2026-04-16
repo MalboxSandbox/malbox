@@ -20,20 +20,21 @@ pub fn generate_main(struct_name: &Ident, kind: PluginKind, is_unit_struct: bool
     match kind {
         PluginKind::Host => quote! {
             fn main() {
-                malbox_plugin_sdk::internal::init_tracing();
+                malbox_plugin_sdk::internal::init_tracing(None);
                 let plugin = #plugin_init;
                 let meta = #struct_name::__MALBOX_META;
-                let runtime = malbox_plugin_sdk::host_runtime::HostRuntime::new(plugin, meta)
+                let runtime = malbox_plugin_sdk::runtime::host::HostRuntime::new(plugin, meta)
                     .expect("failed to initialize host plugin runtime");
                 runtime.run().expect("host plugin runtime error");
             }
         },
         PluginKind::Guest => quote! {
             fn main() {
-                malbox_plugin_sdk::internal::init_tracing();
+                // Tracing + LogBus are initialised inside run() so the gRPC
+                // log stream and the tracing layer share the same bus.
                 let plugin = #plugin_init;
                 let meta = #struct_name::__MALBOX_META;
-                let runtime = malbox_plugin_sdk::guest_runtime::GuestPluginRuntime::new_v2(plugin, meta);
+                let runtime = malbox_plugin_sdk::runtime::guest::GuestPluginRuntime::new(plugin, meta);
                 runtime.run_blocking().expect("guest plugin runtime error");
             }
         },

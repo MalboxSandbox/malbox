@@ -66,8 +66,8 @@ pub fn guest_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn init(&self) -> Result<()> { Ok(()) }
 ///
 ///     #[malbox::on_task]
-///     fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
-///         Ok(vec![])
+///     fn process(&self, task: Task, ctx: &Context) -> Result<()> {
+///         Ok(())
 ///     }
 /// }
 /// ```
@@ -108,5 +108,11 @@ pub fn on_event(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Marks a method as a custom health check handler (used inside `#[malbox::handlers]`).
 #[proc_macro_attribute]
 pub fn health_check(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+/// Marks a method as the execute-command handler (used inside `#[malbox::handlers]`).
+#[proc_macro_attribute]
+pub fn on_execute_command(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
