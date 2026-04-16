@@ -26,45 +26,47 @@
 //! #[malbox::handlers]
 //! impl MyPlugin {
 //!     #[malbox::on_task]
-//!     fn analyze(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
-//!         Ok(vec![])
+//!     fn analyze(&self, task: Task, ctx: &Context) -> Result<()> {
+//!         Ok(())
 //!     }
 //! }
 //! ```
 
 pub mod context;
 pub mod error;
+pub mod log;
+pub mod plugin;
+pub mod runtime;
+pub mod stash;
 pub mod types;
+
+#[doc(hidden)]
+pub mod execution;
 
 #[doc(hidden)]
 pub mod internal;
 
-// Feature-gated runtime modules
-#[cfg(feature = "host")]
-pub mod host_runtime;
-
-#[cfg(feature = "guest")]
-pub mod guest_runtime;
-
 pub mod build;
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 
 /// Convenience re-exports for plugin authors.
 pub mod prelude {
     pub use crate::context::Context;
     pub use crate::error::{Result, SdkError};
+    pub use crate::plugin::Plugin;
     pub use crate::types::{
-        ExecutionContext, HealthStatus, PluginMeta, PluginResult, PluginState, PluginType, Task,
+        ExecRequest, ExecResult, ExecutionContext, ExecutionInfo, HealthStatus, PluginMeta,
+        PluginResult, PluginState, PluginType, Task,
     };
 
     // Re-export common dependencies so plugin authors don't need them in Cargo.toml
-    pub use serde::Deserialize;
+    pub use serde::{Deserialize, Serialize};
     pub use tracing::{debug, error, info, warn};
 
-    // Re-export transport event types for on_event handlers
-    pub use malbox_plugin_transport::messages::events::{
-        DaemonEvent, Event, Payload, PluginEvent, PluginEventPayload, SampleEvent,
-        SampleEventPayload, TaskEvent, TaskEventPayload,
-    };
+    // Re-export transport event type for on_event handlers
+    pub use malbox_plugin_transport::messages::events::Event;
 }
 
 // Re-export macros so `malbox::host_plugin` works
@@ -73,4 +75,24 @@ pub use malbox_plugin_macros::*;
 // Top-level re-exports
 pub use context::Context;
 pub use error::{Result, SdkError};
-pub use types::{HealthStatus, PluginMeta, PluginResult, Task};
+pub use plugin::Plugin;
+pub use types::{
+    ExecRequest, ExecResult, ExecutionInfo, HealthStatus, PluginMeta, PluginResult, Task,
+};
+
+#[cfg(test)]
+mod prelude_tests {
+    #[test]
+    fn prelude_exports_serialize_and_deserialize() {
+        // This test only needs to compile. It verifies that both Serialize and
+        // Deserialize are reachable via `malbox_plugin_sdk::prelude::*`.
+        use crate::prelude::*;
+
+        #[derive(Serialize, Deserialize)]
+        struct Foo {
+            x: i32,
+        }
+
+        let _ = Foo { x: 1 };
+    }
+}

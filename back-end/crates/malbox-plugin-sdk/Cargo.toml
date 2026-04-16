@@ -6,7 +6,8 @@ description = "SDK for building Malbox analysis plugins"
 
 [features]
 host = []
-guest = ["dep:tokio", "dep:tonic"]
+guest = []
+testkit = []
 
 [dependencies]
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
@@ -14,15 +15,18 @@ malbox-plugin-macros = { path = "../malbox-plugin-macros" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
-anyhow = "1"
 thiserror.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 
 #iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
-tokio = { workspace = true, optional = true }
-tonic = { version = "0.14", optional = true }
+tokio = { workspace = true }
+tonic = { version = "0.14" }
+prost = "0.14"
+async-stream = "0.3"
+uuid = { workspace = true }
 
 [dev-dependencies]
 malbox-tracing = { path = "../malbox-tracing" }
 tempfile = "3.26"
+futures = { workspace = true }
