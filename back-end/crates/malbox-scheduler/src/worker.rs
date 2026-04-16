@@ -28,9 +28,7 @@ use malbox_machinery::{
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::manager::handle::OutputFormat;
 use malbox_plugin_internal::transport::daemon::GrpcClient;
-use malbox_plugin_internal::transport::messages::events::{
-    Event, Payload, TaskEvent, TaskEventPayload,
-};
+use malbox_plugin_internal::transport::messages::events::Event;
 use malbox_plugin_internal::transport::traits::TransportEmitter;
 use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::{ResultFormat, ResultStore, SampleStore};
@@ -43,10 +41,18 @@ use uuid::Uuid;
 /// Outcome of a single `execute_task` call.
 #[derive(Debug)]
 enum TaskOutcome {
-    /// Task ran to completion (plugins executed, machine released).
+    /// Task ran to completion — all plugin results are persisted.
+    ///
+    /// Machine cleanup (snapshot revert) proceeds asynchronously after
+    /// this returns.  The machine's own status (`reverting` → `ready` /
+    /// `failed`) tracks that independently from the task.
     Completed,
     /// No machine was available — task was re-enqueued for a later attempt.
     Requeued,
+    /// The plugin execution phase exceeded the user-requested analysis timeout.
+    TimedOut { analysis_secs: u64 },
+    /// The task was canceled because the worker received a shutdown signal.
+    Cancelled,
 }
 
 /// Unique identifier for a worker instance.
@@ -124,18 +130,40 @@ impl Worker {
     /// The worker waits for tasks on the shared queue's notifier,
     /// dequeues a task (competing with other workers), and executes
     /// the full task lifecycle.
-    pub async fn run(self, mut shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
+    ///
+    /// Shutdown is cooperative: the shutdown signal is converted to a
+    /// `watch` channel and passed into `execute_task` so that in-flight
+    /// tasks can check for cancellation at safe points and clean up
+    /// (release machines) before returning.
+    pub async fn run(self, shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
         let notifier = self.task_queue.get_notifier();
         info!(worker_id = %self.id, "Worker started");
 
+        // Convert oneshot into a watch channel so execute_task can poll
+        // it cooperatively without consuming the receiver.
+        let (shutdown_tx, shutdown) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+            let _ = shutdown_tx.send(true);
+        });
+
         loop {
-            // Wait for a task to become available or shutdown signal
-            tokio::select! {
-                _ = notifier.notified() => {},
-                _ = &mut shutdown_rx => {
-                    info!(worker_id = %self.id, "Worker received shutdown signal");
-                    break;
+            // Wait for a task to become available or shutdown signal.
+            {
+                let mut shutdown_rx = shutdown.clone();
+                tokio::select! {
+                    _ = notifier.notified() => {},
+                    _ = shutdown_rx.wait_for(|v| *v) => {
+                        info!(worker_id = %self.id, "Worker received shutdown signal");
+                        break;
+                    }
                 }
+            }
+
+            // Shutdown may have arrived between the notifier firing and here.
+            if *shutdown.borrow() {
+                info!(worker_id = %self.id, "Worker received shutdown signal");
+                break;
             }
 
             // Try to dequeue a task (another worker may have grabbed it)
@@ -146,31 +174,12 @@ impl Worker {
 
             info!(worker_id = %self.id, task_id, "Worker picked up task");
 
-            // Load full task from store
-            let task = match self.task_store.load_task(task_id).await {
-                Ok(t) => t,
-                Err(e) => {
-                    error!(worker_id = %self.id, task_id, error = %e, "Failed to load task");
-                    continue;
-                }
-            };
-
-            // Determine timeout duration
-            let timeout_secs = task.timeout as u64;
-            let timeout_duration = if timeout_secs > 0 {
-                Duration::from_secs(timeout_secs)
-            } else {
-                Duration::from_secs(300) // Default 5 min timeout
-            };
-
-            // Execute with timeout
             let start = std::time::Instant::now();
-            let result = tokio::time::timeout(timeout_duration, self.execute_task(task_id)).await;
-
+            let result = self.execute_task(task_id, &shutdown).await;
             let duration = start.elapsed();
 
             match result {
-                Ok(Ok(TaskOutcome::Completed)) => {
+                Ok(TaskOutcome::Completed) => {
                     info!(worker_id = %self.id, task_id, duration = ?duration, "Task completed successfully");
                     let _ = self
                         .event_tx
@@ -181,34 +190,43 @@ impl Worker {
                         })
                         .await;
                 }
-                Ok(Ok(TaskOutcome::Requeued)) => {
+                Ok(TaskOutcome::Requeued) => {
                     // Task was re-enqueued because no machine was available.
                     // Not a completion — just continue the loop.
                 }
-                Ok(Err(e)) => {
+                Ok(TaskOutcome::TimedOut { analysis_secs }) => {
+                    warn!(worker_id = %self.id, task_id, analysis_secs, "Task analysis timed out");
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::JobCompleted {
+                            worker_id: self.id.clone(),
+                            job_result: Err(SchedulerError::Internal(format!(
+                                "Task {} analysis timed out after {}s",
+                                task_id, analysis_secs
+                            ))),
+                            duration,
+                        })
+                        .await;
+                }
+                Ok(TaskOutcome::Cancelled) => {
+                    info!(worker_id = %self.id, task_id, duration = ?duration, "Task cancelled due to shutdown");
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::JobCompleted {
+                            worker_id: self.id.clone(),
+                            job_result: Ok(crate::task::TaskResult::new(Some(task_id))),
+                            duration,
+                        })
+                        .await;
+                    break;
+                }
+                Err(e) => {
                     error!(worker_id = %self.id, task_id, error = %e, "Task execution failed");
                     let _ = self
                         .event_tx
                         .send(WorkerEvent::WorkerError {
                             worker_id: self.id.clone(),
                             error: crate::error::WorkerError::ExecutionFailed(e.to_string()),
-                        })
-                        .await;
-                }
-                Err(_) => {
-                    warn!(worker_id = %self.id, task_id, timeout = timeout_secs, "Task timed out");
-                    if let Err(e) = self.handle_timeout(task_id).await {
-                        error!(worker_id = %self.id, task_id, error = %e, "Failed to handle timeout cleanup");
-                    }
-                    let _ = self
-                        .event_tx
-                        .send(WorkerEvent::JobCompleted {
-                            worker_id: self.id.clone(),
-                            job_result: Err(SchedulerError::Internal(format!(
-                                "Task {} timed out after {}s",
-                                task_id, timeout_secs
-                            ))),
-                            duration,
                         })
                         .await;
                 }
@@ -221,14 +239,22 @@ impl Worker {
     /// Execute the full lifecycle of a single task.
     ///
     /// Returns `Ok(TaskOutcome::Completed)` when the task ran to completion,
-    /// or `Ok(TaskOutcome::Requeued)` when no machine was available and the
-    /// task was put back on the queue.
-    async fn execute_task(&self, task_id: i32) -> Result<TaskOutcome> {
+    /// `Ok(TaskOutcome::Requeued)` when no machine was available, or
+    /// `Ok(TaskOutcome::Cancelled)` when the worker received a shutdown signal.
+    ///
+    /// Once a machine is acquired, all subsequent code paths are guarded by
+    /// an unconditional cleanup block that releases the machine — even if an
+    /// intermediate step fails or the task is cancelled.
+    async fn execute_task(
+        &self,
+        task_id: i32,
+        shutdown: &tokio::sync::watch::Receiver<bool>,
+    ) -> Result<TaskOutcome> {
         // --- Initializing ---
         self.task_store
             .update_task_state(task_id, TaskState::Initializing)
             .await?;
-        self.emit_task_event(TaskEvent::TaskStarting, task_id);
+        self.emit_task_event(Event::TaskStarting { task_id });
 
         // Load full task for spec building
         let task = self.task_store.load_task(task_id).await?;
@@ -238,7 +264,11 @@ impl Worker {
             .update_task_state(task_id, TaskState::PreparingResources)
             .await?;
 
-        let db_machine = match self.machine_pool.acquire(task.platform, task_id).await {
+        let db_machine = match self
+            .machine_pool
+            .acquire(task.platform.clone(), task_id)
+            .await
+        {
             Ok(Some(m)) => m,
             Ok(None) => {
                 // No machine available — re-enqueue and wait
@@ -260,15 +290,116 @@ impl Worker {
                 self.task_store
                     .update_task_state(task_id, TaskState::Failed)
                     .await?;
-                self.emit_task_event(TaskEvent::TaskFailed, task_id);
+                self.emit_task_event(Event::TaskFailed { task_id });
                 return Err(SchedulerError::Resource(e));
             }
         };
         let machine_id = db_machine.id.expect("acquired machine has id");
         info!(task_id, machine_id, "Machine acquired");
 
-        // Resolve the target platform from the DB record — used both for
-        // building the runtime Machine and for sample execution dispatch.
+        // --- Post-acquire: all paths guarded by unconditional cleanup ---
+        let analysis_secs = if task.timeout > 0 {
+            task.timeout as u64
+        } else {
+            300
+        };
+        let mut registered_guests = Vec::new();
+
+        let work_result = self
+            .run_task_on_machine(
+                task_id,
+                &task,
+                &db_machine,
+                machine_id,
+                analysis_secs,
+                &mut registered_guests,
+                shutdown,
+            )
+            .await;
+
+        // --- Unconditional cleanup (runs for success, failure, timeout, and cancellation) ---
+        for plugin_id in &registered_guests {
+            self.plugin_manager.unregister_guest(plugin_id);
+        }
+
+        if let Err(e) = self
+            .task_store
+            .update_task_state(task_id, TaskState::Stopping)
+            .await
+        {
+            error!(task_id, error = %e, "Failed to update task state to Stopping");
+        }
+
+        if let Err(e) = self.machine_pool.release(machine_id).await {
+            error!(task_id, machine_id, error = %e, "Failed to release machine");
+        }
+
+        // --- Post-cleanup: set final task state based on outcome ---
+        match &work_result {
+            Ok(TaskOutcome::Completed) => {
+                self.task_store
+                    .update_task_state(task_id, TaskState::Completed)
+                    .await?;
+                self.emit_task_event(Event::TaskCompleted { task_id });
+            }
+            Ok(TaskOutcome::TimedOut { .. }) => {
+                if let Err(e) = self
+                    .task_store
+                    .update_task_state(task_id, TaskState::Failed)
+                    .await
+                {
+                    error!(task_id, error = %e, "Failed to update task state to Failed after timeout");
+                }
+                self.emit_task_event(Event::TaskFailed { task_id });
+            }
+            Ok(TaskOutcome::Cancelled) => {
+                if let Err(e) = self
+                    .task_store
+                    .update_task_state(task_id, TaskState::Canceled)
+                    .await
+                {
+                    error!(task_id, error = %e, "Failed to update task state to Canceled");
+                }
+                self.emit_task_event(Event::TaskCanceled { task_id });
+            }
+            Err(_) => {
+                if let Err(e) = self
+                    .task_store
+                    .update_task_state(task_id, TaskState::Failed)
+                    .await
+                {
+                    error!(task_id, error = %e, "Failed to update task state to Failed");
+                }
+                self.emit_task_event(Event::TaskFailed { task_id });
+            }
+            Ok(TaskOutcome::Requeued) => unreachable!("requeue handled before acquire"),
+        }
+
+        work_result
+    }
+
+    /// Run the task work after a machine has been acquired.
+    ///
+    /// This method performs all the VM-interaction, sample transfer, plugin
+    /// registration/execution, and result persistence.  It is called from
+    /// `execute_task` and the caller guarantees that the machine will be
+    /// released regardless of the outcome.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_task_on_machine(
+        &self,
+        task_id: i32,
+        task: &malbox_database::repositories::tasks::Task,
+        db_machine: &malbox_database::repositories::machinery::Machine,
+        machine_id: i32,
+        analysis_secs: u64,
+        registered_guests: &mut Vec<malbox_plugin_internal::registry::types::PluginId>,
+        shutdown: &tokio::sync::watch::Receiver<bool>,
+    ) -> Result<TaskOutcome> {
+        // Check cancellation before heavy work.
+        if *shutdown.borrow() {
+            return Ok(TaskOutcome::Cancelled);
+        }
+
         let platform = match db_machine.platform {
             malbox_database::repositories::machinery::MachinePlatform::Windows => Platform::Windows,
             malbox_database::repositories::machinery::MachinePlatform::Linux => Platform::Linux,
@@ -298,13 +429,16 @@ impl Worker {
             .await?;
 
         // Start the VM and wait for the guest plugin port to become reachable.
-        // After a snapshot revert the VM is stopped, so we must boot it first.
-        if let Err(e) = self.machine_pool.start_and_wait(&db_machine).await {
+        if let Err(e) = self.machine_pool.start_and_wait(db_machine).await {
             warn!(task_id, machine_id, error = %e, "Failed to start VM, proceeding anyway");
         }
 
+        // Check cancellation after VM boot.
+        if *shutdown.borrow() {
+            return Ok(TaskOutcome::Cancelled);
+        }
+
         // Guest access phase: transfer sample to guest.
-        // Only activated when a transport is configured and task has a sample.
         if let (Some(transport), Some(sample_id)) = (&self.transport, task.sample_id) {
             let sample = fetch_sample_by_id(self.task_store.pool(), sample_id)
                 .await
@@ -345,14 +479,12 @@ impl Worker {
                     })
                 }
                 ResolvedTransport::Grpc { .. } => {
-                    // Use the acquired machine's IP and the base guest plugin
-                    // port (first plugin's port from sequential assignment).
                     let machine_addr = format!(
                         "http://{}:{}",
                         db_machine.ip.as_deref().ok_or_else(|| {
                             SchedulerError::Internal("Machine has no IP for gRPC transport".into())
                         })?,
-                        50051u16, // base port — always the first plugin
+                        50051u16,
                     );
                     let mut client =
                         GrpcClient::connect(machine_addr.as_str())
@@ -381,14 +513,6 @@ impl Worker {
 
             if let Err(e) = result {
                 error!(task_id, error = %e, "Failed to push sample to guest");
-                self.task_store
-                    .update_task_state(task_id, TaskState::Failed)
-                    .await?;
-                self.emit_task_event(TaskEvent::TaskFailed, task_id);
-
-                if let Err(rel_err) = self.machine_pool.release(machine_id).await {
-                    error!(task_id, machine_id, error = %rel_err, "Failed to release machine after guest session failure");
-                }
                 return Err(e);
             }
 
@@ -399,10 +523,44 @@ impl Worker {
             );
         }
 
+        // --- Plugin registration phase ---
+        let snapshot_guest_plugins = self
+            .machine_pool
+            .get_active_snapshot_guest_plugins(machine_id)
+            .await
+            .unwrap_or_default();
+
+        let snapshot = self.plugin_manager.registry().snapshot();
+        let base_port: u16 = 50051;
+
+        if let Some(ref ip) = db_machine.ip {
+            for (i, plugin_name) in snapshot_guest_plugins.iter().enumerate() {
+                let plugin_id = malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
+                let port = base_port + i as u16;
+                let addr = format!("http://{}:{}", ip, port);
+
+                match self
+                    .plugin_manager
+                    .register_guest(&plugin_id, addr.clone())
+                    .await
+                {
+                    Ok(()) => {
+                        info!(
+                            task_id,
+                            plugin_id = plugin_name.as_str(),
+                            addr = addr.as_str(),
+                            "Registered guest plugin"
+                        );
+                        registered_guests.push(plugin_id);
+                    }
+                    Err(e) => {
+                        warn!(task_id, plugin_id = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
+                    }
+                }
+            }
+        }
+
         // --- Sample execution phase ---
-        // Execute the sample on the guest OS before running analysis plugins.
-        // Uses the first guest plugin's ExecuteCommand RPC to spawn the process
-        // in the background so plugins can observe it while it runs.
         {
             let ip = db_machine.ip.as_deref().ok_or_else(|| {
                 SchedulerError::Internal("Machine has no IP for sample execution".into())
@@ -434,192 +592,137 @@ impl Worker {
             );
         }
 
+        // Check cancellation before the long analysis phase.
+        if *shutdown.borrow() {
+            return Ok(TaskOutcome::Cancelled);
+        }
+
         // --- Plugin execution phase ---
-        // Fetch guest plugins deployed on this machine's active snapshot.
-        // Only these plugins are registered — not all guest plugins from the
-        // host registry. Port is derived from the plugin's index in the list
-        // (base_port + index).
-        let snapshot_guest_plugins = self
-            .machine_pool
-            .get_active_snapshot_guest_plugins(machine_id)
-            .await
-            .unwrap_or_default();
+        // The analysis timeout wraps only this phase. Shutdown cancellation
+        // is also checked here via select! so the worker can exit promptly.
+        let analysis_timeout = Duration::from_secs(analysis_secs);
+        let mut shutdown_rx = shutdown.clone();
 
-        let snapshot = self.plugin_manager.registry().snapshot();
-        let mut registered_guests = Vec::new();
-        let base_port: u16 = 50051;
+        let timed_out = tokio::select! {
+            result = tokio::time::timeout(analysis_timeout, async {
+                for entry in snapshot.list() {
+                    let plugin_id = &entry.id;
 
-        if let Some(ref ip) = db_machine.ip {
-            for (i, plugin_name) in snapshot_guest_plugins.iter().enumerate() {
-                let plugin_id = malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
-                let port = base_port + i as u16;
-                let addr = format!("http://{}:{}", ip, port);
-
-                match self
-                    .plugin_manager
-                    .register_guest(&plugin_id, addr.clone())
-                    .await
-                {
-                    Ok(()) => {
+                    if entry.manifest.plugin.plugin_type
+                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
+                        && !snapshot_guest_plugins
+                            .iter()
+                            .any(|n| n == plugin_id.as_str())
+                    {
                         info!(
                             task_id,
-                            plugin_id = plugin_name.as_str(),
-                            addr = addr.as_str(),
-                            "Registered guest plugin"
+                            plugin_id = plugin_id.as_str(),
+                            "Skipping guest plugin not in active snapshot"
                         );
-                        registered_guests.push(plugin_id);
+                        continue;
                     }
-                    Err(e) => {
-                        warn!(task_id, plugin_id = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
-                    }
-                }
-            }
-        }
 
-        // Run plugins for this task. Guest plugins not in the active snapshot
-        // are skipped — they weren't deployed on this VM.
-        for entry in snapshot.list() {
-            let plugin_id = &entry.id;
-
-            if entry.manifest.plugin.plugin_type
-                == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
-                && !snapshot_guest_plugins
-                    .iter()
-                    .any(|n| n == plugin_id.as_str())
-            {
-                info!(
-                    task_id,
-                    plugin_id = plugin_id.as_str(),
-                    "Skipping guest plugin not in active snapshot"
-                );
-                continue;
-            }
-
-            match self.plugin_manager.acquire(plugin_id).await {
-                Ok(handle) => {
-                    let config = std::collections::HashMap::new(); // TODO: build from task config
-                    match handle.execute_task(task_id, &task.target, config).await {
-                        Ok(outputs) => {
-                            info!(
-                                task_id,
-                                plugin_id = plugin_id.as_str(),
-                                result_count = outputs.len(),
-                                "Plugin execution completed"
+                    match self.plugin_manager.acquire(plugin_id).await {
+                        Ok(handle) => {
+                            let mut config = std::collections::HashMap::new();
+                            config.insert(
+                                "analysis_timeout".to_string(),
+                                task.timeout.to_string(),
                             );
-
-                            // Persist each result to filesystem + DB.
-                            let plugin_name = plugin_id.as_str();
-                            for output in &outputs {
-                                let fs_format = match output.format {
-                                    OutputFormat::Json => ResultFormat::Json,
-                                    OutputFormat::Bytes => ResultFormat::Bytes,
-                                };
-                                let db_format = match output.format {
-                                    OutputFormat::Json => DbResultFormat::Json,
-                                    OutputFormat::Bytes => DbResultFormat::Bytes,
-                                };
-
-                                match self
-                                    .result_store
-                                    .store(
+                            match handle.execute_task(task_id, &task.target, config).await {
+                                Ok(outputs) => {
+                                    info!(
                                         task_id,
-                                        plugin_name,
-                                        &output.result_name,
-                                        fs_format,
-                                        &output.data,
-                                    )
-                                    .await
-                                {
-                                    Ok(rel_path) => {
-                                        if let Err(e) = task_results::insert_task_result(
-                                            self.task_store.pool(),
-                                            task_id,
-                                            plugin_name,
-                                            &output.result_name,
-                                            db_format,
-                                            output.data.len() as i64,
-                                            &rel_path,
-                                        )
-                                        .await
-                                        {
-                                            error!(
+                                        plugin_id = plugin_id.as_str(),
+                                        result_count = outputs.len(),
+                                        "Plugin execution completed"
+                                    );
+
+                                    let plugin_name = plugin_id.as_str();
+                                    for output in &outputs {
+                                        let fs_format = match output.format {
+                                            OutputFormat::Json => ResultFormat::Json,
+                                            OutputFormat::Bytes => ResultFormat::Bytes,
+                                        };
+                                        let db_format = match output.format {
+                                            OutputFormat::Json => DbResultFormat::Json,
+                                            OutputFormat::Bytes => DbResultFormat::Bytes,
+                                        };
+
+                                        match self
+                                            .result_store
+                                            .store(
                                                 task_id,
                                                 plugin_name,
-                                                result_name = output.result_name.as_str(),
-                                                error = %e,
-                                                "Failed to insert task result into DB"
-                                            );
+                                                &output.result_name,
+                                                fs_format,
+                                                &output.data,
+                                            )
+                                            .await
+                                        {
+                                            Ok(rel_path) => {
+                                                if let Err(e) = task_results::insert_task_result(
+                                                    self.task_store.pool(),
+                                                    task_id,
+                                                    plugin_name,
+                                                    &output.result_name,
+                                                    db_format,
+                                                    output.data.len() as i64,
+                                                    &rel_path,
+                                                )
+                                                .await
+                                                {
+                                                    error!(
+                                                        task_id,
+                                                        plugin_name,
+                                                        result_name = output.result_name.as_str(),
+                                                        error = %e,
+                                                        "Failed to insert task result into DB"
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    task_id,
+                                                    plugin_name,
+                                                    result_name = output.result_name.as_str(),
+                                                    error = %e,
+                                                    "Failed to store task result to filesystem"
+                                                );
+                                            }
                                         }
                                     }
-                                    Err(e) => {
-                                        error!(
-                                            task_id,
-                                            plugin_name,
-                                            result_name = output.result_name.as_str(),
-                                            error = %e,
-                                            "Failed to store task result to filesystem"
-                                        );
-                                    }
+                                }
+                                Err(e) => {
+                                    error!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Plugin execution failed");
                                 }
                             }
+                            handle.release().await;
                         }
                         Err(e) => {
-                            error!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Plugin execution failed");
+                            warn!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
                         }
                     }
-                    handle.release().await;
                 }
-                Err(e) => {
-                    warn!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
-                }
+            }) => result.is_err(),
+            _ = shutdown_rx.wait_for(|v| *v) => {
+                info!(task_id, "Analysis phase cancelled due to shutdown");
+                return Ok(TaskOutcome::Cancelled);
             }
+        };
+
+        if timed_out {
+            warn!(task_id, analysis_secs, "Analysis phase timed out");
+            return Ok(TaskOutcome::TimedOut { analysis_secs });
         }
-
-        // Unregister guest plugins before machine revert destroys the VM state.
-        for plugin_id in &registered_guests {
-            self.plugin_manager.unregister_guest(plugin_id);
-        }
-
-        // --- Stopping ---
-        self.task_store
-            .update_task_state(task_id, TaskState::Stopping)
-            .await?;
-
-        // --- Release machine ---
-        if let Err(e) = self.machine_pool.release(machine_id).await {
-            error!(task_id, machine_id, error = %e, "Failed to release machine");
-        }
-
-        // --- Completed ---
-        self.task_store
-            .update_task_state(task_id, TaskState::Completed)
-            .await?;
-        self.emit_task_event(TaskEvent::TaskCompleted, task_id);
 
         Ok(TaskOutcome::Completed)
     }
 
-    /// Handle task timeout: transition to Failed and emit event.
-    ///
-    /// Note: the machine assigned to this task (if any) cannot be released here
-    /// because `execute_task` was cancelled by the timeout and we have lost the
-    /// `machine_id`. The machine will remain in `assigned` status and will be
-    /// recovered by `MachinePool::reconcile()` on the next startup.
-    async fn handle_timeout(&self, task_id: i32) -> Result<()> {
-        self.task_store
-            .update_task_state(task_id, TaskState::Failed)
-            .await?;
-        self.emit_task_event(TaskEvent::TaskFailed, task_id);
-        Ok(())
-    }
-
     /// Emit a task IPC event, logging errors but not propagating them.
-    fn emit_task_event(&self, event: TaskEvent, task_id: i32) {
-        if let Err(e) = self.plugin_manager.emitter().emit(
-            Event::Task(event),
-            Payload::Task(TaskEventPayload { task_id }),
-        ) {
-            error!(task_id, error = %e, "Failed to emit task event");
+    fn emit_task_event(&self, event: Event) {
+        if let Err(e) = self.plugin_manager.emitter().emit(event) {
+            error!(error = %e, "Failed to emit task event");
         }
     }
 }

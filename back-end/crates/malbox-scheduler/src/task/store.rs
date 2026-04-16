@@ -1,7 +1,8 @@
 use crate::error::{Result, TaskError};
 use malbox_database::PgPool;
 use malbox_database::repositories::tasks::{
-    Task, TaskState, fetch_pending_tasks, fetch_task, insert_task, update_task_status,
+    Task, TaskState, fetch_pending_tasks, fetch_task, insert_task, reset_orphaned_tasks,
+    update_task_status,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -110,6 +111,15 @@ impl TaskStore {
             let mut tasks = self.tasks.write().await;
             tasks.insert(id, task);
         }
+    }
+
+    /// Reset tasks stranded in transient states from a prior daemon run.
+    ///
+    /// Tasks marked Running/Initializing/PreparingResources/Stopping in the DB
+    /// but not known to any live worker are leftovers from a crash — mark them
+    /// Failed so the state is truthful. Returns the number of rows reset.
+    pub async fn recover_orphaned_tasks(&self) -> Result<u64> {
+        Ok(reset_orphaned_tasks(&self.db).await?)
     }
 
     /// Load all pending tasks from the database.

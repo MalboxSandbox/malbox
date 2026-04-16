@@ -68,7 +68,14 @@ impl Scheduler {
         mut task_rx: mpsc::Receiver<Task>,
         shutdown_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
-        // 1. Load pending tasks from DB
+        // 1. Reset tasks stranded in transient states from a prior daemon run.
+        match self.task_store.recover_orphaned_tasks().await {
+            Ok(0) => {}
+            Ok(count) => info!(count, "Reset orphaned tasks from prior run to 'failed'"),
+            Err(e) => error!(error = %e, "Failed to reset orphaned tasks"),
+        }
+
+        // 2. Load pending tasks from DB
         match self.task_store.load_pending_tasks().await {
             Ok(pending) => {
                 if !pending.is_empty() {
