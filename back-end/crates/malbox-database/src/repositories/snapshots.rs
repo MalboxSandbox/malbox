@@ -154,6 +154,40 @@ async fn deactivate_all(pool: &PgPool, machine_id: i32) -> Result<()> {
     Ok(())
 }
 
+/// Fetch a snapshot by machine ID and name.
+pub async fn fetch_snapshot_by_name(
+    pool: &PgPool,
+    machine_id: i32,
+    name: &str,
+) -> Result<Option<MachineSnapshot>> {
+    sqlx::query_as::<_, MachineSnapshot>(
+        r#"
+        SELECT * FROM "machine_snapshots"
+        WHERE machine_id = $1 AND name = $2
+        LIMIT 1
+        "#,
+    )
+    .bind(machine_id)
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| SnapshotError::FetchFailed { source: e }.into())
+}
+
+/// Delete a single snapshot by ID.
+pub async fn delete_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<Option<MachineSnapshot>> {
+    sqlx::query_as::<_, MachineSnapshot>(
+        r#"
+        DELETE FROM "machine_snapshots" WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(snapshot_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| SnapshotError::DeleteFailed { source: e }.into())
+}
+
 /// Delete all snapshots for a machine.
 pub async fn delete_snapshots_for_machine(pool: &PgPool, machine_id: i32) -> Result<()> {
     sqlx::query(

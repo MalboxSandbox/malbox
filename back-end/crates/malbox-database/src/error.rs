@@ -163,6 +163,11 @@ pub enum ProvisionRunError {
         #[source]
         source: sqlx::Error,
     },
+    #[error("Failed to delete provision runs: {source}")]
+    DeleteFailed {
+        #[source]
+        source: sqlx::Error,
+    },
 }
 
 #[derive(Error, Debug)]

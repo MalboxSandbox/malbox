@@ -113,6 +113,29 @@ pub async fn fetch_task(pool: &PgPool, id: i32) -> Result<Option<Task>> {
     })
 }
 
+pub async fn fetch_all_tasks(pool: &PgPool) -> Result<Vec<Task>> {
+    query_as!(
+        Task,
+        r#"
+        SELECT
+            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            timeout, enforce_timeout, priority, machine_id, machine_memory,
+            machine_cpus, created_on, started_on, completed_on,
+            status AS "status!: TaskState", sample_id, owner, tags
+        FROM "tasks" ORDER BY created_on DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        TaskError::FetchFailed {
+            message: "Failed to fetch all tasks".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
+
 pub async fn fetch_pending_tasks(pool: &PgPool) -> Result<Vec<Task>> {
     query_as!(
         Task,
@@ -134,6 +157,34 @@ pub async fn fetch_pending_tasks(pool: &PgPool) -> Result<Vec<Task>> {
         }
         .into()
     })
+}
+
+/// Mark tasks stuck in transient states as Failed.
+///
+/// Called on scheduler startup to recover rows left in Running/Initializing/
+/// PreparingResources/Stopping after a crash or kill — nothing else will ever
+/// transition them, so they'd otherwise stay in those states forever.
+/// Returns the number of rows reset.
+pub async fn reset_orphaned_tasks(pool: &PgPool) -> Result<u64> {
+    let utc_now = time::OffsetDateTime::now_utc();
+    let now = PrimitiveDateTime::new(utc_now.date(), utc_now.time());
+
+    let result = sqlx::query!(
+        r#"
+        UPDATE "tasks"
+        SET status = 'failed', completed_on = $1
+        WHERE status IN ('running', 'initializing', 'preparing_resources', 'stopping')
+        "#,
+        now,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| TaskError::FetchFailed {
+        message: "Failed to reset orphaned tasks".to_string(),
+        source: e,
+    })?;
+
+    Ok(result.rows_affected())
 }
 
 pub async fn update_task_status(pool: &PgPool, id: i32, status: TaskState) -> Result<Task> {

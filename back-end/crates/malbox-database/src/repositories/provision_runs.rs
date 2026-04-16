@@ -132,6 +132,20 @@ pub async fn fetch_provision_runs_for_machine(
     .map_err(|e| ProvisionRunError::FetchFailed { source: e }.into())
 }
 
+/// Delete all provision runs that reference a given snapshot.
+pub async fn delete_provision_runs_for_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<u64> {
+    let result = sqlx::query(
+        r#"
+        DELETE FROM "provision_runs" WHERE snapshot_id = $1
+        "#,
+    )
+    .bind(snapshot_id)
+    .execute(pool)
+    .await
+    .map_err(|e| ProvisionRunError::DeleteFailed { source: e })?;
+    Ok(result.rows_affected())
+}
+
 /// Mark all 'running' provision runs as 'failed' (interrupted by restart).
 pub async fn mark_interrupted_runs(pool: &PgPool) -> Result<u64> {
     let result = sqlx::query(

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE \"tasks\"\n        SET status = 'failed', completed_on = $1\n        WHERE status IN ('running', 'initializing', 'preparing_resources', 'stopping')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamp"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3df95365dcd31166eb7248ed44f8cf2f696897da4ceec89fec76bf0ed2fb45f"
+}

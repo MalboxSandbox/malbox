@@ -61,6 +61,30 @@ pub async fn insert_task_result(
     })
 }
 
+/// Fetch a single result row by its id.
+pub async fn fetch_task_result(pool: &PgPool, result_id: i32) -> Result<Option<TaskResult>> {
+    query_as!(
+        TaskResult,
+        r#"
+        SELECT id, task_id, plugin_name, result_name,
+               format AS "format: ResultFormat",
+               size_bytes, file_path, created_on
+        FROM task_results
+        WHERE id = $1
+        "#,
+        result_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        TaskResultError::FetchFailed {
+            task_id: result_id,
+            source: e,
+        }
+        .into()
+    })
+}
+
 /// Fetch all results for a given task.
 pub async fn fetch_task_results(pool: &PgPool, task_id: i32) -> Result<Vec<TaskResult>> {
     query_as!(
