@@ -1,0 +1,11 @@
+set(PACKAGE_VERSION "0.1.0")
+
+# Version compatibility check — AnyNewerVersion policy.
+if("${PACKAGE_FIND_VERSION}" VERSION_GREATER "${PACKAGE_VERSION}")
+    set(PACKAGE_VERSION_COMPATIBLE FALSE)
+else()
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+    if("${PACKAGE_FIND_VERSION}" STREQUAL "${PACKAGE_VERSION}")
+        set(PACKAGE_VERSION_EXACT TRUE)
+    endif()
+endif()

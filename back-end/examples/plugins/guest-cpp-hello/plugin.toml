@@ -1,0 +1,14 @@
+[plugin]
+name = "guest-cpp-hello"
+version = "0.1.0"
+description = "Example guest plugin written in C++"
+authors = ["Malbox Team"]
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+
+[results.greeting]
+description = "A greeting message"
+user_visible = true
+display_name = "Greeting"
+render = "json"

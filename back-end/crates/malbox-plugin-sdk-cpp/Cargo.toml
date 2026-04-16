@@ -1,0 +1,28 @@
+[package]
+name = "malbox-plugin-sdk-cpp"
+version = "0.1.0"
+edition = "2024"
+description = "C++ bindings for the malbox plugin SDK"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[features]
+default = ["host", "guest"]
+host = ["malbox-plugin-sdk/host", "malbox-plugin-transport/ipc"]
+guest = ["malbox-plugin-sdk/guest"]
+
+[dependencies]
+malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }
+malbox-plugin-transport = { path = "../malbox-plugin-transport" }
+anyhow = "1"
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }
+
+[build-dependencies]
+cbindgen = "0.28"
