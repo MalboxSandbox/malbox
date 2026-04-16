@@ -1,7 +1,6 @@
 extern crate malbox_plugin_sdk as malbox;
 
 use malbox::prelude::*;
-use serde::Serialize;
 use std::process::Command;
 
 /// Snapshot of all running processes at the time of the check.
@@ -34,7 +33,7 @@ impl ExecChecker {
     }
 
     #[malbox::on_task]
-    fn check(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+    fn check(&self, task: Task, ctx: &Context) -> Result<()> {
         let target = task
             .sample_path()
             .file_name()
@@ -47,7 +46,7 @@ impl ExecChecker {
         let processes = list_processes();
 
         info!(
-            task_id = task.id,
+            task_id = task.id(),
             target = target.as_str(),
             process_count = processes.len(),
             "Process listing captured"
@@ -59,7 +58,8 @@ impl ExecChecker {
             processes,
         };
 
-        Ok(vec![PluginResult::json("exec_status", &status)?])
+        ctx.push_result(PluginResult::json("exec_status", &status)?)?;
+        Ok(())
     }
 }
 

@@ -33,7 +33,7 @@ impl YaraScanner {
     }
 
     #[malbox::on_task]
-    fn scan(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+    fn scan(&self, task: Task, ctx: &Context) -> Result<()> {
         ctx.emit_progress(0.25, "loading sample")?;
         let sample = task.sample_bytes()?;
 
@@ -49,11 +49,12 @@ impl YaraScanner {
             .collect();
 
         if matches.is_empty() {
-            info!(task_id = task.id, "No rules matched");
+            info!(task_id = task.id(), "No rules matched");
         } else {
-            info!(task_id = task.id, matched = ?matches, "Rules matched");
+            info!(task_id = task.id(), matched = ?matches, "Rules matched");
         }
 
-        Ok(vec![PluginResult::json("yara_matches", &matches)?])
+        ctx.push_result(PluginResult::json("yara_matches", &matches)?)?;
+        Ok(())
     }
 }

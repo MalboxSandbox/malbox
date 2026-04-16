@@ -37,25 +37,19 @@ impl EventReactor {
 
     /// React to configuration changes — no parameters needed, the macro
     /// wraps the bare `()` return with `Ok(())` automatically.
-    #[malbox::on_event(DaemonEvent::ConfigReloaded)]
+    #[malbox::on_event(ConfigReloaded)]
     fn on_config_reload(&self) {
         info!("Configuration reloaded — re-reading settings");
     }
 
     // -----------------------------------------------------------------------
-    // Plugin events — the `from` filter declares interest in specific plugins.
-    // The filter is parsed and will be used for subscription routing once
-    // the transport layer supports source metadata.
+    // Plugin events
     // -----------------------------------------------------------------------
 
-    /// Called when any plugin produces a result. The `from` filter narrows
-    /// this to results from `host-file-info` and `guest-yara-scanner` only.
-    #[malbox::on_event(PluginEvent::PluginResultProduced, from = ["host-file-info", "guest-yara-scanner"])]
-    fn on_result(&self, payload: PluginEventPayload, _ctx: &Context) -> Result<()> {
-        info!(
-            plugin_id = payload.plugin_id,
-            "Got result from watched plugin — tracking for report aggregation"
-        );
+    /// Called when any plugin produces a result.
+    #[malbox::on_event(PluginResultProduced)]
+    fn on_result(&self, ctx: &Context) -> Result<()> {
+        info!("Got result from plugin — tracking for report aggregation");
         // In a real plugin you'd fetch the actual result via ctx.get_result()
         // and merge it into your report. For now, bump a counter.
         if let Ok(mut reports) = self.task_results.lock() {
@@ -76,44 +70,32 @@ impl EventReactor {
 
     /// When a task completes, build a combined report from all the results
     /// we've collected and emit it.
-    #[malbox::on_event(TaskEvent::TaskCompleted)]
-    fn on_task_done(&self, payload: TaskEventPayload, _ctx: &Context) -> Result<()> {
-        let count = self
-            .task_results
-            .lock()
-            .map(|r| r.len())
-            .unwrap_or(0);
+    #[malbox::on_event(TaskCompleted)]
+    fn on_task_done(&self, ctx: &Context) -> Result<()> {
+        let count = self.task_results.lock().map(|r| r.len()).unwrap_or(0);
 
         info!(
-            task_id = payload.task_id,
             results_collected = count,
             "Task completed — building aggregated report"
         );
 
-        // In a real plugin, you'd emit a PluginResult here:
-        //   let report = self.build_report(payload.task_id)?;
-        //   Ok(vec![PluginResult::json("full_report", &report)?])
+        // In a real plugin, you'd push a result here:
+        //   let report = self.build_report(task_id)?;
+        //   ctx.push_result(PluginResult::json("full_report", &report)?)?;
 
         Ok(())
     }
 
     /// Log task failures for monitoring/alerting.
-    #[malbox::on_event(TaskEvent::TaskFailed)]
-    fn on_task_failed(&self, payload: TaskEventPayload, _ctx: &Context) -> Result<()> {
-        warn!(
-            task_id = payload.task_id,
-            "Task failed — could trigger retry or alerting logic"
-        );
+    #[malbox::on_event(TaskFailed)]
+    fn on_task_failed(&self, ctx: &Context) -> Result<()> {
+        warn!("Task failed — could trigger retry or alerting logic");
         Ok(())
     }
 
     #[malbox::on_stop]
     fn shutdown(&self) -> Result<()> {
-        let count = self
-            .task_results
-            .lock()
-            .map(|r| r.len())
-            .unwrap_or(0);
+        let count = self.task_results.lock().map(|r| r.len()).unwrap_or(0);
         info!(total_results = count, "EventReactor shutting down");
         Ok(())
     }

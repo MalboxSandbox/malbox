@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 #[malbox(state = "persistent", execution = "parallel")]
 struct FileInfoPlugin;
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct FileInfo {
     hash: String,
     size: usize,
@@ -22,7 +22,7 @@ impl FileInfoPlugin {
     }
 
     #[malbox::on_task]
-    fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+    fn process(&self, task: Task, ctx: &Context) -> Result<()> {
         let sample = task.sample_bytes()?;
 
         ctx.emit_progress(0.5, "computing hash")?;
@@ -30,12 +30,13 @@ impl FileInfoPlugin {
         let hash = hex_sha256(&sample);
         let size = sample.len();
 
-        info!(task_id = task.id, %hash, size, "Computed file info");
+        info!(task_id = task.id(), %hash, size, "Computed file info");
 
-        Ok(vec![PluginResult::json(
+        ctx.push_result(PluginResult::json(
             "file_info",
             &FileInfo { hash, size },
-        )?])
+        )?)?;
+        Ok(())
     }
 }
 
