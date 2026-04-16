@@ -58,6 +58,9 @@ struct CreateTaskRequest {
     memory: Option<bool>,
     unique: Option<bool>,
     enforce_timeout: Option<bool>,
+    /// Override the sample filename used on the guest VM.
+    /// If not set, the original uploaded filename is used.
+    target_filename: Option<String>,
 }
 
 #[debug_handler]
@@ -149,7 +152,10 @@ async fn create_task(
 
     let task = Task {
         id: None,
-        target: file_info.name.to_string(),
+        target: request
+            .target_filename
+            .clone()
+            .unwrap_or_else(|| file_info.name.to_string()),
         timeout: request.timeout.unwrap_or(300),
         priority: request.priority.unwrap_or(1),
         platform: match request.platform.as_deref() {

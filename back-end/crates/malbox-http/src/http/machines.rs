@@ -4,10 +4,10 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use malbox_config::provisioning::ProvisionStep;
-use malbox_database::repositories::snapshots;
+use malbox_database::repositories::{provision_runs, snapshots};
 use malbox_resources::error::ResourceError;
 use serde::Deserialize;
 
@@ -16,6 +16,10 @@ pub fn router() -> Router<AppState> {
         .route("/v1/machines", get(list_machines))
         .route("/v1/machines/{id}", get(get_machine))
         .route("/v1/machines/{id}/snapshots", get(list_snapshots))
+        .route(
+            "/v1/machines/{id}/snapshots/{snapshot_id}",
+            delete(delete_snapshot),
+        )
         .route("/v1/machines/{id}/provision", post(provision_machine))
         .route("/v1/machines/{id}/provisions", get(list_provisions))
 }
@@ -42,6 +46,58 @@ async fn get_machine(State(state): State<AppState>, Path(id): Path<i32>) -> impl
 async fn list_snapshots(State(state): State<AppState>, Path(id): Path<i32>) -> impl IntoResponse {
     match snapshots::fetch_snapshots_for_machine(&state.pool, id).await {
         Ok(snaps) => (StatusCode::OK, Json(serde_json::json!(snaps))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn delete_snapshot(
+    State(state): State<AppState>,
+    Path((machine_id, snapshot_name)): Path<(i32, String)>,
+) -> impl IntoResponse {
+    // Look up snapshot by name
+    let snapshot =
+        match snapshots::fetch_snapshot_by_name(&state.pool, machine_id, &snapshot_name).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return (
+                StatusCode::NOT_FOUND,
+                Json(
+                    serde_json::json!({"error": format!("Snapshot '{}' not found", snapshot_name)}),
+                ),
+            )
+                .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        };
+
+    // Delete provision runs that reference this snapshot first
+    if let Err(e) =
+        provision_runs::delete_provision_runs_for_snapshot(&state.pool, snapshot.id).await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to delete provision runs: {}", e)})),
+        )
+            .into_response();
+    }
+
+    match snapshots::delete_snapshot(&state.pool, snapshot.id).await {
+        Ok(Some(_)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Snapshot not found"})),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),
