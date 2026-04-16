@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -14,6 +15,7 @@ use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
+use crate::transport::grpc::proto;
 
 /// Format of a plugin output payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +108,7 @@ impl PluginHandle {
         sample_path: &str,
         config: HashMap<String, String>,
     ) -> Result<Vec<PluginOutput>> {
-        use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
+        use crate::transport::grpc::proto::{ResultFormat as ProtoFormat, ResultKind};
 
         let mut instance = self.instance.lock().await;
         let client = instance.grpc_client.as_mut().ok_or_else(|| {
@@ -123,34 +125,75 @@ impl PluginHandle {
             .await
             .map_err(|e| ManagerError::ExecutionFailed(self.plugin_id.clone(), e.to_string()))?;
 
-        let mut outputs = Vec::new();
+        let mut inline_outputs: Vec<PluginOutput> = Vec::new();
+        let mut pending_refs: Vec<proto::ResultRef> = Vec::new();
 
+        // --- Phase 1: drain the control stream ---
         loop {
             match stream.message().await {
                 Ok(Some(result)) => {
-                    info!(
-                        plugin = %self.plugin_id,
-                        task_id = result.task_id,
-                        result_name = %result.result_name,
-                        data_len = result.data.len(),
-                        is_final = result.is_final,
-                        "received task result from guest plugin"
-                    );
+                    let kind = ResultKind::try_from(result.kind).unwrap_or(ResultKind::Result);
+                    let is_final = result.is_final;
 
-                    let format = match ProtoFormat::try_from(result.format) {
-                        Ok(ProtoFormat::Json) => OutputFormat::Json,
-                        _ => OutputFormat::Bytes,
-                    };
+                    match kind {
+                        ResultKind::Progress => {
+                            debug!(
+                                plugin = %self.plugin_id,
+                                task_id = result.task_id,
+                                "received progress update"
+                            );
+                        }
+                        ResultKind::Ready => {
+                            debug!(
+                                plugin = %self.plugin_id,
+                                task_id = result.task_id,
+                                "plugin signaled ready"
+                            );
+                        }
+                        ResultKind::Result => {
+                            info!(
+                                plugin = %self.plugin_id,
+                                task_id = result.task_id,
+                                result_name = %result.result_name,
+                                data_len = result.data.len(),
+                                is_final,
+                                "received inline task result from guest plugin"
+                            );
 
-                    if !result.result_name.is_empty() {
-                        outputs.push(PluginOutput {
-                            result_name: result.result_name,
-                            data: result.data,
-                            format,
-                        });
+                            let format = match ProtoFormat::try_from(result.format) {
+                                Ok(ProtoFormat::Json) => OutputFormat::Json,
+                                _ => OutputFormat::Bytes,
+                            };
+
+                            if !result.result_name.is_empty() {
+                                inline_outputs.push(PluginOutput {
+                                    result_name: result.result_name,
+                                    data: result.data,
+                                    format,
+                                });
+                            }
+                        }
+                        ResultKind::ResultRef => {
+                            let ref_msg = proto::ResultRef::decode(result.data.as_slice())
+                                .map_err(|e| {
+                                    ManagerError::ExecutionFailed(
+                                        self.plugin_id.clone(),
+                                        format!("failed to decode ResultRef: {e}"),
+                                    )
+                                })?;
+                            info!(
+                                plugin = %self.plugin_id,
+                                task_id = result.task_id,
+                                handle = %ref_msg.handle,
+                                result_name = %ref_msg.result_name,
+                                size_bytes = ref_msg.size_bytes,
+                                "received result ref (will pull after stream completes)"
+                            );
+                            pending_refs.push(ref_msg);
+                        }
                     }
 
-                    if result.is_final {
+                    if is_final {
                         break;
                     }
                 }
@@ -170,6 +213,13 @@ impl PluginHandle {
                     ));
                 }
             }
+        }
+
+        // --- Phase 2: pull each ref sequentially on its own stream ---
+        let mut outputs = inline_outputs;
+        for ref_msg in pending_refs {
+            let pulled = pull_result_chunks(client, &self.plugin_id, &ref_msg).await?;
+            outputs.push(pulled);
         }
 
         Ok(outputs)
@@ -205,4 +255,65 @@ impl PluginHandle {
             }
         }
     }
+}
+
+async fn pull_result_chunks(
+    client: &mut crate::transport::daemon::GrpcClient,
+    plugin_id: &PluginId,
+    ref_msg: &proto::ResultRef,
+) -> Result<PluginOutput> {
+    use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
+
+    let mut stream = client
+        .pull_result(ref_msg.handle.clone())
+        .await
+        .map_err(|e| {
+            ManagerError::ExecutionFailed(
+                plugin_id.clone(),
+                format!(
+                    "pull_result RPC for '{}' (handle {}) failed: {}",
+                    ref_msg.result_name, ref_msg.handle, e
+                ),
+            )
+        })?;
+
+    let mut buf: Vec<u8> = Vec::with_capacity(ref_msg.size_bytes as usize);
+    loop {
+        match stream.message().await {
+            Ok(Some(chunk)) => {
+                buf.extend_from_slice(&chunk.data);
+                if chunk.is_last {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(status) => {
+                return Err(ManagerError::ExecutionFailed(
+                    plugin_id.clone(),
+                    format!(
+                        "pull_result stream error for '{}' (handle {}): {}",
+                        ref_msg.result_name, ref_msg.handle, status
+                    ),
+                ));
+            }
+        }
+    }
+
+    let format = match ProtoFormat::try_from(ref_msg.format) {
+        Ok(ProtoFormat::Json) => OutputFormat::Json,
+        _ => OutputFormat::Bytes,
+    };
+
+    info!(
+        plugin = %plugin_id,
+        result_name = %ref_msg.result_name,
+        bytes = buf.len(),
+        "pulled large result from guest plugin"
+    );
+
+    Ok(PluginOutput {
+        result_name: ref_msg.result_name.clone(),
+        data: buf,
+        format,
+    })
 }

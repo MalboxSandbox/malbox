@@ -9,6 +9,7 @@ pub mod error;
 pub mod handle;
 pub mod health;
 pub mod instance;
+pub mod log_router;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -173,9 +174,25 @@ impl PluginManager {
             .get(plugin_id)
             .ok_or_else(|| ManagerError::PluginNotFound(plugin_id.clone()))?;
 
-        let grpc_client = crate::transport::daemon::GrpcClient::connect(&addr)
+        let mut grpc_client = crate::transport::daemon::GrpcClient::connect(&addr)
             .await
             .map_err(ManagerError::Transport)?;
+
+        // Initialize the guest plugin (triggers on_start, decoder/provider registration).
+        let init_resp = grpc_client
+            .initialize(0, std::collections::HashMap::new())
+            .await
+            .map_err(ManagerError::Transport)?;
+
+        if !init_resp.success {
+            return Err(ManagerError::ExecutionFailed(
+                plugin_id.clone(),
+                format!(
+                    "guest plugin initialization failed: {}",
+                    init_resp.error_message
+                ),
+            ));
+        }
 
         let instance = PluginInstance {
             entry: Arc::clone(entry),
@@ -184,10 +201,50 @@ impl PluginManager {
             grpc_client: Some(grpc_client),
             started_at: Some(Instant::now()),
             last_health_check: None,
+            log_file_path: None,
         };
 
         self.instances
             .insert(plugin_id.clone(), Arc::new(Mutex::new(instance)));
+
+        // Start consuming the guest plugin's log stream in the background.
+        {
+            let instance_lock = self
+                .instances
+                .get(plugin_id)
+                .expect("instance was just inserted");
+            let mut instance = instance_lock.value().lock().await;
+
+            if let Some(ref mut client) = instance.grpc_client {
+                match client.stream_logs(true).await {
+                    Ok(stream) => {
+                        let run_id = format!(
+                            "{}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                        let log_dir = std::path::PathBuf::from("logs");
+                        let (_handle, log_path) = log_router::spawn_log_consumer(
+                            plugin_id.clone(),
+                            stream,
+                            log_dir,
+                            run_id,
+                        );
+                        instance.log_file_path = Some(log_path);
+                        debug!(plugin = %plugin_id, "log stream consumer started");
+                    }
+                    Err(e) => {
+                        warn!(
+                            plugin = %plugin_id,
+                            error = %e,
+                            "failed to start log stream (non-fatal)"
+                        );
+                    }
+                }
+            }
+        }
 
         info!(plugin = %plugin_id, addr = %addr, "guest plugin registered");
 
@@ -312,5 +369,6 @@ async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
         grpc_client: None,
         started_at: Some(Instant::now()),
         last_health_check: None,
+        log_file_path: None,
     })
 }

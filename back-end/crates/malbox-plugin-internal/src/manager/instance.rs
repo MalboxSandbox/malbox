@@ -6,6 +6,7 @@
 //! governs what operations are valid at any point in time.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -122,6 +123,8 @@ pub struct PluginInstance {
     pub started_at: Option<Instant>,
     /// Wall-clock time of the most recent successful health check.
     pub last_health_check: Option<Instant>,
+    /// Path to the log file for this plugin instance's log stream.
+    pub log_file_path: Option<PathBuf>,
 }
 
 impl PluginInstance {
@@ -135,6 +138,7 @@ impl PluginInstance {
             grpc_client: None,
             started_at: None,
             last_health_check: None,
+            log_file_path: None,
         }
     }
 }
@@ -147,6 +151,7 @@ impl fmt::Debug for PluginInstance {
             .field("has_process", &self.process.is_some())
             .field("started_at", &self.started_at)
             .field("last_health_check", &self.last_health_check)
+            .field("log_file_path", &self.log_file_path)
             .finish()
     }
 }
