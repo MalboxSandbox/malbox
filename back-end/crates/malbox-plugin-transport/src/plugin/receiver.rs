@@ -5,7 +5,7 @@
 //! bounds in the transport abstraction.
 
 use crate::error::{Result, TransportError};
-use crate::messages::events::{Event, Payload};
+use crate::messages::events::Event;
 use crate::traits::TransportReceiver;
 use core::time::Duration;
 
@@ -20,18 +20,18 @@ impl GrpcReceiver {
 }
 
 impl TransportReceiver for GrpcReceiver {
-    fn wait(&self, _timeout: Duration) -> Result<Option<(Event, Payload)>> {
+    fn wait(&self, _timeout: Duration) -> Result<Option<Event>> {
         Ok(None)
     }
 
-    fn wait_blocking(&self) -> Result<(Event, Payload)> {
+    fn wait_blocking(&self) -> Result<Event> {
         Err(TransportError::Grpc(
             "GrpcReceiver does not support polling; use the reactive GuestPluginHandler model"
                 .into(),
         ))
     }
 
-    fn try_recv(&self) -> Result<Option<(Event, Payload)>> {
+    fn try_recv(&self) -> Result<Option<Event>> {
         Ok(None)
     }
 }

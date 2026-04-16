@@ -2,14 +2,14 @@
 
 use crate::error::{Result, TransportError};
 use crate::grpc::{conversions, proto};
-use crate::messages::events::{Event, Payload};
+use crate::messages::events::Event;
 use crate::traits::TransportEmitter;
 
 /// gRPC-based event emitter for guest plugins.
 ///
 /// Two modes:
 /// - **Task mode** (`with_task`): wraps a `result_tx` channel from `ExecuteTask` RPC.
-///   `emit()` converts the event/payload to a `proto::TaskResult` and sends it through
+///   `emit()` converts the event to a `proto::TaskResult` and sends it through
 ///   the gRPC streaming response.
 /// - **Noop mode** (`noop`): no active task stream. `emit()` is a silent no-op, used
 ///   during lifecycle callbacks (on_start, on_stop) that have no streaming channel.
@@ -62,10 +62,10 @@ impl GrpcEmitter {
 }
 
 impl TransportEmitter for GrpcEmitter {
-    fn emit(&self, event: Event, payload: Payload) -> Result<()> {
+    fn emit(&self, event: Event) -> Result<()> {
         match &self.inner {
             GrpcEmitterInner::Task { task_id, result_tx } => {
-                let task_result = conversions::event_to_task_result(*task_id, &event, &payload);
+                let task_result = conversions::event_to_task_result(*task_id, &event);
                 result_tx
                     .blocking_send(Ok(task_result))
                     .map_err(|e| TransportError::Grpc(format!("channel send failed: {}", e)))

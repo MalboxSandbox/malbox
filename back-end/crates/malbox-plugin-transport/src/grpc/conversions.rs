@@ -1,67 +1,90 @@
-//! Proto <-> Event/Payload conversions.
+//! Proto <-> Event conversions.
 //!
 //! Bridges the prost-generated protobuf types (`super::proto`) and the
 //! transport-agnostic internal types (`crate::messages::events`).
 
 use super::proto;
 use crate::error::{Result, TransportError};
-use crate::messages::events::*;
+use crate::messages::events::Event;
 
-/// Convert internal `Event` + `Payload` to a proto `EventNotification`.
-pub fn event_to_proto(event: &Event, payload: &Payload) -> Result<proto::EventNotification> {
+/// Convert an internal flat `Event` to a proto `EventNotification`.
+pub fn event_to_proto(event: &Event) -> Result<proto::EventNotification> {
     let proto_event = match event {
-        Event::Task(task_evt) => {
-            let task_id = match payload {
-                Payload::Task(tp) => tp.task_id,
-                _ => 0,
-            };
-            let event_type: i32 = match task_evt {
-                TaskEvent::TaskCreated => proto::TaskEventType::Created.into(),
-                TaskEvent::TaskStarting => proto::TaskEventType::Starting.into(),
-                TaskEvent::TaskCompleted => proto::TaskEventType::Completed.into(),
-                TaskEvent::TaskFailed => proto::TaskEventType::Failed.into(),
-            };
+        Event::TaskCreated { task_id } => {
             proto::event_notification::Event::Task(proto::TaskEventProto {
-                event_type,
-                task_id,
+                event_type: proto::TaskEventType::Created.into(),
+                task_id: *task_id,
             })
         }
-        Event::Plugin(plugin_evt) => {
-            let plugin_id = match payload {
-                Payload::Plugin(pp) => pp.plugin_id,
-                _ => 0,
-            };
-            let event_type: i32 = match plugin_evt {
-                PluginEvent::PluginStarted => proto::PluginEventType::Started.into(),
-                PluginEvent::PluginStopped => proto::PluginEventType::Stopped.into(),
-                PluginEvent::PluginResultProduced => proto::PluginEventType::ResultProduced.into(),
-            };
+        Event::TaskStarting { task_id } => {
+            proto::event_notification::Event::Task(proto::TaskEventProto {
+                event_type: proto::TaskEventType::Starting.into(),
+                task_id: *task_id,
+            })
+        }
+        Event::TaskCompleted { task_id } => {
+            proto::event_notification::Event::Task(proto::TaskEventProto {
+                event_type: proto::TaskEventType::Completed.into(),
+                task_id: *task_id,
+            })
+        }
+        Event::TaskFailed { task_id } => {
+            proto::event_notification::Event::Task(proto::TaskEventProto {
+                event_type: proto::TaskEventType::Failed.into(),
+                task_id: *task_id,
+            })
+        }
+        Event::TaskCanceled { task_id } => {
+            proto::event_notification::Event::Task(proto::TaskEventProto {
+                event_type: proto::TaskEventType::Canceled.into(),
+                task_id: *task_id,
+            })
+        }
+        Event::PluginStarted { plugin_id } => {
             proto::event_notification::Event::Plugin(proto::PluginEventProto {
-                event_type,
-                plugin_id,
+                event_type: proto::PluginEventType::Started.into(),
+                plugin_id: *plugin_id,
             })
         }
-        Event::Sample(sample_evt) => {
-            let sample_id = match payload {
-                Payload::Sample(sp) => sp.sample_id,
-                _ => 0,
-            };
-            let event_type: i32 = match sample_evt {
-                SampleEvent::SampleStarted => proto::SampleEventType::Started.into(),
-                SampleEvent::SampleStopped => proto::SampleEventType::Stopped.into(),
-                SampleEvent::SampleResultProduced => proto::SampleEventType::ResultProduced.into(),
-            };
+        Event::PluginStopped { plugin_id } => {
+            proto::event_notification::Event::Plugin(proto::PluginEventProto {
+                event_type: proto::PluginEventType::Stopped.into(),
+                plugin_id: *plugin_id,
+            })
+        }
+        Event::PluginResultProduced { plugin_id } => {
+            proto::event_notification::Event::Plugin(proto::PluginEventProto {
+                event_type: proto::PluginEventType::ResultProduced.into(),
+                plugin_id: *plugin_id,
+            })
+        }
+        Event::SampleStarted { sample_id } => {
             proto::event_notification::Event::Sample(proto::SampleEventProto {
-                event_type,
-                sample_id,
+                event_type: proto::SampleEventType::Started.into(),
+                sample_id: *sample_id,
             })
         }
-        Event::Daemon(daemon_evt) => {
-            let event_type: i32 = match daemon_evt {
-                DaemonEvent::DaemonShutdown => proto::DaemonEventType::Shutdown.into(),
-                DaemonEvent::ConfigReloaded => proto::DaemonEventType::ConfigReloaded.into(),
-            };
-            proto::event_notification::Event::Daemon(proto::DaemonEventProto { event_type })
+        Event::SampleStopped { sample_id } => {
+            proto::event_notification::Event::Sample(proto::SampleEventProto {
+                event_type: proto::SampleEventType::Stopped.into(),
+                sample_id: *sample_id,
+            })
+        }
+        Event::SampleResultProduced { sample_id } => {
+            proto::event_notification::Event::Sample(proto::SampleEventProto {
+                event_type: proto::SampleEventType::ResultProduced.into(),
+                sample_id: *sample_id,
+            })
+        }
+        Event::DaemonShutdown => {
+            proto::event_notification::Event::Daemon(proto::DaemonEventProto {
+                event_type: proto::DaemonEventType::Shutdown.into(),
+            })
+        }
+        Event::ConfigReloaded => {
+            proto::event_notification::Event::Daemon(proto::DaemonEventProto {
+                event_type: proto::DaemonEventType::ConfigReloaded.into(),
+            })
         }
     };
 
@@ -70,108 +93,104 @@ pub fn event_to_proto(event: &Event, payload: &Payload) -> Result<proto::EventNo
     })
 }
 
-/// Convert a proto `EventNotification` back to internal `(Event, Payload)`.
-pub fn proto_to_event(notification: proto::EventNotification) -> Result<(Event, Payload)> {
+/// Convert a proto `EventNotification` back to an internal `Event`.
+pub fn proto_to_event(notification: proto::EventNotification) -> Result<Event> {
     let inner = notification
         .event
         .ok_or_else(|| TransportError::Grpc("EventNotification has no event set".into()))?;
 
     match inner {
         proto::event_notification::Event::Task(task_proto) => {
-            let task_event = match proto::TaskEventType::try_from(task_proto.event_type) {
-                Ok(proto::TaskEventType::Created) => TaskEvent::TaskCreated,
-                Ok(proto::TaskEventType::Starting) => TaskEvent::TaskStarting,
-                Ok(proto::TaskEventType::Completed) => TaskEvent::TaskCompleted,
-                Ok(proto::TaskEventType::Failed) => TaskEvent::TaskFailed,
-                Ok(proto::TaskEventType::Unspecified) | Err(_) => {
-                    return Err(TransportError::Grpc(format!(
-                        "unknown TaskEventType value: {}",
-                        task_proto.event_type
-                    )));
-                }
-            };
-            Ok((
-                Event::Task(task_event),
-                Payload::Task(TaskEventPayload {
+            match proto::TaskEventType::try_from(task_proto.event_type) {
+                Ok(proto::TaskEventType::Created) => Ok(Event::TaskCreated {
                     task_id: task_proto.task_id,
                 }),
-            ))
+                Ok(proto::TaskEventType::Starting) => Ok(Event::TaskStarting {
+                    task_id: task_proto.task_id,
+                }),
+                Ok(proto::TaskEventType::Completed) => Ok(Event::TaskCompleted {
+                    task_id: task_proto.task_id,
+                }),
+                Ok(proto::TaskEventType::Failed) => Ok(Event::TaskFailed {
+                    task_id: task_proto.task_id,
+                }),
+                Ok(proto::TaskEventType::Canceled) => Ok(Event::TaskCanceled {
+                    task_id: task_proto.task_id,
+                }),
+                Ok(proto::TaskEventType::Unspecified) | Err(_) => Err(TransportError::Grpc(
+                    format!("unknown TaskEventType value: {}", task_proto.event_type),
+                )),
+            }
         }
         proto::event_notification::Event::Plugin(plugin_proto) => {
-            let plugin_event = match proto::PluginEventType::try_from(plugin_proto.event_type) {
-                Ok(proto::PluginEventType::Started) => PluginEvent::PluginStarted,
-                Ok(proto::PluginEventType::Stopped) => PluginEvent::PluginStopped,
-                Ok(proto::PluginEventType::ResultProduced) => PluginEvent::PluginResultProduced,
-                Ok(proto::PluginEventType::Unspecified) | Err(_) => {
-                    return Err(TransportError::Grpc(format!(
-                        "unknown PluginEventType value: {}",
-                        plugin_proto.event_type
-                    )));
-                }
-            };
-            Ok((
-                Event::Plugin(plugin_event),
-                Payload::Plugin(PluginEventPayload {
+            match proto::PluginEventType::try_from(plugin_proto.event_type) {
+                Ok(proto::PluginEventType::Started) => Ok(Event::PluginStarted {
                     plugin_id: plugin_proto.plugin_id,
                 }),
-            ))
+                Ok(proto::PluginEventType::Stopped) => Ok(Event::PluginStopped {
+                    plugin_id: plugin_proto.plugin_id,
+                }),
+                Ok(proto::PluginEventType::ResultProduced) => Ok(Event::PluginResultProduced {
+                    plugin_id: plugin_proto.plugin_id,
+                }),
+                Ok(proto::PluginEventType::Unspecified) | Err(_) => Err(TransportError::Grpc(
+                    format!("unknown PluginEventType value: {}", plugin_proto.event_type),
+                )),
+            }
         }
         proto::event_notification::Event::Sample(sample_proto) => {
-            let sample_event = match proto::SampleEventType::try_from(sample_proto.event_type) {
-                Ok(proto::SampleEventType::Started) => SampleEvent::SampleStarted,
-                Ok(proto::SampleEventType::Stopped) => SampleEvent::SampleStopped,
-                Ok(proto::SampleEventType::ResultProduced) => SampleEvent::SampleResultProduced,
-                Ok(proto::SampleEventType::Unspecified) | Err(_) => {
-                    return Err(TransportError::Grpc(format!(
-                        "unknown SampleEventType value: {}",
-                        sample_proto.event_type
-                    )));
-                }
-            };
-            Ok((
-                Event::Sample(sample_event),
-                Payload::Sample(SampleEventPayload {
+            match proto::SampleEventType::try_from(sample_proto.event_type) {
+                Ok(proto::SampleEventType::Started) => Ok(Event::SampleStarted {
                     sample_id: sample_proto.sample_id,
                 }),
-            ))
+                Ok(proto::SampleEventType::Stopped) => Ok(Event::SampleStopped {
+                    sample_id: sample_proto.sample_id,
+                }),
+                Ok(proto::SampleEventType::ResultProduced) => Ok(Event::SampleResultProduced {
+                    sample_id: sample_proto.sample_id,
+                }),
+                Ok(proto::SampleEventType::Unspecified) | Err(_) => Err(TransportError::Grpc(
+                    format!("unknown SampleEventType value: {}", sample_proto.event_type),
+                )),
+            }
         }
         proto::event_notification::Event::Daemon(daemon_proto) => {
-            let daemon_event = match proto::DaemonEventType::try_from(daemon_proto.event_type) {
-                Ok(proto::DaemonEventType::Shutdown) => DaemonEvent::DaemonShutdown,
-                Ok(proto::DaemonEventType::ConfigReloaded) => DaemonEvent::ConfigReloaded,
-                Ok(proto::DaemonEventType::Unspecified) | Err(_) => {
-                    return Err(TransportError::Grpc(format!(
-                        "unknown DaemonEventType value: {}",
-                        daemon_proto.event_type
-                    )));
-                }
-            };
-            // Daemon events have no matching payload enum -- use Task placeholder
-            Ok((
-                Event::Daemon(daemon_event),
-                Payload::Task(TaskEventPayload { task_id: 0 }),
-            ))
+            match proto::DaemonEventType::try_from(daemon_proto.event_type) {
+                Ok(proto::DaemonEventType::Shutdown) => Ok(Event::DaemonShutdown),
+                Ok(proto::DaemonEventType::ConfigReloaded) => Ok(Event::ConfigReloaded),
+                Ok(proto::DaemonEventType::Unspecified) | Err(_) => Err(TransportError::Grpc(
+                    format!("unknown DaemonEventType value: {}", daemon_proto.event_type),
+                )),
+            }
         }
     }
 }
 
-/// Convert an internal `Event` + `Payload` into a `TaskResult` proto message.
+/// Convert an internal `Event` into a `TaskResult` proto message.
 ///
 /// This is used by `GrpcEmitter` to send event metadata back through the
 /// `ExecuteTask` streaming response. The event description is placed in
 /// `result_name` and format is set to JSON (metadata, not binary data).
-pub fn event_to_task_result(task_id: i32, event: &Event, payload: &Payload) -> proto::TaskResult {
-    let result_name = match event {
-        Event::Task(t) => format!("task:{:?}", t),
-        Event::Plugin(p) => format!("plugin:{:?}", p),
-        Event::Sample(s) => format!("sample:{:?}", s),
-        Event::Daemon(d) => format!("daemon:{:?}", d),
-    };
+pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
+    let result_name = format!("{:?}", event);
 
-    let data = match payload {
-        Payload::Task(tp) => format!(r#"{{"task_id":{}}}"#, tp.task_id).into_bytes(),
-        Payload::Plugin(pp) => format!(r#"{{"plugin_id":{}}}"#, pp.plugin_id).into_bytes(),
-        Payload::Sample(sp) => format!(r#"{{"sample_id":{}}}"#, sp.sample_id).into_bytes(),
+    let data = match event {
+        Event::TaskCreated { task_id }
+        | Event::TaskStarting { task_id }
+        | Event::TaskCompleted { task_id }
+        | Event::TaskFailed { task_id }
+        | Event::TaskCanceled { task_id } => format!(r#"{{"task_id":{}}}"#, task_id).into_bytes(),
+        Event::PluginStarted { plugin_id }
+        | Event::PluginStopped { plugin_id }
+        | Event::PluginResultProduced { plugin_id } => {
+            format!(r#"{{"plugin_id":{}}}"#, plugin_id).into_bytes()
+        }
+        Event::SampleStarted { sample_id }
+        | Event::SampleStopped { sample_id }
+        | Event::SampleResultProduced { sample_id } => {
+            format!(r#"{{"sample_id":{}}}"#, sample_id).into_bytes()
+        }
+        Event::DaemonShutdown | Event::ConfigReloaded => b"{}".to_vec(),
     };
 
     proto::TaskResult {
@@ -180,6 +199,7 @@ pub fn event_to_task_result(task_id: i32, event: &Event, payload: &Payload) -> p
         data,
         format: proto::ResultFormat::Json.into(),
         is_final: false,
+        kind: proto::ResultKind::Result.into(),
     }
 }
 
@@ -187,102 +207,111 @@ pub fn event_to_task_result(task_id: i32, event: &Event, payload: &Payload) -> p
 mod tests {
     use super::*;
 
+    // ── Task roundtrip tests ────────────────────────────────────────
+
     #[test]
     fn test_task_created_roundtrip() {
-        let event = Event::Task(TaskEvent::TaskCreated);
-        let payload = Payload::Task(TaskEventPayload { task_id: 42 });
+        let event = Event::TaskCreated { task_id: 42 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
 
-        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
-        let (event_back, payload_back) =
-            proto_to_event(proto_notif).expect("proto_to_event should succeed");
+    #[test]
+    fn test_task_starting_roundtrip() {
+        let event = Event::TaskStarting { task_id: 10 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
 
-        match event_back {
-            Event::Task(TaskEvent::TaskCreated) => {}
-            other => panic!("expected TaskCreated, got {:?}", other),
-        }
-        match payload_back {
-            Payload::Task(ref tp) => assert_eq!(tp.task_id, 42),
-            other => panic!("expected Task payload, got {:?}", other),
-        }
+    #[test]
+    fn test_task_completed_roundtrip() {
+        let event = Event::TaskCompleted { task_id: 55 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
     }
 
     #[test]
     fn test_task_failed_roundtrip() {
-        let event = Event::Task(TaskEvent::TaskFailed);
-        let payload = Payload::Task(TaskEventPayload { task_id: 7 });
-
-        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
-        let (event_back, payload_back) =
-            proto_to_event(proto_notif).expect("proto_to_event should succeed");
-
-        match event_back {
-            Event::Task(TaskEvent::TaskFailed) => {}
-            other => panic!("expected TaskFailed, got {:?}", other),
-        }
-        match payload_back {
-            Payload::Task(ref tp) => assert_eq!(tp.task_id, 7),
-            other => panic!("expected Task payload, got {:?}", other),
-        }
+        let event = Event::TaskFailed { task_id: 7 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
     }
+
+    // ── Plugin roundtrip tests ──────────────────────────────────────
 
     #[test]
     fn test_plugin_started_roundtrip() {
-        let event = Event::Plugin(PluginEvent::PluginStarted);
-        let payload = Payload::Plugin(PluginEventPayload { plugin_id: 3 });
-
-        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
-        let (event_back, payload_back) =
-            proto_to_event(proto_notif).expect("proto_to_event should succeed");
-
-        match event_back {
-            Event::Plugin(PluginEvent::PluginStarted) => {}
-            other => panic!("expected PluginStarted, got {:?}", other),
-        }
-        match payload_back {
-            Payload::Plugin(ref pp) => assert_eq!(pp.plugin_id, 3),
-            other => panic!("expected Plugin payload, got {:?}", other),
-        }
+        let event = Event::PluginStarted { plugin_id: 3 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
     }
+
+    #[test]
+    fn test_plugin_stopped_roundtrip() {
+        let event = Event::PluginStopped { plugin_id: 15 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
+
+    #[test]
+    fn test_plugin_result_produced_roundtrip() {
+        let event = Event::PluginResultProduced { plugin_id: 8 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
+
+    // ── Sample roundtrip tests ──────────────────────────────────────
+
+    #[test]
+    fn test_sample_started_roundtrip() {
+        let event = Event::SampleStarted { sample_id: 99 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
+
+    #[test]
+    fn test_sample_stopped_roundtrip() {
+        let event = Event::SampleStopped { sample_id: 33 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
+
+    #[test]
+    fn test_sample_result_produced_roundtrip() {
+        let event = Event::SampleResultProduced { sample_id: 77 };
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
+    }
+
+    // ── Daemon roundtrip tests ──────────────────────────────────────
 
     #[test]
     fn test_daemon_shutdown_roundtrip() {
-        // Daemon events have no dedicated payload; use Task placeholder with task_id: 0
-        let event = Event::Daemon(DaemonEvent::DaemonShutdown);
-        let payload = Payload::Task(TaskEventPayload { task_id: 0 });
-
-        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
-        let (event_back, payload_back) =
-            proto_to_event(proto_notif).expect("proto_to_event should succeed");
-
-        match event_back {
-            Event::Daemon(DaemonEvent::DaemonShutdown) => {}
-            other => panic!("expected DaemonShutdown, got {:?}", other),
-        }
-        // Daemon round-trips produce placeholder Task payload
-        match payload_back {
-            Payload::Task(ref tp) => assert_eq!(tp.task_id, 0),
-            other => panic!("expected placeholder Task payload, got {:?}", other),
-        }
+        let event = Event::DaemonShutdown;
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
     }
 
     #[test]
-    fn test_sample_event_roundtrip() {
-        let event = Event::Sample(SampleEvent::SampleStarted);
-        let payload = Payload::Sample(SampleEventPayload { sample_id: 99 });
-
-        let proto_notif = event_to_proto(&event, &payload).expect("event_to_proto should succeed");
-        let (event_back, payload_back) =
-            proto_to_event(proto_notif).expect("proto_to_event should succeed");
-
-        match event_back {
-            Event::Sample(SampleEvent::SampleStarted) => {}
-            other => panic!("expected SampleEvent::SampleStarted, got {:?}", other),
-        }
-        match payload_back {
-            Payload::Sample(ref sp) => assert_eq!(sp.sample_id, 99),
-            other => panic!("expected Sample payload, got {:?}", other),
-        }
+    fn test_config_reloaded_roundtrip() {
+        let event = Event::ConfigReloaded;
+        let proto_notif = event_to_proto(&event).expect("event_to_proto should succeed");
+        let event_back = proto_to_event(proto_notif).expect("proto_to_event should succeed");
+        assert_eq!(event, event_back);
     }
+
+    // ── Error tests ─────────────────────────────────────────────────
 
     #[test]
     fn test_empty_notification_fails() {
@@ -292,5 +321,45 @@ mod tests {
             result.is_err(),
             "empty notification should produce an error"
         );
+    }
+
+    // ── event_to_task_result tests ──────────────────────────────────
+
+    #[test]
+    fn test_event_to_task_result_task() {
+        let event = Event::TaskCreated { task_id: 42 };
+        let result = event_to_task_result(100, &event);
+        assert_eq!(result.task_id, 100);
+        assert!(result.result_name.contains("TaskCreated"));
+        assert_eq!(result.data, br#"{"task_id":42}"#);
+        assert_eq!(result.format, i32::from(proto::ResultFormat::Json));
+        assert!(!result.is_final);
+    }
+
+    #[test]
+    fn test_event_to_task_result_plugin() {
+        let event = Event::PluginStarted { plugin_id: 5 };
+        let result = event_to_task_result(200, &event);
+        assert_eq!(result.task_id, 200);
+        assert!(result.result_name.contains("PluginStarted"));
+        assert_eq!(result.data, br#"{"plugin_id":5}"#);
+    }
+
+    #[test]
+    fn test_event_to_task_result_sample() {
+        let event = Event::SampleStopped { sample_id: 11 };
+        let result = event_to_task_result(300, &event);
+        assert_eq!(result.task_id, 300);
+        assert!(result.result_name.contains("SampleStopped"));
+        assert_eq!(result.data, br#"{"sample_id":11}"#);
+    }
+
+    #[test]
+    fn test_event_to_task_result_daemon() {
+        let event = Event::DaemonShutdown;
+        let result = event_to_task_result(400, &event);
+        assert_eq!(result.task_id, 400);
+        assert!(result.result_name.contains("DaemonShutdown"));
+        assert_eq!(result.data, b"{}");
     }
 }

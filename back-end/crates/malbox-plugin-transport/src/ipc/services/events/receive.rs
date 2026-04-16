@@ -1,7 +1,7 @@
 //! Event receiver for IPC communication.
 
 use crate::error::{Result, TransportError};
-use crate::messages::events::{Event, Payload};
+use crate::messages::events::{Event, IpcPayload};
 use crate::traits::TransportReceiver;
 
 use core::time::Duration;
@@ -14,7 +14,7 @@ use iceoryx2::prelude::*;
 /// Used to receive events and payloads over a named IPC channel.
 pub struct EventReceiver {
     listener: Listener<iceoryx2::service::ipc_threadsafe::Service>,
-    subscriber: Subscriber<iceoryx2::service::ipc_threadsafe::Service, Payload, ()>,
+    subscriber: Subscriber<iceoryx2::service::ipc_threadsafe::Service, IpcPayload, ()>,
 }
 
 impl EventReceiver {
@@ -47,7 +47,7 @@ impl EventReceiver {
                     .try_into()
                     .map_err(|e| TransportError::Ipc(Box::new(e)))?,
             )
-            .publish_subscribe::<Payload>()
+            .publish_subscribe::<IpcPayload>()
             .open_or_create()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?;
 
@@ -64,60 +64,60 @@ impl EventReceiver {
 }
 
 impl TransportReceiver for EventReceiver {
-    fn wait(&self, timeout: Duration) -> Result<Option<(Event, Payload)>> {
+    fn wait(&self, timeout: Duration) -> Result<Option<Event>> {
         if let Some(event_id) = self
             .listener
             .timed_wait_one(timeout)
             .map_err(|e| TransportError::Ipc(Box::new(e)))?
         {
-            let event = Event::from_id(event_id.as_value())?;
-
             if let Some(sample) = self
                 .subscriber
                 .receive()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
             {
-                return Ok(Some((event, sample.payload().clone())));
+                let ipc_payload = sample.payload();
+                let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+                return Ok(Some(event));
             }
         }
 
         Ok(None)
     }
 
-    fn wait_blocking(&self) -> Result<(Event, Payload)> {
+    fn wait_blocking(&self) -> Result<Event> {
         loop {
             if let Some(event_id) = self
                 .listener
                 .blocking_wait_one()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
             {
-                let event = Event::from_id(event_id.as_value())?;
-
                 if let Some(sample) = self
                     .subscriber
                     .receive()
                     .map_err(|e| TransportError::Ipc(Box::new(e)))?
                 {
-                    return Ok((event, sample.payload().clone()));
+                    let ipc_payload = sample.payload();
+                    let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+                    return Ok(event);
                 }
             }
         }
     }
 
-    fn try_recv(&self) -> Result<Option<(Event, Payload)>> {
+    fn try_recv(&self) -> Result<Option<Event>> {
         if let Some(event_id) = self
             .listener
             .try_wait_one()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?
         {
-            let event = Event::from_id(event_id.as_value())?;
-
             if let Some(sample) = self
                 .subscriber
                 .receive()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
             {
-                return Ok(Some((event, sample.payload().clone())));
+                let ipc_payload = sample.payload();
+                let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+                return Ok(Some(event));
             }
         }
 

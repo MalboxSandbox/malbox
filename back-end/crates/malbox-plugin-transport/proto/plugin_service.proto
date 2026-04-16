@@ -20,6 +20,12 @@ service GuestPluginService {
   rpc PushFile(stream FileChunk) returns (FileTransferResponse);
   rpc PullFile(PullFileRequest) returns (stream FileChunk);
   rpc ExecuteCommand(ExecRequest) returns (ExecResponse);
+
+  // Log streaming — daemon pulls logs from guest plugin
+  rpc StreamLogs(LogStreamRequest) returns (stream LogEntry);
+
+  // Large result transfer — daemon pulls stashed results by opaque handle
+  rpc PullResult(PullResultRequest) returns (stream ResultChunk);
 }
 
 // --- Lifecycle messages ---
@@ -64,12 +70,38 @@ message TaskResult {
   bytes data = 3;
   ResultFormat format = 4;
   bool is_final = 5;
+  ResultKind kind = 6;
 }
 
 enum ResultFormat {
   RESULT_FORMAT_UNSPECIFIED = 0;
   RESULT_FORMAT_JSON = 1;
   RESULT_FORMAT_BYTES = 2;
+}
+
+enum ResultKind {
+  RESULT_KIND_RESULT = 0;
+  RESULT_KIND_PROGRESS = 1;
+  RESULT_KIND_READY = 2;
+  RESULT_KIND_RESULT_REF = 3;
+}
+
+// Large-result reference: carried in TaskResult.data when kind=RESULT_KIND_RESULT_REF.
+message ResultRef {
+  string handle = 1;
+  string result_name = 2;
+  ResultFormat format = 3;
+  uint64 size_bytes = 4;
+}
+
+message PullResultRequest {
+  string handle = 1;
+}
+
+message ResultChunk {
+  bytes data = 1;
+  uint32 index = 2;
+  bool is_last = 3;
 }
 
 // --- Event messages ---
@@ -94,6 +126,7 @@ enum TaskEventType {
   TASK_EVENT_TYPE_STARTING = 2;
   TASK_EVENT_TYPE_COMPLETED = 3;
   TASK_EVENT_TYPE_FAILED = 4;
+  TASK_EVENT_TYPE_CANCELED = 5;
 }
 
 message PluginEventProto {
@@ -165,4 +198,27 @@ message ExecResponse {
   optional int32 exit_code = 1;
   bytes stdout = 2;
   bytes stderr = 3;
+  optional uint32 pid = 4;
+}
+
+// --- Log streaming messages ---
+
+enum LogLevel {
+  LOG_LEVEL_TRACE = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+message LogStreamRequest {
+  bool include_buffered = 1;
+}
+
+message LogEntry {
+  uint64 timestamp_ns = 1;
+  LogLevel level = 2;
+  string target = 3;
+  string message = 4;
+  map<string, string> fields = 5;
 }

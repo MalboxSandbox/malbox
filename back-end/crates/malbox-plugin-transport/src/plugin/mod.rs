@@ -9,4 +9,4 @@ mod server;
 
 pub use emitter::GrpcEmitter;
 pub use receiver::GrpcReceiver;
-pub use server::{GrpcServer, GuestPluginHandler};
+pub use server::{GrpcServer, GuestPluginHandler, LogEntryStream, ResultChunkStream};

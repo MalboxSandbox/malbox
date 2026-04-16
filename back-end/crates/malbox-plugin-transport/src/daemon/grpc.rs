@@ -7,7 +7,7 @@ use crate::error::{Result, TransportError};
 use crate::grpc::conversions;
 use crate::grpc::proto;
 use crate::grpc::proto::guest_plugin_service_client::GuestPluginServiceClient;
-use crate::messages::events::{Event, Payload};
+use crate::messages::events::Event;
 use std::collections::HashMap;
 
 /// Daemon-side gRPC client wrapping the generated tonic stub.
@@ -81,12 +81,8 @@ impl GrpcClient {
     }
 
     /// Notify the guest plugin of a system-wide event.
-    pub async fn notify_event(
-        &mut self,
-        event: &Event,
-        payload: &Payload,
-    ) -> Result<proto::EventAck> {
-        let notification = conversions::event_to_proto(event, payload)?;
+    pub async fn notify_event(&mut self, event: &Event) -> Result<proto::EventAck> {
+        let notification = conversions::event_to_proto(event)?;
         let response = self
             .inner
             .notify_event(notification)
@@ -142,6 +138,41 @@ impl GrpcClient {
         Ok(buf)
     }
 
+    /// Start streaming logs from the guest plugin.
+    ///
+    /// Returns a streaming response of `LogEntry` messages. The stream stays
+    /// open for the plugin's lifetime.
+    pub async fn stream_logs(
+        &mut self,
+        include_buffered: bool,
+    ) -> Result<tonic::Streaming<proto::LogEntry>> {
+        let request = proto::LogStreamRequest { include_buffered };
+        let response = self
+            .inner
+            .stream_logs(request)
+            .await
+            .map_err(TransportError::GrpcStatus)?;
+        Ok(response.into_inner())
+    }
+
+    /// Pull a stashed large result from the guest plugin by handle.
+    ///
+    /// Returns a streaming response of `ResultChunk` messages. The caller
+    /// concatenates `chunk.data` in `index` order until a chunk with
+    /// `is_last == true` is received.
+    pub async fn pull_result(
+        &mut self,
+        handle: String,
+    ) -> Result<tonic::Streaming<proto::ResultChunk>> {
+        let request = proto::PullResultRequest { handle };
+        let response = self
+            .inner
+            .pull_result(request)
+            .await
+            .map_err(TransportError::GrpcStatus)?;
+        Ok(response.into_inner())
+    }
+
     /// Execute a command on the guest.
     pub async fn execute_command(
         &mut self,
@@ -166,5 +197,18 @@ impl GrpcClient {
             .await
             .map_err(TransportError::GrpcStatus)?;
         Ok(response.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Compile-time check: pull_result exists with the expected signature.
+    #[allow(dead_code)]
+    fn _pull_result_signature_compiles(client: &mut GrpcClient) {
+        let _fut: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<tonic::Streaming<proto::ResultChunk>>>>,
+        > = Box::pin(client.pull_result("handle".to_string()));
     }
 }

@@ -10,7 +10,7 @@ use crate::grpc::proto;
 use crate::grpc::proto::guest_plugin_service_server::{
     GuestPluginService, GuestPluginServiceServer,
 };
-use crate::messages::events::{Event, Payload};
+use crate::messages::events::Event;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -29,6 +29,14 @@ pub type TaskResultStream =
 /// The stream type returned from the `pull_file` RPC method.
 pub type FileChunkStream =
     Pin<Box<dyn tokio_stream::Stream<Item = Result<proto::FileChunk, Status>> + Send>>;
+
+/// The stream type returned from the `stream_logs` RPC method.
+pub type LogEntryStream =
+    Pin<Box<dyn tokio_stream::Stream<Item = Result<proto::LogEntry, Status>> + Send>>;
+
+/// The stream type returned from the `pull_result` RPC method.
+pub type ResultChunkStream =
+    Pin<Box<dyn tokio_stream::Stream<Item = Result<proto::ResultChunk, Status>> + Send>>;
 
 // ---------------------------------------------------------------------------
 // GuestPluginHandler trait
@@ -75,7 +83,7 @@ pub trait GuestPluginHandler: Send + Sync + 'static {
     /// Called when the daemon broadcasts a system event to the plugin.
     ///
     /// Returns `Ok(())` on success or an error message on failure.
-    async fn on_event(&self, event: Event, payload: Payload) -> Result<(), String>;
+    async fn on_event(&self, event: Event) -> Result<(), String>;
 
     /// Handle an incoming file push from the daemon.
     async fn on_push_file(&self, dest: &str, data: Vec<u8>) -> Result<(), String>;
@@ -93,6 +101,15 @@ pub trait GuestPluginHandler: Send + Sync + 'static {
         timeout_ms: Option<u64>,
         background: bool,
     ) -> Result<proto::ExecResponse, String>;
+
+    /// Called when the daemon requests the plugin's log stream.
+    async fn on_stream_logs(&self, include_buffered: bool) -> LogEntryStream;
+
+    /// Called when the daemon requests a large stashed result by opaque handle.
+    ///
+    /// Implementors should stream the result data in chunks. Return an error
+    /// string if the handle is unknown or the result has expired.
+    async fn on_pull_result(&self, handle: String) -> Result<ResultChunkStream, String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +152,8 @@ impl<H: GuestPluginHandler> GrpcServer<H> {
 impl<H: GuestPluginHandler> GuestPluginService for GrpcServer<H> {
     type ExecuteTaskStream = TaskResultStream;
     type PullFileStream = FileChunkStream;
+    type StreamLogsStream = LogEntryStream;
+    type PullResultStream = ResultChunkStream;
 
     // --- Initialize ---
 
@@ -214,7 +233,7 @@ impl<H: GuestPluginHandler> GuestPluginService for GrpcServer<H> {
         let notification = request.into_inner();
 
         match conversions::proto_to_event(notification) {
-            Ok((event, payload)) => match self.handler.on_event(event, payload).await {
+            Ok(event) => match self.handler.on_event(event).await {
                 Ok(()) => Ok(Response::new(proto::EventAck {
                     success: true,
                     error_message: String::new(),
@@ -316,6 +335,30 @@ impl<H: GuestPluginHandler> GuestPluginService for GrpcServer<H> {
         {
             Ok(response) => Ok(Response::new(response)),
             Err(e) => Err(Status::internal(e)),
+        }
+    }
+
+    // --- StreamLogs (server-streaming) ---
+
+    async fn stream_logs(
+        &self,
+        request: Request<proto::LogStreamRequest>,
+    ) -> Result<Response<Self::StreamLogsStream>, Status> {
+        let req = request.into_inner();
+        let stream = self.handler.on_stream_logs(req.include_buffered).await;
+        Ok(Response::new(stream))
+    }
+
+    // --- PullResult (server-streaming) ---
+
+    async fn pull_result(
+        &self,
+        request: Request<proto::PullResultRequest>,
+    ) -> Result<Response<Self::PullResultStream>, Status> {
+        let req = request.into_inner();
+        match self.handler.on_pull_result(req.handle).await {
+            Ok(stream) => Ok(Response::new(stream)),
+            Err(e) => Err(Status::not_found(e)),
         }
     }
 }
