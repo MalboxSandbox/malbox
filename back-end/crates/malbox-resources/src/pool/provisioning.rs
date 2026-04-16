@@ -437,6 +437,12 @@ impl MachinePool {
                 id: provider_id.to_string(),
             })?;
 
+        // Validate provisioner config early — before starting the VM.
+        // This catches errors like missing playbook paths without the cost
+        // of booting the VM and waiting for connectivity.
+        let provisioner = create_provisioner(&step.provisioner_type, &step.config)
+            .map_err(|e| ResourceError::Provisioner(e.to_string()))?;
+
         // Revert to a snapshot so we provision from a clean state
         let revert_name = revert_to.unwrap_or(BASE_SNAPSHOT_NAME);
 
@@ -492,10 +498,6 @@ impl MachinePool {
         );
 
         wait_for_connectivity(ip, mgmt_port, std::time::Duration::from_secs(180)).await?;
-
-        // Run the provisioner
-        let provisioner = create_provisioner(&step.provisioner_type, &step.config)
-            .map_err(|e| ResourceError::Provisioner(e.to_string()))?;
 
         let endpoint = malbox_machinery::machine::MachineEndpoint {
             address: ip,
