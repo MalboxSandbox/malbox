@@ -1,8 +1,6 @@
 { pkgs, lib, config, inputs, ... }:
 
 let
-  unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
-
   # Windows cross-compilation packages
   # dontDisableStatic preserves the .a static archives needed by the linker.
   # See: https://discourse.nixos.org/t/statically-linked-mingw-binaries/38395/3
@@ -68,7 +66,6 @@ in {
     packer
     ansible
     python3Packages.pywinrm
-    unstable.cocogitto
     protoc-gen-rust
     protobuf
     cargo-nextest
