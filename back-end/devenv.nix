@@ -36,7 +36,7 @@ in {
   env = {
     LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
     BINDGEN_EXTRA_CLANG_ARGS = ''-I"${pkgs.glibc.dev}/include"'';
-    LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.llvm_18 pkgs.clang_18 pkgs.libclang.lib ];
+    LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.llvm_18 pkgs.clang_18 pkgs.libclang.lib pkgs.libvirt ];
     DATABASE_URL = "postgres://postgres@localhost:5432/malbox_db";
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingwCc}/bin/${mingwCc.targetPrefix}gcc";
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${mingwCrt}/lib -L native=${mingwPthreadsWin}/lib -L native=${mingwPthreads}/lib -L native=${mingwMcfgthreads}/lib";
