@@ -26,27 +26,30 @@ pub use task::{PluginContext, PluginResult, PluginStatus, ResourceAllocation, Ta
 ///
 /// Returns a sender for submitting tasks and a shutdown sender.
 /// The scheduler runs in a background tokio task.
+#[allow(clippy::too_many_arguments)]
 pub async fn init_scheduler(
     db_pool: PgPool,
     machine_pool: Arc<MachinePool>,
     plugin_manager: Arc<PluginManager>,
-    worker_count: usize,
+    max_workers: usize,
+    min_workers: usize,
+    idle_timeout_ms: u64,
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
 ) -> Result<(mpsc::Sender<Task>, oneshot::Sender<()>)> {
     info!("Initializing scheduler");
 
-    // Create channels
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-    // Create and run scheduler in background
     let scheduler = scheduler::Scheduler::new(
         db_pool,
         machine_pool,
         plugin_manager,
-        worker_count,
+        max_workers,
+        min_workers,
+        idle_timeout_ms,
         transport,
         sample_store,
         result_store,
@@ -58,6 +61,9 @@ pub async fn init_scheduler(
         }
     });
 
-    info!(worker_count, "Scheduler started");
+    info!(
+        max_workers,
+        min_workers, idle_timeout_ms, "Scheduler started"
+    );
     Ok((task_tx, shutdown_tx))
 }

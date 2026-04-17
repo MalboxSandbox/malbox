@@ -28,8 +28,12 @@ environment = "development"
 # log_level = "info"
 # Enable debug mode
 # debug = false
-# Number of worker threads for task processing (default: 4)
-# worker_threads = 4
+# Maximum number of worker tasks (default: 4)
+# max_workers = 4
+# Minimum always-alive workers (default: 1)
+# min_workers = 1
+# Idle timeout for non-baseline workers, in milliseconds (default: 60000)
+# idle_timeout_ms = 60000
 
 # -----------------------------------------------------------------------------
 # HTTP Server

@@ -34,8 +34,12 @@ pub struct GeneralConfig {
     pub log_level: LogLevel,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default = "default_worker_threads")]
-    pub worker_threads: usize,
+    #[serde(default = "default_max_workers")]
+    pub max_workers: usize,
+    #[serde(default = "default_min_workers")]
+    pub min_workers: usize,
+    #[serde(default = "default_idle_timeout_ms")]
+    pub idle_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +82,14 @@ fn default_log_level() -> LogLevel {
     LogLevel::Info
 }
 
-fn default_worker_threads() -> usize {
+fn default_max_workers() -> usize {
     4
+}
+
+fn default_min_workers() -> usize {
+    1
+}
+
+fn default_idle_timeout_ms() -> u64 {
+    60_000
 }

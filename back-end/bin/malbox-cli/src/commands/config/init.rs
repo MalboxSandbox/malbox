@@ -110,7 +110,9 @@ fn create_default_config(paths: PathConfig) -> Result<Config> {
         environment: Environment::Development,
         log_level: LogLevel::Info,
         debug: false,
-        worker_threads: 4,
+        max_workers: 4,
+        min_workers: 1,
+        idle_timeout_ms: 60_000,
     };
 
     let http = HttpConfig {

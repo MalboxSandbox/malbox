@@ -24,47 +24,44 @@ pub struct Scheduler {
     task_store: Arc<TaskStore>,
     machine_pool: Arc<MachinePool>,
     plugin_manager: Arc<PluginManager>,
-    worker_pool: WorkerPool,
-    worker_count: usize,
+    worker_pool: Arc<WorkerPool>,
+    max_workers: usize,
+    min_workers: usize,
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
 }
 
 impl Scheduler {
-    /// Create a new scheduler.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: PgPool,
         machine_pool: Arc<MachinePool>,
         plugin_manager: Arc<PluginManager>,
-        worker_count: usize,
+        max_workers: usize,
+        min_workers: usize,
+        idle_timeout_ms: u64,
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
         result_store: Arc<ResultStore>,
     ) -> Self {
+        let idle_timeout = std::time::Duration::from_millis(idle_timeout_ms);
         Self {
             task_queue: Arc::new(TaskQueue::new()),
             task_store: Arc::new(TaskStore::new(db_pool)),
             machine_pool,
             plugin_manager,
-            worker_pool: WorkerPool::new(worker_count),
-            worker_count,
+            worker_pool: Arc::new(WorkerPool::new(max_workers, min_workers, idle_timeout)),
+            max_workers,
+            min_workers,
             transport,
             sample_store,
             result_store,
         }
     }
 
-    /// Run the scheduler.
-    ///
-    /// This method:
-    /// 1. Loads pending tasks from the database
-    /// 2. Spawns an ingestion task that reads from the task receiver
-    /// 3. Spawns workers via the WorkerPool
-    /// 4. Spawns a worker event listener
-    /// 5. Waits for shutdown signal
     pub async fn run(
-        mut self,
+        self,
         mut task_rx: mpsc::Receiver<Task>,
         shutdown_rx: oneshot::Receiver<()>,
     ) -> Result<()> {
@@ -75,31 +72,31 @@ impl Scheduler {
             Err(e) => error!(error = %e, "Failed to reset orphaned tasks"),
         }
 
-        // 2. Load pending tasks from DB
-        match self.task_store.load_pending_tasks().await {
+        // 2. Load pending tasks from DB.
+        let recovered_count = match self.task_store.load_pending_tasks().await {
             Ok(pending) => {
-                if !pending.is_empty() {
-                    info!(
-                        count = pending.len(),
-                        "Recovered pending tasks from database"
-                    );
+                let count = pending.len();
+                if count > 0 {
+                    info!(count, "Recovered pending tasks from database");
                     let entries: Vec<(i32, i64)> = pending
                         .iter()
                         .filter_map(|t| t.id.map(|id| (id, t.priority)))
                         .collect();
                     self.task_queue.enqueue_batch(entries).await;
                 }
+                count
             }
             Err(e) => {
                 error!(error = %e, "Failed to load pending tasks from database");
+                0
             }
-        }
+        };
 
-        // 2. Create worker event channel
+        // 3. Create worker event channel.
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(100);
 
-        // 3. Spawn workers
-        self.worker_pool.spawn_workers(
+        // 4. Spawn the baseline pool.
+        self.worker_pool.spawn_initial(
             Arc::clone(&self.task_queue),
             Arc::clone(&self.task_store),
             Arc::clone(&self.machine_pool),
@@ -110,29 +107,41 @@ impl Scheduler {
             Arc::clone(&self.result_store),
         );
 
-        info!(workers = self.worker_count, "Scheduler running");
+        info!(
+            max_workers = self.max_workers,
+            min_workers = self.min_workers,
+            "Scheduler running"
+        );
+
+        // 5. For each recovered pending task (beyond the baseline), give the
+        //    pool a chance to scale up. `ensure_capacity` caps internally.
+        if recovered_count > self.min_workers {
+            let additional = recovered_count - self.min_workers;
+            for _ in 0..additional {
+                self.worker_pool.ensure_capacity();
+            }
+        }
 
         let task_queue = Arc::clone(&self.task_queue);
         let task_store = Arc::clone(&self.task_store);
+        let worker_pool = Arc::clone(&self.worker_pool);
 
-        // 4. Spawn task ingestion loop
+        // 6. Spawn task ingestion loop.
         let ingest_handle = tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
-                // Should throw error instead of putting arbitrary `-1`.
                 let task_id = task.id.unwrap_or(-1);
                 let priority = task.priority;
 
-                // Cache the task in the store
                 task_store.cache_task(task).await;
-
-                // Enqueue for workers to pick up
                 task_queue.enqueue(task_id, priority).await;
+                worker_pool.ensure_capacity();
+
                 info!(task_id, priority, "Task ingested into queue");
             }
             info!("Task ingestion channel closed");
         });
 
-        // 5. Spawn worker event listener
+        // 7. Spawn worker event listener.
         let event_handle = tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 match &event {
@@ -167,11 +176,10 @@ impl Scheduler {
             }
         });
 
-        // 6. Wait for shutdown signal
+        // 8. Wait for shutdown signal.
         let _ = shutdown_rx.await;
         info!("Scheduler received shutdown signal");
 
-        // Graceful shutdown
         self.worker_pool.shutdown().await;
         ingest_handle.abort();
         event_handle.abort();

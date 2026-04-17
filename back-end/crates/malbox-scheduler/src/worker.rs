@@ -82,6 +82,27 @@ impl std::fmt::Display for WorkerId {
     }
 }
 
+/// Increments a shared busy counter on construction and decrements
+/// it on drop. Used by workers to signal "currently executing a task"
+/// to the `WorkerPool` so it can decide whether to spawn more workers.
+struct BusyGuard {
+    counter: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl BusyGuard {
+    fn new(counter: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self { counter }
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        self.counter
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 /// A worker that executes tasks by competing for them from a shared queue.
 pub struct Worker {
     id: WorkerId,
@@ -93,6 +114,8 @@ pub struct Worker {
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
+    busy_count: Arc<std::sync::atomic::AtomicUsize>,
+    idle_timeout: Option<Duration>,
 }
 
 impl Worker {
@@ -106,6 +129,8 @@ impl Worker {
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
         result_store: Arc<ResultStore>,
+        busy_count: Arc<std::sync::atomic::AtomicUsize>,
+        idle_timeout: Option<Duration>,
     ) -> Self {
         Self {
             id: WorkerId::new(),
@@ -117,6 +142,8 @@ impl Worker {
             transport,
             sample_store,
             result_store,
+            busy_count,
+            idle_timeout,
         }
     }
 
@@ -148,14 +175,31 @@ impl Worker {
         });
 
         loop {
-            // Wait for a task to become available or shutdown signal.
+            // Wait for task, shutdown, or idle-timeout.
             {
                 let mut shutdown_rx = shutdown.clone();
-                tokio::select! {
-                    _ = notifier.notified() => {},
-                    _ = shutdown_rx.wait_for(|v| *v) => {
-                        info!(worker_id = %self.id, "Worker received shutdown signal");
-                        break;
+                match self.idle_timeout {
+                    None => {
+                        tokio::select! {
+                            _ = notifier.notified() => {}
+                            _ = shutdown_rx.wait_for(|v| *v) => {
+                                info!(worker_id = %self.id, "Worker received shutdown signal");
+                                break;
+                            }
+                        }
+                    }
+                    Some(timeout) => {
+                        tokio::select! {
+                            _ = notifier.notified() => {}
+                            _ = shutdown_rx.wait_for(|v| *v) => {
+                                info!(worker_id = %self.id, "Worker received shutdown signal");
+                                break;
+                            }
+                            _ = tokio::time::sleep(timeout) => {
+                                info!(worker_id = %self.id, "Worker idle-timeout, exiting");
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -192,7 +236,6 @@ impl Worker {
                 }
                 Ok(TaskOutcome::Requeued) => {
                     // Task was re-enqueued because no machine was available.
-                    // Not a completion — just continue the loop.
                 }
                 Ok(TaskOutcome::TimedOut { analysis_secs }) => {
                     warn!(worker_id = %self.id, task_id, analysis_secs, "Task analysis timed out");
@@ -231,6 +274,7 @@ impl Worker {
                         .await;
                 }
             }
+            // `_busy` dropped at end of each loop iteration -> fetch_sub happens here.
         }
 
         info!(worker_id = %self.id, "Worker stopped");
@@ -296,6 +340,12 @@ impl Worker {
         };
         let machine_id = db_machine.id.expect("acquired machine has id");
         info!(task_id, machine_id, "Machine acquired");
+
+        // Mark worker as busy only now that it holds a machine. Workers that
+        // re-enqueued waiting for capacity do not count toward backpressure,
+        // so `ensure_capacity` does not spawn redundant workers that would
+        // just requeue themselves.
+        let _busy = BusyGuard::new(Arc::clone(&self.busy_count));
 
         // --- Post-acquire: all paths guarded by unconditional cleanup ---
         let analysis_secs = if task.timeout > 0 {
@@ -724,5 +774,36 @@ impl Worker {
         if let Err(e) = self.plugin_manager.emitter().emit(event) {
             error!(error = %e, "Failed to emit task event");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BusyGuard;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn busy_guard_increments_on_new_and_decrements_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        assert_eq!(counter.load(Ordering::Acquire), 0);
+
+        let guard = BusyGuard::new(Arc::clone(&counter));
+        assert_eq!(counter.load(Ordering::Acquire), 1);
+
+        drop(guard);
+        assert_eq!(counter.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn busy_guard_nested_counts_correctly() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let g1 = BusyGuard::new(Arc::clone(&counter));
+        let g2 = BusyGuard::new(Arc::clone(&counter));
+        assert_eq!(counter.load(Ordering::Acquire), 2);
+        drop(g1);
+        assert_eq!(counter.load(Ordering::Acquire), 1);
+        drop(g2);
+        assert_eq!(counter.load(Ordering::Acquire), 0);
     }
 }
