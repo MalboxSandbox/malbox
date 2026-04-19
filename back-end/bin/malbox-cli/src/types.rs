@@ -17,9 +17,9 @@ impl From<PlatformType> for InfraPlatformType {
     }
 }
 
-#[derive(Clone, ValueEnum, Debug, Serialize, Deserialize)]
+#[derive(Clone, ValueEnum, Debug, Serialize, Deserialize, Default)]
 pub enum OutputFormat {
+    #[default]
     Text,
     Json,
-    Yaml,
 }

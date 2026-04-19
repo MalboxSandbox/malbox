@@ -2,6 +2,8 @@ use crate::api::ApiClient;
 use crate::api::machines::ProvisionRequest;
 use crate::commands::{Command, Context};
 use crate::error::Result;
+use crate::utils::format::{self, Detail, Table, display_json};
+use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -17,12 +19,12 @@ enum MachineCommands {
     List,
     /// Get details of a specific machine
     Get(GetArgs),
-    /// List snapshots for a machine
-    Snapshots(SnapshotsArgs),
+    /// Manage snapshots for a machine
+    Snapshot(SnapshotCommand),
     /// Run a provisioning step against a machine
     Provision(ProvisionArgs),
     /// List provision run history for a machine
-    Provisions(ProvisionsArgs),
+    ProvisionHistory(ProvisionHistoryArgs),
 }
 
 #[derive(Parser)]
@@ -31,14 +33,41 @@ struct GetArgs {
     id: i32,
 }
 
+// -- Snapshot subcommand group --
+
 #[derive(Parser)]
-struct SnapshotsArgs {
-    /// Machine ID
-    id: i32,
+#[command(about = "Manage machine snapshots")]
+struct SnapshotCommand {
+    #[command(subcommand)]
+    command: SnapshotCommands,
+}
+
+#[derive(Subcommand)]
+enum SnapshotCommands {
+    /// List snapshots for a machine
+    List(SnapshotListArgs),
+    /// Delete a snapshot (and its associated provision runs)
+    Delete(SnapshotDeleteArgs),
 }
 
 #[derive(Parser)]
-struct ProvisionsArgs {
+struct SnapshotListArgs {
+    /// Machine ID
+    machine_id: i32,
+}
+
+#[derive(Parser)]
+struct SnapshotDeleteArgs {
+    /// Machine ID
+    machine_id: i32,
+    /// Snapshot name (e.g., "with-yara")
+    snapshot_name: String,
+}
+
+// -- Provision args --
+
+#[derive(Parser)]
+struct ProvisionHistoryArgs {
     /// Machine ID
     id: i32,
 }
@@ -69,9 +98,12 @@ impl Command for MachineCommand {
         match self.command {
             MachineCommands::List => list(&ctx.api).await,
             MachineCommands::Get(args) => get(&ctx.api, args).await,
-            MachineCommands::Snapshots(args) => snapshots(&ctx.api, args).await,
+            MachineCommands::Snapshot(cmd) => match cmd.command {
+                SnapshotCommands::List(args) => snapshot_list(&ctx.api, args).await,
+                SnapshotCommands::Delete(args) => snapshot_delete(&ctx.api, args).await,
+            },
             MachineCommands::Provision(args) => provision(&ctx.api, args).await,
-            MachineCommands::Provisions(args) => provisions(&ctx.api, args).await,
+            MachineCommands::ProvisionHistory(args) => provision_history(&ctx.api, args).await,
         }
     }
 }
@@ -80,29 +112,32 @@ async fn list(api: &ApiClient) -> Result<()> {
     let machines = api.list_machines().await?;
 
     if machines.is_empty() {
-        println!("No machines found.");
+        format::empty("No machines found.");
         return Ok(());
     }
 
-    println!(
-        "{:<6} {:<20} {:<10} {:<8} {:<15} {:<15}",
-        "ID", "NAME", "PLATFORM", "ARCH", "STATUS", "IP"
-    );
-    println!("{}", "-".repeat(74));
+    let mut table = Table::new(&[
+        ("ID", 6),
+        ("NAME", 20),
+        ("PLATFORM", 10),
+        ("ARCH", 8),
+        ("STATUS", 15),
+        ("IP", 15),
+    ]);
 
     for m in &machines {
-        println!(
-            "{:<6} {:<20} {:<10} {:<8} {:<15} {:<15}",
+        table.add_row(vec![
             m.id.map(|id| id.to_string()).unwrap_or_default(),
-            m.name,
+            m.name.clone(),
             display_json(&m.platform),
             display_json(&m.arch),
             display_json(&m.status),
-            m.ip.as_deref().unwrap_or("-"),
-        );
+            m.ip.as_deref().unwrap_or("-").to_string(),
+        ]);
     }
 
-    println!("\nTotal: {} machine(s)", machines.len());
+    table.print();
+    format::total(machines.len(), "machine");
     Ok(())
 }
 
@@ -112,22 +147,22 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
     Ok(())
 }
 
-async fn snapshots(api: &ApiClient, args: SnapshotsArgs) -> Result<()> {
-    let snaps = api.list_snapshots(args.id).await?;
+async fn snapshot_list(api: &ApiClient, args: SnapshotListArgs) -> Result<()> {
+    let snaps = api.list_snapshots(args.machine_id).await?;
 
     if snaps.is_empty() {
-        println!("No snapshots for machine {}.", args.id);
+        format::empty(format!("No snapshots for machine {}.", args.machine_id));
         return Ok(());
     }
 
-    println!(
-        "{:<8} {:<20} {:<8} {:<20}",
-        "ACTIVE", "NAME", "TAGS", "CREATED"
-    );
-    println!("{}", "-".repeat(56));
+    let mut table = Table::new(&[("ACTIVE", 8), ("NAME", 20), ("TAGS", 8), ("CREATED", 20)]);
 
     for s in &snaps {
-        let active = if s.is_active { "  ●" } else { "" };
+        let active = if s.is_active {
+            "\u{25cf}".to_string()
+        } else {
+            String::new()
+        };
         let tags = s
             .tags
             .as_ref()
@@ -136,56 +171,56 @@ async fn snapshots(api: &ApiClient, args: SnapshotsArgs) -> Result<()> {
         let created = s
             .created_at
             .as_ref()
-            .map(|v| display_json(v))
+            .map(display_json)
             .unwrap_or_else(|| "-".to_string());
 
-        println!("{:<8} {:<20} {:<8} {:<20}", active, s.name, tags, created);
+        table.add_row(vec![active, s.name.clone(), tags, created]);
     }
 
-    println!("\nTotal: {} snapshot(s)", snaps.len());
+    table.print();
+    format::total(snaps.len(), "snapshot");
+    Ok(())
+}
+
+async fn snapshot_delete(api: &ApiClient, args: SnapshotDeleteArgs) -> Result<()> {
+    let spinner = Spinner::start(format!("Deleting snapshot '{}'...", args.snapshot_name));
+    api.delete_snapshot(args.machine_id, &args.snapshot_name)
+        .await?;
+    drop(spinner);
+    format::success(format!("Snapshot '{}' deleted.", args.snapshot_name));
     Ok(())
 }
 
 fn print_machine(m: &crate::api::machines::Machine) {
-    println!(
-        "  ID:          {}",
-        m.id.map(|id| id.to_string()).unwrap_or_default()
-    );
-    println!("  Name:        {}", m.name);
-    println!("  Platform:    {}", display_json(&m.platform));
-    println!("  Arch:        {}", display_json(&m.arch));
-    println!("  Status:      {}", display_json(&m.status));
-    println!("  IP:          {}", m.ip.as_deref().unwrap_or("-"));
-    if let Some(ref provider) = m.provider {
-        println!("  Provider:    {}", provider);
-    }
-    if let Some(ref provider_id) = m.provider_id {
-        println!("  Provider ID: {}", provider_id);
-    }
-    if let Some(task_id) = m.current_task_id {
-        println!("  Task:        {}", task_id);
-    }
-    if let Some(ref err) = m.error_message {
-        println!("  Error:       {}", err);
-    }
-    if let Some(ref tags) = m.tags {
-        if !tags.is_empty() {
-            println!("  Tags:        {}", tags.join(", "));
-        }
-    }
-    if let Some(ref ts) = m.created_at {
-        println!("  Created:     {}", display_json(ts));
-    }
-    if let Some(ref ts) = m.updated_at {
-        println!("  Updated:     {}", display_json(ts));
-    }
+    let tags_display = m
+        .tags
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .map(|t| t.join(", "));
+
+    let mut detail = Detail::new();
+    detail
+        .field("ID", m.id.map(|id| id.to_string()).unwrap_or_default())
+        .field("Name", &m.name)
+        .field("Platform", display_json(&m.platform))
+        .field("Arch", display_json(&m.arch))
+        .field("Status", display_json(&m.status))
+        .field("IP", m.ip.as_deref().unwrap_or("-"))
+        .field_opt("Provider", m.provider.as_deref())
+        .field_opt("Provider ID", m.provider_id.as_deref())
+        .field_opt("Task", m.current_task_id)
+        .field_opt("Error", m.error_message.as_deref())
+        .field_opt("Tags", tags_display)
+        .field_opt("Created", m.created_at.as_ref().map(display_json))
+        .field_opt("Updated", m.updated_at.as_ref().map(display_json));
+    detail.print();
 }
 
 async fn provision(api: &ApiClient, args: ProvisionArgs) -> Result<()> {
     let config = args
         .config
         .as_deref()
-        .map(|s| serde_json::from_str(s))
+        .map(serde_json::from_str)
         .transpose()
         .map_err(|e| {
             crate::error::CliError::InvalidArgument(format!("invalid --config JSON: {}", e))
@@ -199,59 +234,62 @@ async fn provision(api: &ApiClient, args: ProvisionArgs) -> Result<()> {
         revert_to: args.revert_to,
     };
 
-    println!("Running provisioning step on machine {}...", args.id);
-
+    let spinner = Spinner::start(format!("Running provisioning on machine {}...", args.id));
     let result = api.provision_machine(args.id, request).await?;
-    println!("Status: {}", result.status);
-    if let Some(ref err) = result.error_message {
-        println!("Error: {}", err);
+    drop(spinner);
+
+    let mut detail = Detail::new();
+    detail
+        .field("Status", &result.status)
+        .field_opt("Error", result.error_message.as_deref())
+        .field_opt("Snapshot", result.snapshot_id.as_ref().map(display_json));
+
+    if result.status == "completed" || result.status == "success" {
+        format::success(format!("Provisioning completed on machine {}.", args.id));
+    } else {
+        println!("Provisioning finished on machine {}.", args.id);
     }
-    if let Some(ref snap_id) = result.snapshot_id {
-        println!("Snapshot: {}", display_json(snap_id));
-    }
+    detail.print();
 
     Ok(())
 }
 
-async fn provisions(api: &ApiClient, args: ProvisionsArgs) -> Result<()> {
+async fn provision_history(api: &ApiClient, args: ProvisionHistoryArgs) -> Result<()> {
     let runs = api.list_provision_runs(args.id).await?;
 
     if runs.is_empty() {
-        println!("No provision runs for machine {}.", args.id);
+        format::empty(format!("No provision runs for machine {}.", args.id));
         return Ok(());
     }
 
-    println!(
-        "{:<10} {:<15} {:<10} {:<20}",
-        "STATUS", "PROVISIONER", "SNAPSHOT", "CREATED"
-    );
-    println!("{}", "-".repeat(55));
+    let mut table = Table::new(&[
+        ("STATUS", 10),
+        ("PROVISIONER", 15),
+        ("SNAPSHOT", 10),
+        ("CREATED", 20),
+    ]);
 
     for r in &runs {
         let snapshot = r
             .snapshot_id
             .as_ref()
-            .map(|v| display_json(v))
+            .map(display_json)
             .unwrap_or_else(|| "-".to_string());
         let created = r
             .created_at
             .as_ref()
-            .map(|v| display_json(v))
+            .map(display_json)
             .unwrap_or_else(|| "-".to_string());
 
-        println!(
-            "{:<10} {:<15} {:<10} {:<20}",
-            r.status, r.provisioner, snapshot, created
-        );
+        table.add_row(vec![
+            r.status.clone(),
+            r.provisioner.clone(),
+            snapshot,
+            created,
+        ]);
     }
 
-    println!("\nTotal: {} run(s)", runs.len());
+    table.print();
+    format::total(runs.len(), "run");
     Ok(())
-}
-
-fn display_json(val: &serde_json::Value) -> String {
-    match val {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
 }

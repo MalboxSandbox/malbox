@@ -3,7 +3,6 @@ use crate::error::Result;
 use clap::{Parser, Subcommand};
 
 mod init;
-mod playbook;
 pub use init::InitArgs;
 
 #[derive(Parser)]

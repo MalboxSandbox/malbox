@@ -104,6 +104,19 @@ impl ApiClient {
         Ok(response.json().await?)
     }
 
+    pub async fn delete_snapshot(&self, machine_id: i32, snapshot_name: &str) -> Result<()> {
+        let response = self
+            .client
+            .delete(self.url(&format!(
+                "/v1/machines/{}/snapshots/{}",
+                machine_id, snapshot_name
+            )))
+            .send()
+            .await?;
+        self.check_response(response).await?;
+        Ok(())
+    }
+
     pub async fn list_provision_runs(&self, machine_id: i32) -> Result<Vec<ProvisionRunResponse>> {
         let response = self
             .client

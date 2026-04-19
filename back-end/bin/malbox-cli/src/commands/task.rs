@@ -2,7 +2,10 @@ use crate::api::ApiClient;
 use crate::api::tasks::SubmitTaskRequest;
 use crate::commands::{Command, Context};
 use crate::error::Result;
+use crate::utils::format::{self, Detail, Table};
+use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
+use console::Style;
 
 #[derive(Parser)]
 #[command(about = "Manage analysis tasks")]
@@ -13,10 +16,18 @@ pub struct TaskCommand {
 
 #[derive(Subcommand)]
 enum TaskCommands {
+    /// List all tasks
+    List,
+    /// Get details and results of a specific task
+    Get(GetArgs),
     /// Submit a file for analysis
     Submit(SubmitArgs),
-    /// Show results for a completed task
-    Results(ResultsArgs),
+}
+
+#[derive(Parser)]
+struct GetArgs {
+    /// Task ID
+    id: i32,
 }
 
 #[derive(Parser)]
@@ -35,9 +46,9 @@ struct SubmitArgs {
     /// Task priority (higher = more urgent)
     #[arg(long)]
     priority: Option<i64>,
-    /// Comma-separated tags
-    #[arg(long)]
-    tags: Option<String>,
+    /// Tags for the task
+    #[arg(long, num_args = 1..)]
+    tags: Option<Vec<String>>,
     /// Task owner
     #[arg(long)]
     owner: Option<String>,
@@ -52,22 +63,113 @@ struct SubmitArgs {
     enforce_timeout: bool,
 }
 
-#[derive(Parser)]
-struct ResultsArgs {
-    /// Task ID
-    id: i32,
-}
-
 impl Command for TaskCommand {
     async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
+            TaskCommands::List => list(&ctx.api).await,
+            TaskCommands::Get(args) => get(&ctx.api, args).await,
             TaskCommands::Submit(args) => submit(&ctx.api, args).await,
-            TaskCommands::Results(args) => results(&ctx.api, args).await,
         }
     }
 }
 
+async fn list(api: &ApiClient) -> Result<()> {
+    let tasks = api.list_tasks().await?;
+
+    if tasks.is_empty() {
+        format::empty("No tasks found.");
+        return Ok(());
+    }
+
+    let mut table = Table::new(&[
+        ("ID", 6),
+        ("STATUS", 12),
+        ("TARGET", 25),
+        ("PLATFORM", 10),
+        ("PRIORITY", 10),
+        ("MACHINE", 10),
+        ("CREATED", 20),
+    ]);
+
+    for t in &tasks {
+        table.add_row(vec![
+            t.id.to_string(),
+            t.status.clone(),
+            t.target.clone(),
+            t.platform.clone(),
+            t.priority.to_string(),
+            t.machine_id
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            t.created_on.clone(),
+        ]);
+    }
+
+    table.print();
+    format::total(tasks.len(), "task");
+    Ok(())
+}
+
+async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
+    let task = api.get_task(args.id).await?;
+
+    let tags_display = task
+        .tags
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .map(|t| t.join(", "));
+
+    let mut detail = Detail::new();
+    detail
+        .field("ID", task.id)
+        .field("Status", &task.status)
+        .field("Target", &task.target)
+        .field("Platform", &task.platform)
+        .field("Timeout", format!("{}s", task.timeout))
+        .field("Priority", task.priority)
+        .field_opt("Owner", task.owner.as_deref())
+        .field_opt("Machine", task.machine_id)
+        .field_opt("Tags", tags_display)
+        .field("Created", &task.created_on)
+        .field_opt("Completed", task.completed_on.as_deref());
+    detail.print();
+
+    let results = api.get_task_results(args.id).await?;
+    if !results.is_empty() {
+        let bold = Style::new().bold();
+        println!("\n  {}", bold.apply_to("Results:"));
+
+        let mut table = Table::new(&[
+            ("ID", 6),
+            ("PLUGIN", 25),
+            ("RESULT", 20),
+            ("FORMAT", 8),
+            ("SIZE", 10),
+            ("PATH", 30),
+        ]);
+        table.set_indent(2);
+
+        for r in &results {
+            table.add_row(vec![
+                r.id.to_string(),
+                r.plugin_name.clone(),
+                r.result_name.clone(),
+                r.format.clone(),
+                r.size_bytes.to_string(),
+                r.file_path.clone(),
+            ]);
+        }
+
+        table.print();
+    }
+
+    Ok(())
+}
+
 async fn submit(api: &ApiClient, args: SubmitArgs) -> Result<()> {
+    let file_display = args.file.clone();
+    let spinner = Spinner::start(format!("Submitting '{}'...", file_display));
+
     let response = api
         .submit_task(SubmitTaskRequest {
             file_path: args.file,
@@ -83,32 +185,7 @@ async fn submit(api: &ApiClient, args: SubmitArgs) -> Result<()> {
         })
         .await?;
 
-    println!("Task submitted successfully.");
-    println!("  Task ID: {}", response.task_id);
-    Ok(())
-}
-
-async fn results(api: &ApiClient, args: ResultsArgs) -> Result<()> {
-    let results = api.get_task_results(args.id).await?;
-
-    if results.is_empty() {
-        println!("No results for task {}.", args.id);
-        return Ok(());
-    }
-
-    println!(
-        "{:<6} {:<25} {:<20} {:<8} {:<10} {}",
-        "ID", "PLUGIN", "RESULT", "FORMAT", "SIZE", "PATH"
-    );
-    println!("{}", "-".repeat(90));
-
-    for r in &results {
-        println!(
-            "{:<6} {:<25} {:<20} {:<8} {:<10} {}",
-            r.id, r.plugin_name, r.result_name, r.format, r.size_bytes, r.file_path,
-        );
-    }
-
-    println!("\nTotal: {} result(s)", results.len());
+    drop(spinner);
+    format::success(format!("Task submitted (ID: {})", response.task_id));
     Ok(())
 }

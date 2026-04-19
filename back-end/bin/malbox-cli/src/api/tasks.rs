@@ -21,13 +21,28 @@ pub struct TaskResultInfo {
     pub created_on: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct TaskInfo {
+    pub id: i32,
+    pub status: String,
+    pub target: String,
+    pub platform: String,
+    pub timeout: i64,
+    pub priority: i64,
+    pub tags: Option<Vec<String>>,
+    pub owner: Option<String>,
+    pub machine_id: Option<i32>,
+    pub created_on: String,
+    pub completed_on: Option<String>,
+}
+
 pub struct SubmitTaskRequest {
     pub file_path: String,
     pub package: Option<String>,
     pub module: Option<String>,
     pub timeout: Option<i64>,
     pub priority: Option<i64>,
-    pub tags: Option<String>,
+    pub tags: Option<Vec<String>>,
     pub owner: Option<String>,
     pub memory: bool,
     pub unique: bool,
@@ -35,6 +50,22 @@ pub struct SubmitTaskRequest {
 }
 
 impl ApiClient {
+    pub async fn list_tasks(&self) -> Result<Vec<TaskInfo>> {
+        let response = self.client.get(self.url("/v1/tasks")).send().await?;
+        let response = self.check_response(response).await?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn get_task(&self, task_id: i32) -> Result<TaskInfo> {
+        let response = self
+            .client
+            .get(self.url(&format!("/v1/tasks/{}", task_id)))
+            .send()
+            .await?;
+        let response = self.check_response(response).await?;
+        Ok(response.json().await?)
+    }
+
     pub async fn submit_task(&self, request: SubmitTaskRequest) -> Result<TaskResponse> {
         let file_bytes = tokio::fs::read(&request.file_path)
             .await
@@ -62,7 +93,7 @@ impl ApiClient {
             form = form.text("priority", priority.to_string());
         }
         if let Some(tags) = request.tags {
-            form = form.text("tags", tags);
+            form = form.text("tags", tags.join(","));
         }
         if let Some(owner) = request.owner {
             form = form.text("owner", owner);
