@@ -16,13 +16,13 @@ impl Clone for LibvirtProvider {
         let source_domain_name = format!("malbox-{}", machine.id());
 
         let source_domain = Domain::lookup_by_name(self.connection(), &source_domain_name)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Parse source domain XML to get disk path
         let source_xml = source_domain
             .get_xml_desc(0)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         let mut domain_info = XmlDomain::from_xml(&source_xml).map_err(|e| {
@@ -65,7 +65,7 @@ impl Clone for LibvirtProvider {
         })?;
 
         let _clone_domain = Domain::define_xml(self.connection(), &clone_xml)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Track allocation

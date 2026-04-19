@@ -33,22 +33,22 @@ impl Command for InitArgs {
         // Check for existing configuration
         let existing_config = check_existing_config(&paths);
 
-        if let Some(existing_path) = &existing_config {
-            if !self.force {
-                println!("Warning: Configuration file already exists at:");
-                println!("  {}", existing_path.display());
-                println!();
-                print!("Do you want to overwrite it? [y/N]: ");
-                io::stdout().flush()?;
+        if let Some(existing_path) = &existing_config
+            && !self.force
+        {
+            println!("Warning: Configuration file already exists at:");
+            println!("  {}", existing_path.display());
+            println!();
+            print!("Do you want to overwrite it? [y/N]: ");
+            io::stdout().flush()?;
 
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                let input = input.trim().to_lowercase();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let input = input.trim().to_lowercase();
 
-                if input != "y" && input != "yes" {
-                    println!("Configuration generation cancelled.");
-                    return Ok(());
-                }
+            if input != "y" && input != "yes" {
+                println!("Configuration generation cancelled.");
+                return Ok(());
             }
         }
 

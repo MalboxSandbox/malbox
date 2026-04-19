@@ -160,17 +160,15 @@ impl MachinePool {
         let max_interval = std::time::Duration::from_secs(10);
 
         loop {
-            match tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(addr)).await
+            if let Ok(Ok(_)) =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(addr)).await
             {
-                Ok(Ok(_)) => {
-                    info!(
-                        %addr,
-                        elapsed_secs = start.elapsed().as_secs(),
-                        "Guest plugin port reachable"
-                    );
-                    return Ok(());
-                }
-                Ok(Err(_)) | Err(_) => {}
+                info!(
+                    %addr,
+                    elapsed_secs = start.elapsed().as_secs(),
+                    "Guest plugin port reachable"
+                );
+                return Ok(());
             }
 
             if start.elapsed() >= timeout {

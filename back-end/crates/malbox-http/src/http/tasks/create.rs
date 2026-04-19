@@ -6,7 +6,7 @@ use axum::{
     routing::post,
 };
 use axum_macros::debug_handler;
-use axum_typed_multipart::{FieldData, TryFromField, TryFromMultipart, TypedMultipart};
+use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
 use magic::cookie::DatabasePaths;
 use malbox_database::repositories::{
     machinery::MachinePlatform,
@@ -29,6 +29,7 @@ struct TaskResponse {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct FileInfo {
     name: String,
     size: i64,
@@ -42,6 +43,7 @@ struct FileInfo {
 }
 
 #[derive(TryFromMultipart)]
+#[allow(dead_code)]
 struct CreateTaskRequest {
     #[form_data(limit = "unlimited")]
     file: FieldData<Bytes>,

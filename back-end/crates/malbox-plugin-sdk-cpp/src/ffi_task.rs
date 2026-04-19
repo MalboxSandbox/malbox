@@ -14,11 +14,11 @@ use std::ffi::{CString, c_char};
 
 thread_local! {
     /// CStrings kept alive for the duration of the current plugin callback.
-    static TEMP_STRINGS: RefCell<Vec<CString>> = RefCell::new(Vec::new());
+    static TEMP_STRINGS: RefCell<Vec<CString>> = const { RefCell::new(Vec::new()) };
     /// Byte buffers kept alive for the duration of the current plugin callback.
-    static TEMP_BYTES: RefCell<Option<Vec<u8>>> = RefCell::new(None);
+    static TEMP_BYTES: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
     /// Per-config-entry key/value pairs kept alive for the current callback.
-    static TEMP_CONFIG_ENTRIES: RefCell<Vec<(CString, CString)>> = RefCell::new(Vec::new());
+    static TEMP_CONFIG_ENTRIES: RefCell<Vec<(CString, CString)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Release all temporaries created for the current callback invocation.

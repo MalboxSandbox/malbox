@@ -49,10 +49,10 @@ impl Watcher {
                 {
                     let mut state = debounce_state.lock().unwrap();
                     let now = Instant::now();
-                    if let Some(last) = state.get(&plugin_subdir) {
-                        if now.duration_since(*last) < debounce_window {
-                            continue;
-                        }
+                    if let Some(last) = state.get(&plugin_subdir)
+                        && now.duration_since(*last) < debounce_window
+                    {
+                        continue;
                     }
                     state.insert(plugin_subdir.clone(), now);
                 }

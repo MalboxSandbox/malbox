@@ -2,11 +2,10 @@ use axum::{
     Json,
     http::{HeaderMap, HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
     response::{IntoResponse, Response},
-    routing::head,
 };
-use malbox_database::{DatabaseError, Error as SqlxError};
+use malbox_database::Error as SqlxError;
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::{any, borrow::Cow};
 use tracing::error;
 
 #[derive(thiserror::Error, Debug)]
@@ -83,26 +82,5 @@ impl From<SqlxError> for Error {
     fn from(err: SqlxError) -> Self {
         error!(error = ?err, "Database error");
         Error::Internal("Database error occurred".to_string())
-    }
-}
-
-pub trait ResultExt<T> {
-    fn on_constraint(
-        self,
-        name: &str,
-        f: impl FnOnce(&dyn DatabaseError) -> Error,
-    ) -> Result<T, Error>;
-}
-
-impl<T, E> ResultExt<T> for Result<T, E>
-where
-    E: Into<Error>,
-{
-    fn on_constraint(
-        self,
-        name: &str,
-        map_err: impl FnOnce(&dyn DatabaseError) -> Error,
-    ) -> Result<T, Error> {
-        self.map_err(|e| e.into())
     }
 }

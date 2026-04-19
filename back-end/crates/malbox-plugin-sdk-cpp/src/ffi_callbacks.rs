@@ -198,10 +198,7 @@ impl Plugin for VtablePlugin {
     }
 
     fn on_execute_command(&self, request: &ExecRequest) -> Option<ExecResult> {
-        let on_execute_command = match self.vtable.on_execute_command {
-            Some(f) => f,
-            None => return None,
-        };
+        let on_execute_command = self.vtable.on_execute_command?;
 
         let req_data = crate::ffi_exec::ExecRequestData::from_exec_request(request);
         let mut result_data = crate::ffi_exec::ExecResultData::default();

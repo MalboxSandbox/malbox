@@ -223,7 +223,7 @@ execution = "parallel"
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("no-binary");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("plugin.toml"), &valid_manifest("no-binary")).unwrap();
+        std::fs::write(dir.join("plugin.toml"), valid_manifest("no-binary")).unwrap();
 
         let scanner = Scanner::new(tmp.path().to_path_buf());
         let entry = scanner.scan_one(&dir).unwrap();
@@ -235,7 +235,7 @@ execution = "parallel"
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("no-exec");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("plugin.toml"), &valid_manifest("no-exec")).unwrap();
+        std::fs::write(dir.join("plugin.toml"), valid_manifest("no-exec")).unwrap();
 
         let binary_path = dir.join("no-exec");
         std::fs::write(&binary_path, "not executable").unwrap();
@@ -292,7 +292,7 @@ execution = "exclusive"
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("plugin.toml"),
-            &guest_manifest("guest-yara-scanner"),
+            guest_manifest("guest-yara-scanner"),
         )
         .unwrap();
 
@@ -311,7 +311,7 @@ execution = "exclusive"
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("guest-plugin");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("plugin.toml"), &guest_manifest("guest-plugin")).unwrap();
+        std::fs::write(dir.join("plugin.toml"), guest_manifest("guest-plugin")).unwrap();
 
         let binary_path = dir.join("guest-plugin.exe");
         std::fs::write(&binary_path, b"MZ\x00").unwrap();

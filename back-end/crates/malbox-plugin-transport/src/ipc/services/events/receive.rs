@@ -69,16 +69,14 @@ impl TransportReceiver for EventReceiver {
             .listener
             .timed_wait_one(timeout)
             .map_err(|e| TransportError::Ipc(Box::new(e)))?
-        {
-            if let Some(sample) = self
+            && let Some(sample) = self
                 .subscriber
                 .receive()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
-            {
-                let ipc_payload = sample.payload();
-                let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
-                return Ok(Some(event));
-            }
+        {
+            let ipc_payload = sample.payload();
+            let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+            return Ok(Some(event));
         }
 
         Ok(None)
@@ -90,16 +88,14 @@ impl TransportReceiver for EventReceiver {
                 .listener
                 .blocking_wait_one()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
-            {
-                if let Some(sample) = self
+                && let Some(sample) = self
                     .subscriber
                     .receive()
                     .map_err(|e| TransportError::Ipc(Box::new(e)))?
-                {
-                    let ipc_payload = sample.payload();
-                    let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
-                    return Ok(event);
-                }
+            {
+                let ipc_payload = sample.payload();
+                let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+                return Ok(event);
             }
         }
     }
@@ -109,16 +105,14 @@ impl TransportReceiver for EventReceiver {
             .listener
             .try_wait_one()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?
-        {
-            if let Some(sample) = self
+            && let Some(sample) = self
                 .subscriber
                 .receive()
                 .map_err(|e| TransportError::Ipc(Box::new(e)))?
-            {
-                let ipc_payload = sample.payload();
-                let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
-                return Ok(Some(event));
-            }
+        {
+            let ipc_payload = sample.payload();
+            let event = Event::from_id_and_payload(event_id.as_value(), ipc_payload)?;
+            return Ok(Some(event));
         }
 
         Ok(None)

@@ -43,6 +43,12 @@ pub struct TaskQueue {
     notify: Arc<Notify>,
 }
 
+impl Default for TaskQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskQueue {
     /// Create a new empty task queue.
     pub fn new() -> Self {

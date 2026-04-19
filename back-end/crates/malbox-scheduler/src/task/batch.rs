@@ -19,6 +19,7 @@ pub struct TaskBatch {
 }
 
 /// Collector for building task batches.
+#[allow(dead_code)]
 pub struct BatchCollector {
     /// Worker configuration.
     config: WorkerConfig,
@@ -60,10 +61,10 @@ impl BatchCollector {
         }
 
         // Check if we can add to current batch
-        if let Some(ref current) = self.current_batch {
-            if !current.tasks.is_empty() {
-                let first_task = &current.tasks[0];
-            }
+        if let Some(ref current) = self.current_batch
+            && !current.tasks.is_empty()
+        {
+            let _first_task = &current.tasks[0];
         }
 
         // Add to current batch or start new one

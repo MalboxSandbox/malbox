@@ -40,6 +40,8 @@ pub struct PluginManager {
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     registry: Arc<PluginRegistry>,
     emitter: Arc<EventEmitter>,
+    /// Held to keep the background health-check task alive for the lifetime of the manager.
+    #[allow(dead_code)]
     health_check_handle: JoinHandle<()>,
     shutdown_tx: watch::Sender<bool>,
 }

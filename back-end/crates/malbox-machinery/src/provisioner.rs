@@ -60,6 +60,10 @@ pub enum ProvisionStatus {
     Failed,
 }
 
+/// Factory function signature used by a registered provisioner.
+pub type ProvisionerFactory =
+    fn(&toml::Value) -> Result<Box<dyn Provisioner>, Box<dyn Error + Send + Sync>>;
+
 /// Metadata about a registered provisioner.
 ///
 /// Submitted to the `inventory` registry by provisioner crates.
@@ -67,7 +71,7 @@ pub struct ProvisionerMetadata {
     /// Unique name for this provisioner (e.g., "ansible", "native").
     pub name: &'static str,
     /// Factory function to create a provisioner instance from TOML config.
-    pub create: fn(&toml::Value) -> Result<Box<dyn Provisioner>, Box<dyn Error + Send + Sync>>,
+    pub create: ProvisionerFactory,
 }
 
 // Collect all registered provisioners at compile time.

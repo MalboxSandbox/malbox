@@ -26,6 +26,7 @@ use malbox_machinery_macros::RegisterProvider;
 #[capability(Clone)]
 pub struct LibvirtProvider {
     conn: Arc<Connect>,
+    #[allow(dead_code)]
     config: LibvirtConfig,
     storage_pool: Arc<StoragePool>,
     allocated: Arc<RwLock<HashSet<MachineId>>>,
@@ -184,16 +185,15 @@ impl LibvirtProvider {
     pub(crate) fn get_domain_ip(
         domain: &virt::domain::Domain,
     ) -> Result<std::net::IpAddr, LibvirtError> {
-        if let Ok(interfaces) = domain.interface_addresses(
-            virt::sys::VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE as u32,
-            0,
-        ) {
+        if let Ok(interfaces) =
+            domain.interface_addresses(virt::sys::VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE, 0)
+        {
             for iface in &interfaces {
                 for addr in &iface.addrs {
-                    if let Ok(ip) = addr.addr.parse::<std::net::IpAddr>() {
-                        if !ip.is_loopback() {
-                            return Ok(ip);
-                        }
+                    if let Ok(ip) = addr.addr.parse::<std::net::IpAddr>()
+                        && !ip.is_loopback()
+                    {
+                        return Ok(ip);
                     }
                 }
             }

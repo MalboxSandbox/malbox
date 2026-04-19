@@ -23,6 +23,7 @@ pub struct MachineSnapshot {
 /// Insert a new snapshot record.
 ///
 /// If `activate` is true, deactivates all other snapshots for this machine first.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_snapshot(
     pool: &PgPool,
     machine_id: i32,

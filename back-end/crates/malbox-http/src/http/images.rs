@@ -89,7 +89,7 @@ async fn register_image(
         "Moving image to managed store"
     );
 
-    if let Err(_) = tokio::fs::rename(&src, &dest).await {
+    if tokio::fs::rename(&src, &dest).await.is_err() {
         // rename fails across filesystems — fall back to copy + remove
         tokio::fs::copy(&src, &dest)
             .await

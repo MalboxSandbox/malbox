@@ -1,10 +1,8 @@
 use super::machinery::MachinePlatform;
-use super::samples::Sample;
 use crate::error::{Result, TaskError};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, query_as};
-use std::collections::HashMap;
-use time::{PrimitiveDateTime, macros::date};
+use time::PrimitiveDateTime;
 
 #[derive(sqlx::Type, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[sqlx(type_name = "task_state", rename_all = "snake_case")]

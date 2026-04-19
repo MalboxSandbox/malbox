@@ -120,6 +120,7 @@ pub struct Worker {
 
 impl Worker {
     /// Create a new worker with all required shared state.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         task_queue: Arc<TaskQueue>,
         task_store: Arc<TaskStore>,
@@ -464,14 +465,14 @@ impl Worker {
                 db_machine.provider_id.clone().unwrap_or_default(),
             ));
             m.set_state(MachineState::Running);
-            if let Some(ref ip) = db_machine.ip {
-                if let Ok(addr) = ip.parse() {
-                    m.set_endpoint(Some(MachineEndpoint {
-                        address: addr,
-                        id: db_machine.provider_id.clone().unwrap_or_default(),
-                        platform,
-                    }));
-                }
+            if let Some(ref ip) = db_machine.ip
+                && let Ok(addr) = ip.parse()
+            {
+                m.set_endpoint(Some(MachineEndpoint {
+                    address: addr,
+                    id: db_machine.provider_id.clone().unwrap_or_default(),
+                    platform,
+                }));
             }
             m
         };

@@ -20,7 +20,7 @@ impl Allocate for LibvirtProvider {
         let id = params.name.clone();
 
         // Create a qcow2 overlay disk (backed by the base image if provided)
-        let capacity_bytes = (params.disk_size_mb as u64) * 1024 * 1024;
+        let capacity_bytes = params.disk_size_mb * 1024 * 1024;
         let disk_path = self
             .create_disk(&domain_name, params.base_image.as_deref(), capacity_bytes)
             .await
@@ -33,7 +33,7 @@ impl Allocate for LibvirtProvider {
 
         // Register the domain in libvirt (persistent, not started)
         let domain = Domain::define_xml(self.connection(), &xml)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Store the machine name in domain metadata so we can link back
@@ -46,7 +46,7 @@ impl Allocate for LibvirtProvider {
                 None,
                 0,
             )
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         self.allocated()
@@ -67,7 +67,7 @@ impl Allocate for LibvirtProvider {
         let domain_name = format!("malbox-{}", machine.id());
 
         let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Force-stop if running
@@ -78,7 +78,7 @@ impl Allocate for LibvirtProvider {
         // Capture the disk path before we remove the domain definition
         let xml_desc = domain
             .get_xml_desc(0)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         let domain_info = XmlDomain::from_xml(&xml_desc).map_err(|e| {
@@ -99,15 +99,14 @@ impl Allocate for LibvirtProvider {
         // Remove the domain definition from libvirt
         domain
             .undefine()
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Delete the disk volume from the storage pool
-        if let Some(path) = disk_path {
-            if let Ok(vol) = virt::storage_vol::StorageVol::lookup_by_path(self.connection(), &path)
-            {
-                let _ = vol.delete(0);
-            }
+        if let Some(path) = disk_path
+            && let Ok(vol) = virt::storage_vol::StorageVol::lookup_by_path(self.connection(), &path)
+        {
+            let _ = vol.delete(0);
         }
 
         self.allocated().write().unwrap().remove(machine.id());
@@ -122,18 +121,18 @@ impl Allocate for LibvirtProvider {
         let domain_name = format!("malbox-{}", machine.id());
 
         let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         if !domain
             .is_active()
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?
         {
             // libvirt calls this "create" — it boots an already-defined domain
             domain
                 .create()
-                .map_err(|e| LibvirtError::from(e))
+                .map_err(LibvirtError::from)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
         }
 
@@ -153,7 +152,7 @@ impl Allocate for LibvirtProvider {
         let domain_name = format!("malbox-{}", machine.id());
 
         let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         if !domain.is_active().unwrap_or(false) {
@@ -163,7 +162,7 @@ impl Allocate for LibvirtProvider {
         if force {
             domain
                 .destroy()
-                .map_err(|e| LibvirtError::from(e))
+                .map_err(LibvirtError::from)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
         } else {
             // Try ACPI shutdown, fall back to force-kill
@@ -173,7 +172,7 @@ impl Allocate for LibvirtProvider {
             if domain.is_active().unwrap_or(false) {
                 domain
                     .destroy()
-                    .map_err(|e| LibvirtError::from(e))
+                    .map_err(LibvirtError::from)
                     .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
             }
         }
@@ -189,7 +188,7 @@ impl Allocate for LibvirtProvider {
         let domains = self
             .connection()
             .list_all_domains(0)
-            .map_err(|e| LibvirtError::from(e))
+            .map_err(LibvirtError::from)
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         let mut machines = Vec::new();
@@ -197,7 +196,7 @@ impl Allocate for LibvirtProvider {
         for domain in domains {
             let name = domain
                 .get_name()
-                .map_err(|e| LibvirtError::from(e))
+                .map_err(LibvirtError::from)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
             // Only include domains managed by malbox
@@ -209,7 +208,7 @@ impl Allocate for LibvirtProvider {
 
             let (state_code, _reason) = domain
                 .get_state()
-                .map_err(|e| LibvirtError::from(e))
+                .map_err(LibvirtError::from)
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
             let state = match state_code {
@@ -225,14 +224,14 @@ impl Allocate for LibvirtProvider {
             machine.set_state(state);
 
             // Resolve IP if the domain is running
-            if matches!(state, MachineState::Running) {
-                if let Ok(ip) = Self::get_domain_ip(&domain) {
-                    machine.set_endpoint(Some(MachineEndpoint {
-                        address: ip,
-                        id: machine.id().to_string(),
-                        platform: Platform::Windows, // TODO: store platform in domain metadata
-                    }));
-                }
+            if matches!(state, MachineState::Running)
+                && let Ok(ip) = Self::get_domain_ip(&domain)
+            {
+                machine.set_endpoint(Some(MachineEndpoint {
+                    address: ip,
+                    id: machine.id().to_string(),
+                    platform: Platform::Windows, // TODO: store platform in domain metadata
+                }));
             }
 
             machines.push(machine);

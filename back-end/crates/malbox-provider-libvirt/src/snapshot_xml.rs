@@ -3,12 +3,13 @@ use serde::Deserialize;
 /// Declarative snapshot XML structure that deserializes from libvirt XML format.
 #[derive(Debug, Deserialize)]
 #[serde(rename = "domainsnapshot")]
+#[allow(dead_code)]
 pub struct SnapshotXml {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub creationTime: Option<i64>,
+    #[serde(default, rename = "creationTime")]
+    pub creation_time: Option<i64>,
     #[serde(default)]
     pub state: Option<String>,
 }

@@ -80,6 +80,7 @@ pub struct Machine {
 }
 
 /// Insert a new machine with full resource specs.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_machine(
     pool: &PgPool,
     name: &str,

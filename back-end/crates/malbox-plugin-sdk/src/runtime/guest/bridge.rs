@@ -81,10 +81,10 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
         .await;
 
         // Signal the server to stop
-        if let Ok(mut guard) = self.shutdown_tx.lock() {
-            if let Some(tx) = guard.take() {
-                let _ = tx.send(());
-            }
+        if let Ok(mut guard) = self.shutdown_tx.lock()
+            && let Some(tx) = guard.take()
+        {
+            let _ = tx.send(());
         }
     }
 

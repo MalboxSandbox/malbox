@@ -49,7 +49,7 @@ async fn list_plugins(
         .filter(|e| {
             type_filter
                 .as_ref()
-                .map_or(true, |t| e.manifest.plugin.plugin_type == *t)
+                .is_none_or(|t| e.manifest.plugin.plugin_type == *t)
         })
         .map(|e| PluginInfo {
             name: e.manifest.plugin.name.clone(),

@@ -99,19 +99,19 @@ pub fn register_provider_derive(input: TokenStream) -> TokenStream {
 /// Extract the provider name from #[provider(name = "...")] attribute
 fn extract_provider_name(input: &DeriveInput) -> String {
     for attr in &input.attrs {
-        if attr.path().is_ident("provider") {
-            if let Meta::List(meta_list) = &attr.meta {
-                let tokens_str = meta_list.tokens.to_string();
+        if attr.path().is_ident("provider")
+            && let Meta::List(meta_list) = &attr.meta
+        {
+            let tokens_str = meta_list.tokens.to_string();
 
-                // Parse: name = "value"
-                for part in tokens_str.split(',') {
-                    let part = part.trim();
-                    if let Some(name_part) = part.strip_prefix("name") {
-                        let name_part = name_part.trim();
-                        if let Some(value_part) = name_part.strip_prefix('=') {
-                            let value = value_part.trim().trim_matches('"');
-                            return value.to_string();
-                        }
+            // Parse: name = "value"
+            for part in tokens_str.split(',') {
+                let part = part.trim();
+                if let Some(name_part) = part.strip_prefix("name") {
+                    let name_part = name_part.trim();
+                    if let Some(value_part) = name_part.strip_prefix('=') {
+                        let value = value_part.trim().trim_matches('"');
+                        return value.to_string();
                     }
                 }
             }
@@ -126,11 +126,11 @@ fn extract_capabilities(input: &DeriveInput) -> Vec<String> {
     let mut capabilities = Vec::new();
 
     for attr in &input.attrs {
-        if attr.path().is_ident("capability") {
-            if let Meta::List(meta_list) = &attr.meta {
-                let tokens_str = meta_list.tokens.to_string();
-                capabilities.push(tokens_str.trim().to_string());
-            }
+        if attr.path().is_ident("capability")
+            && let Meta::List(meta_list) = &attr.meta
+        {
+            let tokens_str = meta_list.tokens.to_string();
+            capabilities.push(tokens_str.trim().to_string());
         }
     }
 

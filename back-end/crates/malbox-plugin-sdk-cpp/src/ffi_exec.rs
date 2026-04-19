@@ -60,22 +60,12 @@ impl ExecRequestData {
 ///
 /// Created on the Rust side, passed as `*mut MalboxExecResult` to the C
 /// callback, which fills it in via the `malbox_exec_result_set_*` functions.
+#[derive(Default)]
 pub(crate) struct ExecResultData {
     pub exit_code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub pid: Option<u32>,
-}
-
-impl Default for ExecResultData {
-    fn default() -> Self {
-        Self {
-            exit_code: None,
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-            pid: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

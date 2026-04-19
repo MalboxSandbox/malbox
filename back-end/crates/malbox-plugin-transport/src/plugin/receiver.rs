@@ -13,6 +13,12 @@ pub struct GrpcReceiver {
     _private: (),
 }
 
+impl Default for GrpcReceiver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GrpcReceiver {
     pub fn new() -> Self {
         Self { _private: () }
