@@ -3,7 +3,7 @@ use malbox_database::repositories::images;
 use notify::{Event, EventKind, RecursiveMode, Watcher, recommended_watcher};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Start watching the image store directory for changes.
 /// Updates image availability in the database when files appear/disappear.
@@ -17,21 +17,17 @@ pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool) {
         }) {
             Ok(w) => w,
             Err(e) => {
-                warn!("Failed to create filesystem watcher: {}", e);
+                warn!(error = %e, "Failed to create filesystem watcher");
                 return;
             }
         };
 
         if let Err(e) = watcher.watch(&store_path, RecursiveMode::Recursive) {
-            warn!(
-                "Failed to watch image store at {}: {}",
-                store_path.display(),
-                e
-            );
+            warn!(path = %store_path.display(), error = %e, "Failed to watch image store");
             return;
         }
 
-        info!("Watching image store: {}", store_path.display());
+        debug!(path = %store_path.display(), "Image store watcher started");
 
         // Keep the watcher alive
         loop {
@@ -43,7 +39,7 @@ pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool) {
         while let Some(event) = rx.recv().await {
             match event {
                 Ok(event) => handle_fs_event(&db, event).await,
-                Err(e) => warn!("Filesystem watch error: {}", e),
+                Err(e) => warn!(error = %e, "Filesystem watch error"),
             }
         }
     });
@@ -76,6 +72,6 @@ async fn check_image_availability(db: &PgPool, _path: &std::path::Path) {
                 }
             }
         }
-        Err(e) => warn!("Failed to check image availability: {}", e),
+        Err(e) => warn!(error = %e, "Failed to check image availability"),
     }
 }

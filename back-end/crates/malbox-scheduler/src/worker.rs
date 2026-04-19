@@ -35,7 +35,7 @@ use malbox_utils::{ResultFormat, ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{Instrument, debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 
 /// Outcome of a single `execute_task` call.
@@ -162,9 +162,10 @@ impl Worker {
     /// `watch` channel and passed into `execute_task` so that in-flight
     /// tasks can check for cancellation at safe points and clean up
     /// (release machines) before returning.
+    #[instrument(skip_all, fields(worker_id = %self.id))]
     pub async fn run(self, shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
         let notifier = self.task_queue.get_notifier();
-        info!(worker_id = %self.id, "Worker started");
+        debug!(worker_id = %self.id, "Worker started");
 
         // Convert oneshot into a watch channel so execute_task can poll
         // it cooperatively without consuming the receiver.
@@ -183,7 +184,7 @@ impl Worker {
                         tokio::select! {
                             _ = notifier.notified() => {}
                             _ = shutdown_rx.wait_for(|v| *v) => {
-                                info!(worker_id = %self.id, "Worker received shutdown signal");
+                                debug!(worker_id = %self.id, "Worker received shutdown signal");
                                 break;
                             }
                         }
@@ -192,11 +193,11 @@ impl Worker {
                         tokio::select! {
                             _ = notifier.notified() => {}
                             _ = shutdown_rx.wait_for(|v| *v) => {
-                                info!(worker_id = %self.id, "Worker received shutdown signal");
+                                debug!(worker_id = %self.id, "Worker received shutdown signal");
                                 break;
                             }
                             _ = tokio::time::sleep(timeout) => {
-                                info!(worker_id = %self.id, "Worker idle-timeout, exiting");
+                                debug!(worker_id = %self.id, "Worker idle-timeout, exiting");
                                 break;
                             }
                         }
@@ -206,7 +207,7 @@ impl Worker {
 
             // Shutdown may have arrived between the notifier firing and here.
             if *shutdown.borrow() {
-                info!(worker_id = %self.id, "Worker received shutdown signal");
+                debug!(worker_id = %self.id, "Worker received shutdown signal");
                 break;
             }
 
@@ -289,6 +290,7 @@ impl Worker {
     /// Once a machine is acquired, all subsequent code paths are guarded by
     /// an unconditional cleanup block that releases the machine — even if an
     /// intermediate step fails or the task is cancelled.
+    #[instrument(skip_all, fields(task_id, worker_id = %self.id), err)]
     async fn execute_task(
         &self,
         task_id: i32,
@@ -434,6 +436,7 @@ impl Worker {
     /// registration/execution, and result persistence.  It is called from
     /// `execute_task` and the caller guarantees that the machine will be
     /// released regardless of the outcome.
+    #[instrument(skip_all, fields(task_id, machine_id, worker_id = %self.id), err)]
     #[allow(clippy::too_many_arguments)]
     async fn run_task_on_machine(
         &self,
@@ -585,28 +588,33 @@ impl Worker {
 
         if let Some(ref ip) = db_machine.ip {
             for (i, plugin_name) in snapshot_guest_plugins.iter().enumerate() {
-                let plugin_id = malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
-                let port = base_port + i as u16;
-                let addr = format!("http://{}:{}", ip, port);
+                async {
+                    let plugin_id =
+                        malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
+                    let port = base_port + i as u16;
+                    let addr = format!("http://{}:{}", ip, port);
 
-                match self
-                    .plugin_manager
-                    .register_guest(&plugin_id, addr.clone())
-                    .await
-                {
-                    Ok(()) => {
-                        info!(
-                            task_id,
-                            plugin_id = plugin_name.as_str(),
-                            addr = addr.as_str(),
-                            "Registered guest plugin"
-                        );
-                        registered_guests.push(plugin_id);
-                    }
-                    Err(e) => {
-                        warn!(task_id, plugin_id = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
+                    match self
+                        .plugin_manager
+                        .register_guest(&plugin_id, addr.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(
+                                task_id,
+                                plugin = plugin_name.as_str(),
+                                addr = addr.as_str(),
+                                "Registered guest plugin"
+                            );
+                            registered_guests.push(plugin_id);
+                        }
+                        Err(e) => {
+                            warn!(task_id, plugin = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
+                        }
                     }
                 }
+                .instrument(debug_span!("plugin.register", plugin = %plugin_name))
+                .await;
             }
         }
 
@@ -657,102 +665,105 @@ impl Worker {
             result = tokio::time::timeout(analysis_timeout, async {
                 for entry in snapshot.list() {
                     let plugin_id = &entry.id;
-
-                    if entry.manifest.plugin.plugin_type
-                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
-                        && !snapshot_guest_plugins
-                            .iter()
-                            .any(|n| n == plugin_id.as_str())
-                    {
-                        info!(
-                            task_id,
-                            plugin_id = plugin_id.as_str(),
-                            "Skipping guest plugin not in active snapshot"
-                        );
-                        continue;
-                    }
-
-                    match self.plugin_manager.acquire(plugin_id).await {
-                        Ok(handle) => {
-                            let mut config = std::collections::HashMap::new();
-                            config.insert(
-                                "analysis_timeout".to_string(),
-                                task.timeout.to_string(),
+                    async {
+                        if entry.manifest.plugin.plugin_type
+                            == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
+                            && !snapshot_guest_plugins
+                                .iter()
+                                .any(|n| n == plugin_id.as_str())
+                        {
+                            info!(
+                                task_id,
+                                plugin = plugin_id.as_str(),
+                                "Skipping guest plugin not in active snapshot"
                             );
-                            match handle.execute_task(task_id, &task.target, config).await {
-                                Ok(outputs) => {
-                                    info!(
-                                        task_id,
-                                        plugin_id = plugin_id.as_str(),
-                                        result_count = outputs.len(),
-                                        "Plugin execution completed"
-                                    );
+                            return;
+                        }
 
-                                    let plugin_name = plugin_id.as_str();
-                                    for output in &outputs {
-                                        let fs_format = match output.format {
-                                            OutputFormat::Json => ResultFormat::Json,
-                                            OutputFormat::Bytes => ResultFormat::Bytes,
-                                        };
-                                        let db_format = match output.format {
-                                            OutputFormat::Json => DbResultFormat::Json,
-                                            OutputFormat::Bytes => DbResultFormat::Bytes,
-                                        };
+                        match self.plugin_manager.acquire(plugin_id).await {
+                            Ok(handle) => {
+                                let mut config = std::collections::HashMap::new();
+                                config.insert(
+                                    "analysis_timeout".to_string(),
+                                    task.timeout.to_string(),
+                                );
+                                match handle.execute_task(task_id, &task.target, config).await {
+                                    Ok(outputs) => {
+                                        info!(
+                                            task_id,
+                                            plugin = plugin_id.as_str(),
+                                            result_count = outputs.len(),
+                                            "Plugin execution completed"
+                                        );
 
-                                        match self
-                                            .result_store
-                                            .store(
-                                                task_id,
-                                                plugin_name,
-                                                &output.result_name,
-                                                fs_format,
-                                                &output.data,
-                                            )
-                                            .await
-                                        {
-                                            Ok(rel_path) => {
-                                                if let Err(e) = task_results::insert_task_result(
-                                                    self.task_store.pool(),
+                                        let plugin_name = plugin_id.as_str();
+                                        for output in &outputs {
+                                            let fs_format = match output.format {
+                                                OutputFormat::Json => ResultFormat::Json,
+                                                OutputFormat::Bytes => ResultFormat::Bytes,
+                                            };
+                                            let db_format = match output.format {
+                                                OutputFormat::Json => DbResultFormat::Json,
+                                                OutputFormat::Bytes => DbResultFormat::Bytes,
+                                            };
+
+                                            match self
+                                                .result_store
+                                                .store(
                                                     task_id,
                                                     plugin_name,
                                                     &output.result_name,
-                                                    db_format,
-                                                    output.data.len() as i64,
-                                                    &rel_path,
+                                                    fs_format,
+                                                    &output.data,
                                                 )
                                                 .await
-                                                {
+                                            {
+                                                Ok(rel_path) => {
+                                                    if let Err(e) = task_results::insert_task_result(
+                                                        self.task_store.pool(),
+                                                        task_id,
+                                                        plugin_name,
+                                                        &output.result_name,
+                                                        db_format,
+                                                        output.data.len() as i64,
+                                                        &rel_path,
+                                                    )
+                                                    .await
+                                                    {
+                                                        error!(
+                                                            task_id,
+                                                            plugin_name,
+                                                            result_name = output.result_name.as_str(),
+                                                            error = %e,
+                                                            "Failed to insert task result into DB"
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
                                                     error!(
                                                         task_id,
                                                         plugin_name,
                                                         result_name = output.result_name.as_str(),
                                                         error = %e,
-                                                        "Failed to insert task result into DB"
+                                                        "Failed to store task result to filesystem"
                                                     );
                                                 }
                                             }
-                                            Err(e) => {
-                                                error!(
-                                                    task_id,
-                                                    plugin_name,
-                                                    result_name = output.result_name.as_str(),
-                                                    error = %e,
-                                                    "Failed to store task result to filesystem"
-                                                );
-                                            }
                                         }
                                     }
+                                    Err(e) => {
+                                        error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Plugin execution failed");
-                                }
+                                handle.release().await;
                             }
-                            handle.release().await;
-                        }
-                        Err(e) => {
-                            warn!(task_id, plugin_id = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                            Err(e) => {
+                                warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                            }
                         }
                     }
+                    .instrument(debug_span!("plugin.execute", plugin = %plugin_id))
+                    .await;
                 }
             }) => result.is_err(),
             _ = shutdown_rx.wait_for(|v| *v) => {

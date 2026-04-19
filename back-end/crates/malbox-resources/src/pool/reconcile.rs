@@ -7,7 +7,7 @@ use malbox_database::repositories::machinery::{self, MachineArch, MachineStatusD
 use malbox_database::repositories::provision_runs;
 use malbox_database::repositories::snapshots;
 use malbox_machinery::provider::capabilities::snapshot::SnapshotId;
-use tracing::{error, info, warn};
+use tracing::{debug, debug_span, error, info, instrument, warn};
 
 use super::provisioning::hash_provider_config;
 use super::revert::destroy_by_provider_id;
@@ -15,6 +15,7 @@ use super::{DbMachine, MachinePool};
 
 impl MachinePool {
     /// Reconcile DB state against the provider on startup.
+    #[instrument(skip_all, fields(machine_count = tracing::field::Empty), err)]
     pub async fn reconcile(&self) -> Result<()> {
         info!("Reconciling machine pool with provider");
 
@@ -33,6 +34,8 @@ impl MachinePool {
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))?;
 
+        tracing::Span::current().record("machine_count", db_machines.len());
+
         if db_machines.is_empty() {
             info!("No machines in database, nothing to reconcile");
             return Ok(());
@@ -49,6 +52,7 @@ impl MachinePool {
                 Some(id) => id,
                 None => continue,
             };
+            let _span = debug_span!("reconcile.machine", machine_id).entered();
 
             match db_machine.status {
                 MachineStatusDb::Creating => {
@@ -108,7 +112,7 @@ impl MachinePool {
                 }
 
                 MachineStatusDb::Failed => {
-                    info!(machine_id, "Machine already failed, skipping");
+                    debug!(machine_id, "Machine already failed, skipping");
                 }
             }
         }

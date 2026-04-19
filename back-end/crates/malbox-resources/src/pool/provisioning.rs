@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::net::{IpAddr, SocketAddr};
 use tokio::net::TcpStream;
 use tokio::time::Instant;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 /// Compute a deterministic hash of a provider_config value.
 pub(crate) fn hash_provider_config(config: &Option<toml::Value>) -> String {
@@ -93,6 +93,7 @@ fn build_create_params_from_db(
 
 impl MachinePool {
     /// Create a machine from an image and take a base snapshot.
+    #[instrument(skip_all, fields(machine_id), err)]
     pub(crate) async fn setup_machine(&self, machine_id: i32, image_path: &str) -> Result<()> {
         let allocate = self.provider.allocate();
 
@@ -186,6 +187,7 @@ impl MachinePool {
 
     /// Create a machine from a config definition: allocate, wait for endpoint, base snapshot.
     /// Does NOT mark the machine Ready — the caller is responsible for that.
+    #[instrument(skip_all, fields(machine_id), err)]
     pub(crate) async fn setup_machine_from_config(
         &self,
         machine_id: i32,
@@ -268,6 +270,7 @@ impl MachinePool {
     /// Run a provisioning step against a ready machine.
     ///
     /// Returns the completed ProvisionRun record.
+    #[instrument(skip_all, fields(machine_id, step = %step.provisioner_type), err)]
     pub async fn run_provision_step(
         &self,
         machine_id: i32,

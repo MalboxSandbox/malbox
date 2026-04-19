@@ -8,6 +8,7 @@ pub mod watcher;
 use arc_swap::ArcSwap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tracing::info;
 
 use error::RegistryError;
 use scanner::Scanner;
@@ -46,10 +47,10 @@ impl PluginRegistry {
         let scanner = Scanner::new(plugin_dir.clone());
         let entries = scanner.scan_all()?;
 
-        tracing::info!(
+        info!(
             count = entries.len(),
             dir = %plugin_dir.display(),
-            "Initial plugin scan complete"
+            "Plugin scan complete"
         );
 
         let plugins = entries

@@ -7,7 +7,8 @@ use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::{Level, info};
 
 mod error;
 mod images;
@@ -46,7 +47,15 @@ pub async fn serve(
     };
 
     let app = api_router()
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(
+                    DefaultMakeSpan::new()
+                        .level(Level::INFO)
+                        .include_headers(false),
+                )
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(shared_state.clone());
 
     let host = shared_state.config.http.host;
@@ -57,7 +66,7 @@ pub async fn serve(
         .await
         .map_err(|e| format!("error binding TcpListener: {}", e))?;
 
-    tracing::info!("[STARTUP] listening on http://{}", address);
+    info!(address = %address, "HTTP server listening");
 
     axum::serve(listener, app)
         .await

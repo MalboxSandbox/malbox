@@ -13,7 +13,7 @@ use malbox_machinery::{Machine as RuntimeMachine, MachineId, Platform};
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info};
 
 pub type DbMachine = machinery::Machine;
 
@@ -181,7 +181,7 @@ impl MachinePool {
                 )));
             }
 
-            warn!(
+            debug!(
                 %addr,
                 elapsed_secs = start.elapsed().as_secs(),
                 "Waiting for guest plugin..."

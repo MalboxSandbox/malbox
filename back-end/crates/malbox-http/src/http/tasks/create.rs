@@ -63,6 +63,7 @@ struct CreateTaskRequest {
     target_filename: Option<String>,
 }
 
+#[tracing::instrument(skip_all, fields(task_id = tracing::field::Empty), err)]
 #[debug_handler]
 async fn create_task_from_file(
     State(state): State<AppState>,
@@ -81,6 +82,7 @@ async fn create_task_from_file(
     let task = create_task(&state, &request, &file_info, sample.id).await?;
 
     let task_id = task.id.expect("Task must have an ID");
+    tracing::Span::current().record("task_id", task_id);
 
     // Send task to scheduler for processing
     state
@@ -89,7 +91,7 @@ async fn create_task_from_file(
         .await
         .map_err(|e| Error::Internal(format!("Failed to send task to scheduler: {}", e)))?;
 
-    info!("Task {} submitted to scheduler", task_id);
+    info!(task_id, "Task submitted to scheduler");
 
     Ok(Json(TaskResponse {
         task_id: task.id.unwrap(),

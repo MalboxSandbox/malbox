@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 /// Decide whether `ensure_capacity` should spawn another worker.
 ///
@@ -120,10 +120,7 @@ impl WorkerPool {
 
         *self.deps.lock().expect("deps mutex poisoned") = Some(deps);
 
-        info!(
-            count = self.min_workers,
-            "Worker pool initialized (baseline)"
-        );
+        debug!(count = self.min_workers, "Worker pool initialized");
     }
 
     /// Spawn a single worker with the given idle_timeout policy.
@@ -145,7 +142,7 @@ impl WorkerPool {
         );
 
         let worker_id = worker.id().clone();
-        info!(
+        debug!(
             worker_id = %worker_id,
             idle_timeout_ms = ?idle_timeout.map(|d| d.as_millis()),
             "Spawning worker"

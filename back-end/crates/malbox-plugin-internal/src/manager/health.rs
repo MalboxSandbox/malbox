@@ -65,7 +65,7 @@ pub fn spawn_health_check_loop(
                         },
                         plugin_id
                     );
-                    warn!("{}", reason);
+                    warn!(reason = %reason, "Plugin failed health check");
                     instance.lifecycle = PluginLifecycle::Failed { reason };
                 }
 

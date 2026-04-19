@@ -63,6 +63,13 @@ pub fn spawn_log_consumer(
 
         let mut writer = std::io::BufWriter::new(file);
 
+        info!(
+            target: "guest",
+            plugin = %plugin_id,
+            path = %log_file_path.display(),
+            "Guest plugin log file opened"
+        );
+
         loop {
             match stream.message().await {
                 Ok(Some(entry)) => {
@@ -121,19 +128,44 @@ fn forward_to_tracing(plugin_id: &PluginId, entry: &proto::LogEntry) {
 
     match level {
         proto::LogLevel::Trace => {
-            trace!(plugin = %plugin_id, target = %target, "[guest] {message}");
+            trace!(
+                target: "guest",
+                plugin = %plugin_id,
+                guest_target = %target,
+                "{}", message
+            );
         }
         proto::LogLevel::Debug => {
-            debug!(plugin = %plugin_id, target = %target, "[guest] {message}");
+            debug!(
+                target: "guest",
+                plugin = %plugin_id,
+                guest_target = %target,
+                "{}", message
+            );
         }
         proto::LogLevel::Info => {
-            info!(plugin = %plugin_id, target = %target, "[guest] {message}");
+            info!(
+                target: "guest",
+                plugin = %plugin_id,
+                guest_target = %target,
+                "{}", message
+            );
         }
         proto::LogLevel::Warn => {
-            warn!(plugin = %plugin_id, target = %target, "[guest] {message}");
+            warn!(
+                target: "guest",
+                plugin = %plugin_id,
+                guest_target = %target,
+                "{}", message
+            );
         }
         proto::LogLevel::Error => {
-            error!(plugin = %plugin_id, target = %target, "[guest] {message}");
+            error!(
+                target: "guest",
+                plugin = %plugin_id,
+                guest_target = %target,
+                "{}", message
+            );
         }
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+use tracing::{debug, error, warn};
 use virt::{connect::Connect, storage_pool::StoragePool};
 
 mod capabilities;
@@ -239,13 +240,13 @@ fn install_libvirt_error_handler() {
 
         match level as virt::sys::virErrorLevel {
             virt::sys::VIR_ERR_WARNING => {
-                tracing::warn!(target: "libvirt", "{}", message);
+                warn!(target: "libvirt", "{}", message);
             }
             virt::sys::VIR_ERR_ERROR => {
-                tracing::error!(target: "libvirt", "{}", message);
+                error!(target: "libvirt", "{}", message);
             }
             _ => {
-                tracing::debug!(target: "libvirt", "{}", message);
+                debug!(target: "libvirt", "{}", message);
             }
         }
     }

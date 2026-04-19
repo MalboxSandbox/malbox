@@ -109,17 +109,12 @@ impl AnsibleProvisioner {
 
 #[async_trait]
 impl Provisioner for AnsibleProvisioner {
+    #[tracing::instrument(skip_all, fields(playbook = %self.config.playbook.display(), machine_ip = %context.endpoint.address), err)]
     async fn provision(
         &self,
         context: &ProvisionContext,
     ) -> Result<ProvisionResult, Box<dyn std::error::Error + Send + Sync>> {
         let machine_ip = context.endpoint.address.to_string();
-
-        info!(
-            playbook = %self.config.playbook.display(),
-            machine_ip = %machine_ip,
-            "Starting Ansible provisioning"
-        );
 
         // Determine inventory source.
         // If "dynamic", create a temp file with the machine IP and

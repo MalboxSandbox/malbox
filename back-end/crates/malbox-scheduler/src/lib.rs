@@ -11,7 +11,7 @@ use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
-use tracing::info;
+use tracing::{error, info};
 
 pub mod error;
 pub mod scheduler;
@@ -38,8 +38,6 @@ pub async fn init_scheduler(
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
 ) -> Result<(mpsc::Sender<Task>, oneshot::Sender<()>)> {
-    info!("Initializing scheduler");
-
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -57,7 +55,7 @@ pub async fn init_scheduler(
 
     tokio::spawn(async move {
         if let Err(e) = scheduler.run(task_rx, shutdown_rx).await {
-            tracing::error!(error = %e, "Scheduler exited with error");
+            error!(error = %e, "Scheduler exited with error");
         }
     });
 

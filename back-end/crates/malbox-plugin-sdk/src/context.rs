@@ -10,6 +10,7 @@ use malbox_plugin_transport::traits::TransportEmitter;
 use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::{info, warn};
 
 /// Sender half of the result streaming channel.
 ///
@@ -100,7 +101,7 @@ impl<'a> Context<'a> {
     /// over it. Otherwise, just logs the progress.
     pub fn emit_progress(&self, progress: f64, message: &str) -> Result<()> {
         let clamped = progress.clamp(0.0, 1.0);
-        tracing::info!(progress = clamped, message, "plugin_progress");
+        info!(kind = "progress", progress = clamped, %message, "Plugin progress");
 
         if let Some(ref tx) = self.result_tx {
             // Encode progress as JSON in the data field
@@ -135,7 +136,7 @@ impl<'a> Context<'a> {
 
     /// Log a warning that will be attached to the task report.
     pub fn warn(&self, message: &str) -> Result<()> {
-        tracing::warn!(message, "plugin_warning");
+        warn!(kind = "warning", %message, "Plugin warning");
         Ok(())
     }
 

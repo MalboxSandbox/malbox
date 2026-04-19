@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::PluginHandle;
@@ -47,6 +47,7 @@ pub struct PluginManager {
 impl PluginManager {
     /// Create a new plugin manager, spawning all persistent host plugins and
     /// starting the background health check loop.
+    #[instrument(skip_all, err)]
     pub async fn new(
         registry: Arc<PluginRegistry>,
         emitter: Arc<EventEmitter>,
@@ -79,10 +80,7 @@ impl PluginManager {
         let health_check_handle =
             spawn_health_check_loop(Arc::clone(&instances), health_check_interval, shutdown_rx);
 
-        info!(
-            count = instances.len(),
-            "plugin manager initialized with persistent plugins"
-        );
+        info!(count = instances.len(), "Plugin manager initialized");
 
         Ok(Self {
             instances,
@@ -168,6 +166,7 @@ impl PluginManager {
     /// [`PluginInstance`] in the [`Ready`](PluginLifecycle::Ready) state. The
     /// instance is inserted into the instances map so it can be acquired by
     /// workers for task execution.
+    #[instrument(skip_all, fields(plugin = %plugin_id, addr = %addr), err)]
     pub async fn register_guest(&self, plugin_id: &PluginId, addr: String) -> Result<()> {
         let snapshot = self.registry.snapshot();
         let entry = snapshot

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 /// Host plugin runtime.
 pub struct HostRuntime<P> {
@@ -35,7 +35,7 @@ pub struct HostRuntime<P> {
 impl<P: Plugin> HostRuntime<P> {
     /// Create a new host plugin runtime.
     pub fn new(plugin: P, meta: PluginMeta) -> Result<Self> {
-        info!("Initializing host runtime for '{}'", meta.name);
+        info!(plugin = %meta.name, "Initializing host runtime");
 
         let node = NodeBuilder::new()
             .create::<IpcService>()
@@ -47,7 +47,7 @@ impl<P: Plugin> HostRuntime<P> {
         let emitter = EventEmitter::new(&node, plugin_channel::EVENTS, plugin_channel::PAYLOADS)
             .map_err(|e| SdkError::Init(format!("Failed to create event emitter: {}", e)))?;
 
-        info!("Host runtime for '{}' initialized", meta.name);
+        info!(plugin = %meta.name, "Host runtime initialized");
 
         Ok(Self {
             plugin,
@@ -59,6 +59,7 @@ impl<P: Plugin> HostRuntime<P> {
     }
 
     /// Run the plugin event loop. Blocks until shutdown.
+    #[instrument(skip_all, fields(plugin = %self.meta.name), err)]
     pub fn run(&self) -> Result<()> {
         let ctx = Context::new(&self.emitter, None, None);
 
@@ -67,41 +68,41 @@ impl<P: Plugin> HostRuntime<P> {
 
         // Emit PluginStarted
         ctx.emit_event(Event::PluginStarted { plugin_id: 0 })?;
-        info!("Plugin '{}' started, entering event loop", self.meta.name);
+        info!(plugin = %self.meta.name, "Plugin started, entering event loop");
 
         // Event loop
         loop {
             if self.shutdown.load(Ordering::Relaxed) {
-                info!("Shutdown signal received for '{}'", self.meta.name);
+                info!(plugin = %self.meta.name, "Shutdown signal received");
                 break;
             }
 
             match self.receiver.wait(Duration::from_millis(100)) {
                 Ok(Some(event)) => {
-                    debug!("Received event: {:?}", event);
+                    debug!(?event, "Received event");
                     if matches!(event, Event::DaemonShutdown) {
                         self.shutdown.store(true, Ordering::Relaxed);
                     }
                     if let Err(e) = self.plugin.on_event(event, &ctx) {
-                        error!("Handler error in '{}': {}", self.meta.name, e);
+                        error!(plugin = %self.meta.name, error = %e, "Handler error");
                     }
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    error!("Transport error in '{}': {}", self.meta.name, e);
+                    error!(plugin = %self.meta.name, error = %e, "Transport error");
                 }
             }
         }
 
         // Call on_stop
         if let Err(e) = self.plugin.on_stop() {
-            error!("on_stop error in '{}': {}", self.meta.name, e);
+            error!(plugin = %self.meta.name, error = %e, "on_stop error");
         }
 
         // Emit PluginStopped
         let _ = ctx.emit_event(Event::PluginStopped { plugin_id: 0 });
 
-        info!("Plugin '{}' runtime exited", self.meta.name);
+        info!(plugin = %self.meta.name, "Plugin runtime exited");
         Ok(())
     }
 }

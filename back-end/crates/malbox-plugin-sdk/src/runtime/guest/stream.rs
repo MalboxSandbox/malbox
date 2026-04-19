@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tonic::Status;
-use tracing::error;
+use tracing::{error, instrument};
 
 use super::exec::ExecutionWaiter;
 
@@ -25,6 +25,7 @@ use super::exec::ExecutionWaiter;
 ///
 /// This is invoked from `tokio::task::spawn_blocking` so it can call into
 /// the plugin's synchronous `on_task` method without blocking the runtime.
+#[instrument(skip_all, fields(task_id))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_task<P: Plugin>(
     plugin: Arc<P>,
@@ -45,7 +46,7 @@ pub(super) fn execute_task<P: Plugin>(
         kind: proto::ResultKind::Ready.into(),
     };
     if let Err(e) = result_tx.blocking_send(Ok(ready_result)) {
-        error!("Failed to send READY signal: {}", e);
+        error!(error = %e, "Failed to send READY signal");
         return;
     }
 
@@ -67,7 +68,7 @@ pub(super) fn execute_task<P: Plugin>(
     let task = Task::new(task_id, sample_path, config);
 
     if let Err(e) = plugin.on_task(task, &ctx) {
-        error!("Plugin task handler error: {}", e);
+        error!(error = %e, "Plugin task handler error");
     }
 
     // Always send the final marker, regardless of success/failure.
@@ -82,7 +83,7 @@ pub(super) fn execute_task<P: Plugin>(
         kind: proto::ResultKind::Result.into(),
     };
     if let Err(e) = emitter.send_task_result(final_marker) {
-        error!("Failed to send final marker: {}", e);
+        error!(error = %e, "Failed to send final marker");
     }
 }
 

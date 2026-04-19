@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
@@ -74,6 +74,7 @@ impl PluginHandle {
     /// This dispatches the task to the plugin process via the appropriate
     /// transport (IPC for host plugins, gRPC for guest plugins) and waits
     /// for the plugin to produce its result outputs.
+    #[instrument(skip_all, fields(plugin = %self.plugin_id(), task_id), err)]
     pub async fn execute_task(
         &self,
         task_id: i32,

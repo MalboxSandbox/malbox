@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use tokio::sync::OnceCell;
-use tracing::info;
+use tracing::debug;
 
 pub mod cli;
 pub mod core;
@@ -40,10 +40,10 @@ async fn load_config_internal() -> Result<Config, ConfigError> {
     let paths = PathConfig::new()?;
 
     let config_path = if let Some(path) = find_user_config(&paths) {
-        info!("Using user config at {}", path.display());
+        debug!(path = %path.display(), "Loaded user config");
         path
     } else if let Some(path) = find_system_config() {
-        info!("Using system config at {}", path.display());
+        debug!(path = %path.display(), "Loaded system config");
         path
     } else {
         return Err(ConfigError::NotFound);
@@ -65,7 +65,7 @@ async fn load_config_internal() -> Result<Config, ConfigError> {
     config.paths = paths;
 
     config.paths.ensure_dirs_exist().await?;
-    tracing::debug!("Using paths: {:#?}", config.paths);
+    debug!("Using paths: {:#?}", config.paths);
 
     Ok(config)
 }

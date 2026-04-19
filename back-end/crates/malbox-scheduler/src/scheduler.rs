@@ -16,7 +16,7 @@ use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 /// The scheduler orchestrates task ingestion, queuing, and worker management.
 pub struct Scheduler {
@@ -68,7 +68,7 @@ impl Scheduler {
         // 1. Reset tasks stranded in transient states from a prior daemon run.
         match self.task_store.recover_orphaned_tasks().await {
             Ok(0) => {}
-            Ok(count) => info!(count, "Reset orphaned tasks from prior run to 'failed'"),
+            Ok(count) => warn!(count, "Reset orphaned tasks from prior run to 'failed'"),
             Err(e) => error!(error = %e, "Failed to reset orphaned tasks"),
         }
 
@@ -107,10 +107,10 @@ impl Scheduler {
             Arc::clone(&self.result_store),
         );
 
-        info!(
+        debug!(
             max_workers = self.max_workers,
             min_workers = self.min_workers,
-            "Scheduler running"
+            "Scheduler run loop entered"
         );
 
         // 5. For each recovered pending task (beyond the baseline), give the
@@ -136,7 +136,7 @@ impl Scheduler {
                 task_queue.enqueue(task_id, priority).await;
                 worker_pool.ensure_capacity();
 
-                info!(task_id, priority, "Task ingested into queue");
+                debug!(task_id, priority, "Task ingested into queue");
             }
             info!("Task ingestion channel closed");
         });

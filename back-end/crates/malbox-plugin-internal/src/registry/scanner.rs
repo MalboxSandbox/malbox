@@ -1,6 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use tracing::warn;
 
 use super::error::ScanError;
 use super::manifest::{PluginTypeConfig, parse_manifest};
@@ -34,7 +35,7 @@ impl Scanner {
             match self.scan_one(&path) {
                 Ok(entry) => entries.push(entry),
                 Err(e) => {
-                    tracing::warn!(
+                    warn!(
                         path = %path.display(),
                         error = %e,
                         "Skipping plugin directory"

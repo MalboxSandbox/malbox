@@ -10,6 +10,7 @@ use malbox_config::provisioning::ProvisionStep;
 use malbox_database::repositories::{provision_runs, snapshots};
 use malbox_resources::error::ResourceError;
 use serde::Deserialize;
+use tracing::{error, info};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -173,7 +174,7 @@ async fn provision_machine(
                     plugin_info.insert("port".to_string(), toml::Value::Integer(port as i64));
                     plugins_table.insert(name.clone(), toml::Value::Table(plugin_info));
 
-                    tracing::info!(
+                    info!(
                         plugin = name.as_str(),
                         port,
                         binary = %entry.binary_path.display(),
@@ -263,7 +264,7 @@ fn json_to_toml(val: serde_json::Value) -> toml::Value {
 
 /// Map a `ResourceError` to an appropriate HTTP response.
 fn resource_error_response(err: ResourceError) -> axum::response::Response {
-    tracing::error!(error = %err, "Request failed");
+    error!(error = %err, "Request failed");
     let (status, message) = match &err {
         ResourceError::MachineNotFound { .. } => (StatusCode::NOT_FOUND, err.to_string()),
         ResourceError::MachineAssigned { .. } => (StatusCode::CONFLICT, err.to_string()),

@@ -1,5 +1,6 @@
 use super::error::{Result, StorageError};
 use std::path::{Path, PathBuf};
+use tracing::info;
 
 /// Format of a stored plugin result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +97,7 @@ impl ResultStore {
         tmp.persist(&dest).map_err(|e| e.error)?;
 
         let relative = Self::relative_path(task_id, plugin_name, result_name, format);
-        tracing::info!(
+        info!(
             task_id,
             plugin_name,
             result_name,

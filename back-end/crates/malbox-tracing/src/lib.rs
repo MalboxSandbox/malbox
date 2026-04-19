@@ -1,73 +1,91 @@
-use ansi_term::Colour::{Blue, Cyan, Green, Red, Yellow};
-use ansi_term::Style;
-use std::fmt;
-use tracing_subscriber::{
-    EnvFilter,
-    fmt::{
-        FormatEvent, FormatFields, Layer,
-        format::Writer,
-        time::{FormatTime, SystemTime},
-    },
-    layer::SubscriberExt,
-    registry::LookupSpan,
-    util::SubscriberInitExt,
-};
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-// NOTE: Using a custom format here, since we might want to display further
-// information with specific formats in the future
-// Such as:
-// - Specific SQL queries
-// - HTTP request details
-// - ...
-
-struct CustomFormatter;
-
-impl<S, N> FormatEvent<S, N> for CustomFormatter
-where
-    S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static,
-{
-    fn format_event(
-        &self,
-        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
-        mut writer: Writer<'_>,
-        event: &tracing::Event<'_>,
-    ) -> fmt::Result {
-        let timer = SystemTime::default();
-        timer.format_time(&mut writer)?;
-
-        write!(writer, " ")?;
-
-        let level = match *event.metadata().level() {
-            tracing::Level::ERROR => Red.bold().paint("ERROR"),
-            tracing::Level::WARN => Yellow.bold().paint("WARN"),
-            tracing::Level::INFO => Green.bold().paint("INFO"),
-            tracing::Level::DEBUG => Blue.bold().paint("DEBUG"),
-            tracing::Level::TRACE => Style::new().dimmed().paint("TRACE"),
-        };
-        write!(writer, "{} ", level)?;
-
-        write!(writer, "{} ", Cyan.paint(event.metadata().target()))?;
-
-        if let (Some(file), Some(line)) = (event.metadata().file(), event.metadata().line()) {
-            write!(writer, "{} ", Yellow.paint(format!("{}:{}", file, line)))?;
-        }
-
-        ctx.field_format().format_fields(writer.by_ref(), event)?;
-        writeln!(writer)
+/// Parse a log-level string ("error" | "warn" | "info" | "debug" | "trace",
+/// case-insensitive) into a `LevelFilter`.
+pub fn parse_log_level(s: &str) -> Result<LevelFilter, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "error" => Ok(LevelFilter::ERROR),
+        "warn" => Ok(LevelFilter::WARN),
+        "info" => Ok(LevelFilter::INFO),
+        "debug" => Ok(LevelFilter::DEBUG),
+        "trace" => Ok(LevelFilter::TRACE),
+        other => Err(format!(
+            "invalid log level `{other}`: expected error|warn|info|debug|trace"
+        )),
     }
 }
 
-pub fn init_tracing(log_level: &str) {
-    let fmt_layer = Layer::default()
-        .event_format(CustomFormatter)
-        .with_ansi(true);
+/// Initialise the global tracing subscriber.
+///
+/// `default_level` is the fallback filter used when `RUST_LOG` is not set.
+/// `RUST_LOG` always wins when present.
+pub fn init_tracing(default_level: LevelFilter) {
+    use tracing_error::ErrorLayer;
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("malbox={},libvirt={}", log_level, log_level)));
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(true)
+        .with_file(true)
+        .with_line_number(true);
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Guest plugins can be chatty; their full output is written to a per-plugin log
+        // file, so we only surface warn/error in the daemon log by default. Override with
+        // `RUST_LOG=guest=<lvl>,...` for verbose forwarding.
+        EnvFilter::new(format!(
+            "malbox={lvl},libvirt={lvl},guest=warn",
+            lvl = default_level
+        ))
+    });
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt_layer)
+        .with(ErrorLayer::default())
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_log_level_accepts_standard_levels() {
+        assert_eq!(parse_log_level("error").unwrap(), LevelFilter::ERROR);
+        assert_eq!(parse_log_level("warn").unwrap(), LevelFilter::WARN);
+        assert_eq!(parse_log_level("info").unwrap(), LevelFilter::INFO);
+        assert_eq!(parse_log_level("debug").unwrap(), LevelFilter::DEBUG);
+        assert_eq!(parse_log_level("trace").unwrap(), LevelFilter::TRACE);
+    }
+
+    #[test]
+    fn parse_log_level_is_case_insensitive() {
+        assert_eq!(parse_log_level("INFO").unwrap(), LevelFilter::INFO);
+        assert_eq!(parse_log_level("Warn").unwrap(), LevelFilter::WARN);
+    }
+
+    #[test]
+    fn parse_log_level_rejects_garbage() {
+        assert!(parse_log_level("banana").is_err());
+        assert!(parse_log_level("").is_err());
+    }
+
+    #[test]
+    fn span_trace_captures_active_span_when_error_layer_is_installed() {
+        use tracing_error::{ErrorLayer, SpanTrace};
+        use tracing_subscriber::prelude::*;
+
+        let subscriber = tracing_subscriber::registry().with(ErrorLayer::default());
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let span = tracing::info_span!("outer", key = "value");
+        let _enter = span.enter();
+
+        let trace = SpanTrace::capture();
+        let rendered = format!("{trace}");
+        assert!(
+            rendered.contains("outer"),
+            "span trace should mention `outer` span, got: {rendered}"
+        );
+    }
 }

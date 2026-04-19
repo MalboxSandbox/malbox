@@ -3,23 +3,35 @@ use color_eyre::Result;
 use malbox_cli::api::ApiClient;
 use malbox_cli::commands::{Cli, Command, Context};
 use malbox_tracing::init_tracing;
+use tracing::level_filters::LevelFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing("debug");
-
     color_eyre::install()?;
 
     let config = malbox_config::load_config().await?;
     let cli_config =
         malbox_config::cli::load_cli_config().map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
+    let cli = Cli::parse();
+
+    // Quiet by default: the CLI talks to the user via stdout/indicatif.
+    // `-v/--verbose` surfaces internal tracing for diagnostics.
+    let log_level = if cli.verbose {
+        LevelFilter::DEBUG
+    } else {
+        LevelFilter::WARN
+    };
+    init_tracing(log_level);
+
+    let api_url = cli.api_url.as_deref().unwrap_or(&cli_config.api.url);
+
     let ctx = Context {
         config: config.clone(),
-        api: ApiClient::new(&cli_config.api.url),
+        api: ApiClient::new(api_url),
+        format: cli.format.clone(),
+        verbose: cli.verbose,
     };
-
-    let cli = Cli::parse();
 
     cli.execute(&ctx)
         .await

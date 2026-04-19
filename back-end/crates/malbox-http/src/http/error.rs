@@ -7,6 +7,7 @@ use axum::{
 use malbox_database::{DatabaseError, Error as SqlxError};
 use std::collections::HashMap;
 use std::{any, borrow::Cow};
+use tracing::error;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -66,7 +67,7 @@ impl IntoResponse for Error {
                 (self.status_code(), headers, self.to_string()).into_response()
             }
             Self::Internal(ref msg) => {
-                tracing::error!("Internal error: {}", msg);
+                error!(details = %msg, "Internal error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "An internal server error occured",
@@ -80,7 +81,7 @@ impl IntoResponse for Error {
 
 impl From<SqlxError> for Error {
     fn from(err: SqlxError) -> Self {
-        tracing::error!("Database error: {:?}", err);
+        error!(error = ?err, "Database error");
         Error::Internal("Database error occurred".to_string())
     }
 }

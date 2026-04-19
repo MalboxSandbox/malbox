@@ -4,6 +4,7 @@ pub mod results;
 
 use error::{Result, StorageError};
 use std::path::{Path, PathBuf};
+use tracing::{debug, info};
 
 /// Content-addressed sample file storage.
 ///
@@ -47,7 +48,7 @@ impl SampleStore {
         let dest = self.path(sha256)?;
 
         if tokio::fs::try_exists(&dest).await.unwrap_or(false) {
-            tracing::debug!(sha256, "Sample already exists, skipping write");
+            debug!(sha256, "Sample already exists, skipping write");
             return Ok(dest);
         }
 
@@ -61,7 +62,7 @@ impl SampleStore {
         tokio::fs::write(tmp.path(), data).await?;
         tmp.persist(&dest).map_err(|e| e.error)?;
 
-        tracing::info!(sha256, path = %dest.display(), "Sample stored");
+        info!(sha256, path = %dest.display(), "Sample stored");
         Ok(dest)
     }
 }

@@ -2,6 +2,7 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as Not
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tracing::error;
 
 use super::error::WatcherError;
 use super::types::PluginId;
@@ -34,7 +35,7 @@ impl Watcher {
             let event = match res {
                 Ok(e) => e,
                 Err(e) => {
-                    tracing::error!(error = %e, "Filesystem watcher error");
+                    error!(error = %e, "Filesystem watcher error");
                     return;
                 }
             };

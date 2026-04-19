@@ -9,6 +9,7 @@ use axum::{
 use malbox_database::repositories::images::{self, NewImage};
 use malbox_database::repositories::machinery::{MachineArch, MachinePlatform};
 use serde::Deserialize;
+use tracing::info;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -82,7 +83,7 @@ async fn register_image(
     let filename = format!("{}.{}", &request.name, &format);
     let dest = images_dir.join(&filename);
 
-    tracing::info!(
+    info!(
         src = %src.display(),
         dest = %dest.display(),
         "Moving image to managed store"

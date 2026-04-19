@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::oneshot;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Configuration for the guest plugin runtime.
 pub struct GuestRuntimeConfig {
@@ -143,7 +143,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         // orphan files left behind by a prior crashed run.
         let stash_dir = self.config.work_dir.join("_stash");
         if let Err(e) = ResultStash::sweep_orphans_on_startup(&stash_dir) {
-            tracing::warn!(error = %e, "failed to sweep result stash orphans on startup");
+            warn!(error = %e, "failed to sweep result stash orphans on startup");
         }
         let stash_config = {
             let threshold = std::env::var("MALBOX_STASH_THRESHOLD")
@@ -177,7 +177,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
                     ticker.tick().await;
                     let n = sweep_stash.sweep_expired();
                     if n > 0 {
-                        tracing::warn!(
+                        warn!(
                             reclaimed = n,
                             "TTL sweep reclaimed stale result stash entries"
                         );
@@ -198,7 +198,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| self.config.work_dir.join("_logs"));
                 if let Err(e) = std::fs::create_dir_all(&log_dir) {
-                    tracing::warn!(error = %e, "failed to create log overflow dir");
+                    warn!(error = %e, "failed to create log overflow dir");
                 }
                 sweep_log_overflow_orphans(&log_dir);
                 let overflow_path =
@@ -223,7 +223,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let server = GrpcServer::new(handler);
         let addr = self.config.listen_addr;
 
-        info!("Guest plugin gRPC server starting on {}", addr);
+        info!(address = %addr, "Guest plugin gRPC server starting");
 
         tonic::transport::Server::builder()
             .add_service(server.into_service())

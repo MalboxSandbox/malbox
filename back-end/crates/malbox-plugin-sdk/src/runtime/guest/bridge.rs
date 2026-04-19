@@ -75,7 +75,7 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
         let plugin = self.plugin.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if let Err(e) = plugin.on_stop() {
-                error!("Plugin on_stop error: {}", e);
+                error!(error = %e, "Plugin on_stop error");
             }
         })
         .await;
