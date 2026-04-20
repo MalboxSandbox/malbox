@@ -107,9 +107,16 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
         return -1;
     }
 
-    // Step 2: on_task
+    // Step 2: on_task -- needs a result channel so push_result works.
+    // Mirrors the real guest runtime, which wires a ResultSender for on_task
+    // and provides a tx-less context for lifecycle callbacks.
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+    let ctx_task = Context::test_new_with_tx(&emitter, tx);
     let task = Task::test_new(config.task_id, sample_path, config_map);
-    if let Err(e) = plugin.on_task(task, &ctx) {
+    let on_task_result = plugin.on_task(task, &ctx_task);
+    drop(ctx_task);
+    while rx.try_recv().is_ok() {}
+    if let Err(e) = on_task_result {
         set_last_error(&format!("on_task failed: {e}"));
         return -1;
     }
