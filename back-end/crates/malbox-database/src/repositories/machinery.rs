@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 #[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[sqlx(type_name = "machine_arch", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum MachineArch {
     X86,
     #[default]
@@ -15,6 +16,7 @@ pub enum MachineArch {
 
 #[derive(sqlx::Type, Debug, Serialize, Deserialize, Default, Clone, Hash, Eq, PartialEq)]
 #[sqlx(type_name = "machine_platform", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum MachinePlatform {
     #[default]
     Windows,
@@ -23,6 +25,7 @@ pub enum MachinePlatform {
 
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "machine_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum MachineStatusDb {
     Creating,
     Provisioning,
