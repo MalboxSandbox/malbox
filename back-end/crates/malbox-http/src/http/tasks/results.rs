@@ -11,6 +11,7 @@ use malbox_database::repositories::task_results::{
 use serde::Serialize;
 
 use super::super::AppState;
+use super::resolve_result_path;
 
 #[derive(Serialize)]
 struct TaskResultResponse {
@@ -55,12 +56,7 @@ async fn get_task_result_content(
         }
     };
 
-    let stored = std::path::Path::new(&result.file_path);
-    let abs_path = if stored.is_absolute() {
-        stored.to_path_buf()
-    } else {
-        state.config.paths.data_dir.join(stored)
-    };
+    let abs_path = resolve_result_path(&state.config, &result);
 
     let bytes = match tokio::fs::read(&abs_path).await {
         Ok(b) => b,

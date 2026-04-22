@@ -79,6 +79,7 @@ fn api_router() -> Router<AppState> {
         .fallback(handler_404)
         .merge(tasks::create::router())
         .merge(tasks::get::router())
+        .merge(tasks::report::router())
         .merge(tasks::results::router())
         .merge(images::router())
         .merge(machines::router())

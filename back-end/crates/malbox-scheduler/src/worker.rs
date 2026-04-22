@@ -20,7 +20,9 @@ use crate::error::{Result, SchedulerError};
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use malbox_database::repositories::samples::fetch_sample_by_id;
-use malbox_database::repositories::task_results::{self, ResultFormat as DbResultFormat};
+use malbox_database::repositories::task_results::{
+    self, ResultFormat as DbResultFormat, ResultRole,
+};
 use malbox_database::repositories::tasks::TaskState;
 use malbox_machinery::{
     Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineState, Platform,
@@ -724,6 +726,14 @@ impl Worker {
                                                 OutputFormat::Json => DbResultFormat::Json,
                                                 OutputFormat::Bytes => DbResultFormat::Bytes,
                                             };
+                                            let db_role = if matches!(output.format, OutputFormat::Json)
+                                                && output.result_name
+                                                    == malbox_plugin_transport::REPORT_RESULT_NAME
+                                            {
+                                                ResultRole::Report
+                                            } else {
+                                                ResultRole::Artifact
+                                            };
 
                                             match self
                                                 .result_store
@@ -743,6 +753,7 @@ impl Worker {
                                                         plugin_name,
                                                         &output.result_name,
                                                         db_format,
+                                                        db_role,
                                                         output.data.len() as i64,
                                                         &rel_path,
                                                     )

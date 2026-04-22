@@ -11,6 +11,8 @@ malbox-utils = { path = "../malbox-utils" }
 malbox-config = { path = "../malbox-config" }
 malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
+malbox-plugin-sdk = { path = "../malbox-plugin-sdk" }
+malbox-plugin-transport = { path = "../malbox-plugin-transport" }
 malbox-scheduler = { path = "../malbox-scheduler" }
 malbox-tracing = { path = "../malbox-tracing" }
 tokio = { workspace = true }
