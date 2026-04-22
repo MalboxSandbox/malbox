@@ -8,7 +8,7 @@
 		strokeWidth = 0,
 		...restProps
 	}: {
-		path: string | string[];
+		path: string | readonly string[];
 		viewBox?: string;
 		class?: string;
 		fill?: string;

@@ -2,10 +2,27 @@
 	import FileUpload from '$lib/components/FileUpload.svelte';
 	import SubmissionStats from '$lib/components/SubmissionStats.svelte';
 	import SystemStats from '$lib/components/SystemStats.svelte';
+	import { invalidate } from '$app/navigation';
+	import { startPolling } from '$lib/api/polling';
+	import type { PageData } from './$types';
+
+	interface Props {
+		data: PageData;
+	}
+
+	let { data }: Props = $props();
+
+	$effect(() => {
+		const stop = startPolling(() => invalidate('malbox:tasks'), {
+			intervalMs: 10_000,
+			pauseWhenHidden: true
+		});
+		return stop;
+	});
 </script>
 
-<div class="max-w-7xl mx-auto flex flex-col gap-8">
-	<div class="text-center space-y-3">
+<div class="mx-auto flex max-w-7xl flex-col gap-8">
+	<div class="space-y-3 text-center">
 		<h1 class="text-3xl font-semibold text-[var(--color-text-primary)]">
 			Upload your File, URL or Hash
 		</h1>
@@ -17,9 +34,8 @@
 
 	<FileUpload />
 
-	<!-- Statistics Section -->
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-		<SubmissionStats />
-		<SystemStats />
+	<div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+		<SubmissionStats tasks={data.tasks} />
+		<SystemStats machines={data.machines} />
 	</div>
 </div>
