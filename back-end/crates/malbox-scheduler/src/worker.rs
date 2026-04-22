@@ -38,6 +38,17 @@ use tokio::time::Duration;
 use tracing::{Instrument, debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 
+/// Extra time the host waits beyond the plugin's own analysis budget before
+/// declaring the task timed out.
+///
+/// The plugin typically uses its full `analysis_timeout` for sleep/monitor
+/// then flushes and emits a final marker. If the host's wrapping timeout
+/// matches the plugin's budget exactly, both timers expire simultaneously:
+/// the host drops the gRPC stream at the exact instant the plugin tries to
+/// deliver results, so nothing is ever written. The grace covers wake-up,
+/// final flush, and the final `send_task_result`.
+const ANALYSIS_TIMEOUT_GRACE_SECS: u64 = 60;
+
 /// Outcome of a single `execute_task` call.
 #[derive(Debug)]
 enum TaskOutcome {
@@ -351,11 +362,12 @@ impl Worker {
         let _busy = BusyGuard::new(Arc::clone(&self.busy_count));
 
         // --- Post-acquire: all paths guarded by unconditional cleanup ---
-        let analysis_secs = if task.timeout > 0 {
+        let plugin_timeout_secs = if task.timeout > 0 {
             task.timeout as u64
         } else {
             300
         };
+        let analysis_secs = plugin_timeout_secs.saturating_add(ANALYSIS_TIMEOUT_GRACE_SECS);
         let mut registered_guests = Vec::new();
 
         let work_result = self
@@ -684,9 +696,14 @@ impl Worker {
                         match self.plugin_manager.acquire(plugin_id).await {
                             Ok(handle) => {
                                 let mut config = std::collections::HashMap::new();
+                                // Advertise the plugin's own budget — the host's
+                                // wrapping timeout is `plugin budget + grace` so
+                                // the plugin has room to flush after its sleep.
+                                let plugin_timeout_secs = analysis_secs
+                                    .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
                                 config.insert(
                                     "analysis_timeout".to_string(),
-                                    task.timeout.to_string(),
+                                    plugin_timeout_secs.to_string(),
                                 );
                                 match handle.execute_task(task_id, &task.target, config).await {
                                     Ok(outputs) => {
