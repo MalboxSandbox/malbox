@@ -10,6 +10,16 @@ pub enum ResultFormat {
     Bytes,
 }
 
+/// Mirrors the `task_result_role` Postgres enum. A task output is either a
+/// structured `Report` envelope (JSON with `result_name = "report"`) or an
+/// opaque artifact (any other output).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "task_result_role", rename_all = "lowercase")]
+pub enum ResultRole {
+    Report,
+    Artifact,
+}
+
 /// Row from the `task_results` table.
 #[derive(FromRow, Debug, Clone)]
 pub struct TaskResult {
@@ -18,6 +28,7 @@ pub struct TaskResult {
     pub plugin_name: String,
     pub result_name: String,
     pub format: ResultFormat,
+    pub role: ResultRole,
     pub size_bytes: i64,
     pub file_path: String,
     pub created_on: OffsetDateTime,
@@ -30,22 +41,25 @@ pub async fn insert_task_result(
     plugin_name: &str,
     result_name: &str,
     format: ResultFormat,
+    role: ResultRole,
     size_bytes: i64,
     file_path: &str,
 ) -> Result<TaskResult> {
     query_as!(
         TaskResult,
         r#"
-        INSERT INTO task_results (task_id, plugin_name, result_name, format, size_bytes, file_path)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO task_results (task_id, plugin_name, result_name, format, role, size_bytes, file_path)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, task_id, plugin_name, result_name,
                   format AS "format: ResultFormat",
+                  role   AS "role: ResultRole",
                   size_bytes, file_path, created_on
         "#,
         task_id,
         plugin_name,
         result_name,
         format as ResultFormat,
+        role as ResultRole,
         size_bytes,
         file_path,
     )
@@ -68,6 +82,7 @@ pub async fn fetch_task_result(pool: &PgPool, result_id: i32) -> Result<Option<T
         r#"
         SELECT id, task_id, plugin_name, result_name,
                format AS "format: ResultFormat",
+               role   AS "role: ResultRole",
                size_bytes, file_path, created_on
         FROM task_results
         WHERE id = $1
@@ -92,9 +107,30 @@ pub async fn fetch_task_results(pool: &PgPool, task_id: i32) -> Result<Vec<TaskR
         r#"
         SELECT id, task_id, plugin_name, result_name,
                format AS "format: ResultFormat",
+               role   AS "role: ResultRole",
                size_bytes, file_path, created_on
         FROM task_results
         WHERE task_id = $1
+        ORDER BY created_on
+        "#,
+        task_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| TaskResultError::FetchFailed { task_id, source: e }.into())
+}
+
+/// Fetch only the `report` rows for a task. Uses the `(task_id, role)` index.
+pub async fn fetch_task_reports(pool: &PgPool, task_id: i32) -> Result<Vec<TaskResult>> {
+    query_as!(
+        TaskResult,
+        r#"
+        SELECT id, task_id, plugin_name, result_name,
+               format AS "format: ResultFormat",
+               role   AS "role: ResultRole",
+               size_bytes, file_path, created_on
+        FROM task_results
+        WHERE task_id = $1 AND role = 'report'::task_result_role
         ORDER BY created_on
         "#,
         task_id,

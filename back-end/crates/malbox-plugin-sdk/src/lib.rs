@@ -57,8 +57,11 @@ pub mod prelude {
     pub use crate::error::{Result, SdkError};
     pub use crate::plugin::Plugin;
     pub use crate::types::{
-        ExecRequest, ExecResult, ExecutionContext, ExecutionInfo, HealthStatus, PluginMeta,
-        PluginResult, PluginState, PluginType, Task,
+        ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecRequest,
+        ExecResult, ExecutionContext, ExecutionInfo, GraphEdge, GraphNode, HealthStatus, Indicator,
+        KvPair, PluginInfo, PluginMeta, PluginResult, PluginState, PluginType, REPORT_RESULT_NAME,
+        Report, ReportBuilder, SCHEMA_VERSION, Section, SectionBuilder, Task, TimelineEvent,
+        TreeNode, Ttp, Verdict,
     };
 
     // Re-export common dependencies so plugin authors don't need them in Cargo.toml
@@ -77,7 +80,8 @@ pub use context::Context;
 pub use error::{Result, SdkError};
 pub use plugin::Plugin;
 pub use types::{
-    ExecRequest, ExecResult, ExecutionInfo, HealthStatus, PluginMeta, PluginResult, Task,
+    ExecRequest, ExecResult, ExecutionInfo, HealthStatus, PluginMeta, PluginResult,
+    REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION, Task,
 };
 
 #[cfg(test)]

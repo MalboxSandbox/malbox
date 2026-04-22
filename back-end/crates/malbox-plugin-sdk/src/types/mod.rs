@@ -7,11 +7,17 @@
 mod exec;
 mod health;
 mod meta;
+pub mod report;
 mod result;
 mod task;
 
 pub use exec::{ExecRequest, ExecResult, ExecutionInfo};
 pub use health::HealthStatus;
 pub use meta::{ExecutionContext, PluginMeta, PluginState, PluginType};
+pub use report::{
+    ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, GraphEdge, GraphNode,
+    Indicator, KvPair, PluginInfo, REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION,
+    Section, SectionBuilder, TimelineEvent, TreeNode, Ttp, Verdict,
+};
 pub use result::PluginResult;
 pub use task::Task;

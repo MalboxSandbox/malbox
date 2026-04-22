@@ -13,6 +13,7 @@ set(TEST_SOURCES
     test_types.cpp
     test_result.cpp
     test_plugin.cpp
+    test_report.cpp
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
