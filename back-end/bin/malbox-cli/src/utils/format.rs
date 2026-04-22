@@ -137,3 +137,22 @@ pub fn total(count: usize, label: &str) {
         dim.apply_to(format!("Total: {} {}(s)", count, label))
     );
 }
+
+/// Render a byte count as a short human-readable string (e.g. "1.2 KB", "512 B").
+pub fn bytes(size: i64) -> String {
+    if size < 0 {
+        return "-".to_string();
+    }
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut value = size as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", size, UNITS[0])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit])
+    }
+}

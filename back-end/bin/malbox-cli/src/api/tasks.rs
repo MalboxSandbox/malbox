@@ -127,4 +127,17 @@ impl ApiClient {
         let response = self.check_response(response).await?;
         Ok(response.json().await?)
     }
+
+    pub async fn get_task_result_content(&self, task_id: i32, result_id: i32) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .get(self.url(&format!(
+                "/v1/tasks/{}/results/{}/content",
+                task_id, result_id
+            )))
+            .send()
+            .await?;
+        let response = self.check_response(response).await?;
+        Ok(response.bytes().await?.to_vec())
+    }
 }

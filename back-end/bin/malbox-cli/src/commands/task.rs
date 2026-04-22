@@ -1,11 +1,12 @@
 use crate::api::ApiClient;
 use crate::api::tasks::SubmitTaskRequest;
 use crate::commands::{Command, Context};
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::utils::format::{self, Detail, Table};
 use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
 use console::Style;
+use std::io::{IsTerminal, Write};
 
 #[derive(Parser)]
 #[command(about = "Manage analysis tasks")]
@@ -28,6 +29,11 @@ enum TaskCommands {
 struct GetArgs {
     /// Task ID
     id: i32,
+    /// Fetch and print the content of a specific result by its ID.
+    /// JSON results are pretty-printed to a terminal (raw when piped);
+    /// binary results are written raw when piped and refused on a TTY.
+    #[arg(long)]
+    result: Option<i32>,
 }
 
 #[derive(Parser)]
@@ -111,6 +117,10 @@ async fn list(api: &ApiClient) -> Result<()> {
 }
 
 async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
+    if let Some(result_id) = args.result {
+        return print_result_content(api, args.id, result_id).await;
+    }
+
     let task = api.get_task(args.id).await?;
 
     let tags_display = task
@@ -135,18 +145,11 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
     detail.print();
 
     let results = api.get_task_results(args.id).await?;
-    if !results.is_empty() {
-        let bold = Style::new().bold();
-        println!("\n  {}", bold.apply_to("Results:"));
+    let bold = Style::new().bold();
+    println!("\n  {} {}", bold.apply_to("Results:"), results.len());
 
-        let mut table = Table::new(&[
-            ("ID", 6),
-            ("PLUGIN", 25),
-            ("RESULT", 20),
-            ("FORMAT", 8),
-            ("SIZE", 10),
-            ("PATH", 30),
-        ]);
+    if !results.is_empty() {
+        let mut table = Table::new(&[("ID", 6), ("PLUGIN", 25), ("RESULT", 20), ("SIZE", 10)]);
         table.set_indent(2);
 
         for r in &results {
@@ -154,13 +157,61 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
                 r.id.to_string(),
                 r.plugin_name.clone(),
                 r.result_name.clone(),
-                r.format.clone(),
-                r.size_bytes.to_string(),
-                r.file_path.clone(),
+                format::bytes(r.size_bytes),
             ]);
         }
 
         table.print();
+    }
+
+    Ok(())
+}
+
+async fn print_result_content(api: &ApiClient, task_id: i32, result_id: i32) -> Result<()> {
+    let results = api.get_task_results(task_id).await?;
+    let result = results.iter().find(|r| r.id == result_id).ok_or_else(|| {
+        CliError::InvalidArgument(format!(
+            "result {} not found for task {}",
+            result_id, task_id
+        ))
+    })?;
+
+    let content = api.get_task_result_content(task_id, result_id).await?;
+    let stdout = std::io::stdout();
+    let is_tty = stdout.is_terminal();
+
+    match result.format.as_str() {
+        "json" if is_tty => match serde_json::from_slice::<serde_json::Value>(&content) {
+            Ok(v) => {
+                let pretty = serde_json::to_string_pretty(&v)?;
+                println!("{}", pretty);
+            }
+            Err(e) => {
+                eprintln!("warning: result labeled json but failed to parse ({e}); writing raw");
+                stdout.lock().write_all(&content)?;
+            }
+        },
+        "json" => {
+            stdout.lock().write_all(&content)?;
+        }
+        _ => {
+            if is_tty {
+                eprintln!(
+                    "Result {} ({}/{}): {} of binary data.",
+                    result.id,
+                    result.plugin_name,
+                    result.result_name,
+                    format::bytes(result.size_bytes),
+                );
+                eprintln!("Redirect to a file to save it, e.g.:");
+                eprintln!(
+                    "  malbox task get {} --result {} > {}.bin",
+                    task_id, result_id, result.result_name,
+                );
+            } else {
+                stdout.lock().write_all(&content)?;
+            }
+        }
     }
 
     Ok(())
