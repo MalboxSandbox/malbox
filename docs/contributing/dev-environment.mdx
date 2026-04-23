@@ -1,0 +1,227 @@
+---
+title: "Dev Environment"
+description: "Set up and use the Malbox development environment"
+---
+
+## Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+- **Git** - to clone the repository
+- **devenv** - Malbox uses [devenv](https://devenv.sh/) for reproducible development environments. Follow the [official installation guide](https://devenv.sh/getting-started/) to install it (this also installs Nix if you don't have it)
+- **pnpm** - required for the frontend. Follow the [pnpm installation guide](https://pnpm.io/installation)
+- A **Linux host** (or WSL2 on Windows)
+
+## Clone and enter the environment
+
+```bash
+git clone https://github.com/DualHorizon/malbox.git
+cd malbox
+```
+
+Start the development environment:
+
+```bash
+devenv shell
+```
+
+This automatically sets up:
+
+- Rust stable toolchain (rustc, cargo, clippy, rustfmt, rust-analyzer)
+- PostgreSQL 16 (started as a background service)
+- Node.js and pnpm
+- C/C++ build tools (cmake, gcc, clang 18)
+- Windows cross-compilation toolchain (MinGW)
+- Infrastructure tools (packer, ansible)
+- Pre-commit hooks (cargo-check, clippy, rustfmt)
+
+<Note>
+  The first run takes a while as Nix downloads and builds all dependencies. Subsequent runs are near-instant.
+</Note>
+
+## Database
+
+PostgreSQL starts automatically when you enter `devenv shell`. The default configuration is:
+
+| Setting      | Value                                          |
+| ------------ | ---------------------------------------------- |
+| Host         | `127.0.0.1`                                    |
+| Port         | `5432`                                         |
+| Database     | `malbox_db`                                    |
+| User         | `postgres`                                     |
+| Password     | `password`                                     |
+| DATABASE_URL | `postgres://postgres@localhost:5432/malbox_db` |
+
+The `DATABASE_URL` environment variable is set for you automatically in devenv.
+
+To run pending database migrations:
+
+```bash
+cd back-end
+sqlx migrate run
+```
+
+## Running the backend
+
+From the repository root:
+
+```bash
+cd back-end
+cargo build
+cargo run --bin malbox-daemon
+```
+
+The daemon starts an HTTP server on `http://127.0.0.1:8080`.
+
+## Running the frontend
+
+In a separate terminal (also inside `devenv shell`):
+
+```bash
+cd front-end
+cp .env.example .env
+pnpm install
+pnpm dev
+```
+
+The dev server starts at `http://localhost:5173`. It proxies API requests to the backend at the URL configured in `.env`:
+
+```bash
+# .env
+MALBOX_API_URL=http://127.0.0.1:8080
+BODY_SIZE_LIMIT=0
+```
+
+## Running the docs
+
+In a separate terminal:
+
+```bash
+npx mintlify@latest dev
+```
+
+The docs site starts at `http://localhost:3000`.
+
+## Daily workflow
+
+### Running tests
+
+```bash
+# Run the test suite (uses cargo-nextest)
+cd back-end
+cargo nextest run
+
+# Run doctests separately (nextest doesn't support them)
+cargo test --doc
+```
+
+### Formatting and linting
+
+Pre-commit hooks run cargo-check, clippy, and rustfmt automatically on every commit. You can also run them manually:
+
+```bash
+# Backend
+cd back-end
+cargo fmt
+cargo clippy
+
+# Frontend
+cd front-end
+pnpm lint
+pnpm format
+```
+
+### Type checking the frontend
+
+```bash
+cd front-end
+pnpm check          # one-off
+pnpm check:watch    # continuous
+```
+
+### Database migrations
+
+Create a new migration:
+
+```bash
+cd back-end
+sqlx migrate add <migration_name>
+```
+
+This creates a new SQL file in the migrations directory. After writing your migration, run it:
+
+```bash
+sqlx migrate run
+```
+
+After changing queries, update the offline query cache so CI builds work without a live database:
+
+```bash
+cargo sqlx prepare
+```
+
+### Building Rust documentation
+
+```bash
+cd back-end
+cargo doc --no-deps --document-private-items
+```
+
+## Pre-commit hooks
+
+The devenv environment installs Git hooks that run on every commit:
+
+- **cargo-check** - verifies the project compiles
+- **clippy** - catches common mistakes and style issues
+- **rustfmt** - enforces consistent formatting
+
+Do not skip these hooks with `--no-verify`. If a hook fails, fix the issue before committing.
+
+## Troubleshooting
+
+### `devenv shell` fails or hangs
+
+Make sure Nix is installed correctly and the Nix daemon is running:
+
+```bash
+nix --version
+```
+
+If you see errors about missing flake inputs, try:
+
+```bash
+devenv update
+```
+
+### Database connection refused
+
+PostgreSQL may not have started yet. Check its status:
+
+```bash
+pg_isready -h 127.0.0.1 -p 5432
+```
+
+If it reports no connection, exit and re-enter `devenv shell` - PostgreSQL starts as part of the shell initialization.
+
+### SQLx compile errors about missing queries
+
+If you see SQLx compile-time errors, make sure the offline query cache is up to date:
+
+```bash
+cd back-end
+cargo sqlx prepare
+```
+
+For CI or when you don't have a running database, set `SQLX_OFFLINE=true`:
+
+```bash
+SQLX_OFFLINE=true cargo build
+```
+
+### Frontend can't reach the backend
+
+Make sure:
+
+1. The backend is running (`cargo run --bin malbox-daemon`)
+2. Your `.env` file has the correct `MALBOX_API_URL` (default: `http://127.0.0.1:8080`)
+3. Both terminals are inside `devenv shell`
