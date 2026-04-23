@@ -110,11 +110,13 @@ mod tests {
                 scope: None,
                 results: HashMap::new(),
                 events: None,
+                runtime: None,
             },
             binary_path: PathBuf::from(format!("/plugins/{name}/{name}")),
             plugin_dir: PathBuf::from(format!("/plugins/{name}")),
             registered_at: SystemTime::now(),
             status: crate::registry::types::PluginStatus::Registered,
+            runtime_config: None,
         }
     }
 

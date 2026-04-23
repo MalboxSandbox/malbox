@@ -2,6 +2,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use malbox_plugin_manifest::ResolvedRuntimeConfig;
+
 /// Unique identifier for a plugin, derived from its manifest name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PluginId(String);
@@ -49,6 +51,8 @@ pub struct PluginEntry {
     pub plugin_dir: PathBuf,
     pub registered_at: SystemTime,
     pub status: PluginStatus,
+    /// Resolved runtime settings (defaults filled in). `None` if validation couldn't be attempted.
+    pub runtime_config: Option<ResolvedRuntimeConfig>,
 }
 
 #[cfg(test)]

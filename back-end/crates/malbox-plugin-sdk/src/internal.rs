@@ -26,11 +26,17 @@ pub fn deserialize_config<T: serde::de::DeserializeOwned>(
 /// [`GuestLogLayer`](crate::log::GuestLogLayer) is added to the
 /// subscriber so that log events are captured and can be streamed back to the
 /// daemon via gRPC.
-pub fn init_tracing(log_bus: Option<Arc<crate::log::LogBus>>) -> Option<Arc<crate::log::LogBus>> {
+///
+/// `filter` is a `tracing_subscriber::EnvFilter` directive string — e.g.
+/// "info", "info,hyper=warn". Callers pass this explicitly (it's baked into
+/// the plugin binary at compile time by the `#[guest_plugin]` macro).
+pub fn init_tracing(
+    filter: &str,
+    log_bus: Option<Arc<crate::log::LogBus>>,
+) -> Option<Arc<crate::log::LogBus>> {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let filter = std::env::var("MALBOX_LOG").unwrap_or_else(|_| "info".to_string());
     let fmt_layer = tracing_subscriber::fmt::layer();
     let filter_layer = tracing_subscriber::EnvFilter::new(filter);
 

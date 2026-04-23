@@ -22,7 +22,6 @@ use crate::error::{Result, SdkError};
 use crate::log::LogBus;
 use crate::plugin::Plugin;
 use crate::stash::{ResultStash, StashConfig};
-use crate::types::PluginMeta;
 
 use bridge::GuestPluginBridge;
 use malbox_plugin_transport::plugin::GrpcServer;
@@ -36,30 +35,19 @@ use tokio::sync::oneshot;
 use tracing::{info, warn};
 
 /// Configuration for the guest plugin runtime.
+///
+/// Values are baked into the plugin binary at compile time (by the
+/// `#[guest_plugin]` macro, which reads them from `plugin.toml`). Paths are
+/// `&'static str` so a `const` can be constructed at macro expansion time.
+#[derive(Debug, Clone, Copy)]
 pub struct GuestRuntimeConfig {
-    /// Socket address the gRPC server listens on.
     pub listen_addr: SocketAddr,
-    /// Working directory for file operations (push_file, pull_file, execute_command cwd).
-    /// Created on startup if it doesn't exist.
-    pub work_dir: PathBuf,
-}
-
-impl Default for GuestRuntimeConfig {
-    fn default() -> Self {
-        let port: u16 = std::env::var("MALBOX_PLUGIN_PORT")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(50051);
-
-        let work_dir = std::env::var("MALBOX_WORK_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp/malbox"));
-
-        Self {
-            listen_addr: ([0, 0, 0, 0], port).into(),
-            work_dir,
-        }
-    }
+    pub work_dir: &'static str,
+    /// When `None`, derived as `<work_dir>/_logs` at runtime.
+    pub log_overflow_dir: Option<&'static str>,
+    pub stash_threshold_bytes: usize,
+    pub stash_ttl_secs: u64,
+    pub log_filter: &'static str,
 }
 
 /// Sweep log overflow files older than 10 minutes. Called once on runtime
@@ -107,13 +95,6 @@ pub struct GuestPluginRuntime<P: Send + Sync + 'static> {
 }
 
 impl<P: Plugin> GuestPluginRuntime<P> {
-    /// Create a guest runtime for the given plugin and metadata.
-    ///
-    /// Used by generated `main()` from `#[malbox::guest_plugin]`.
-    pub fn new(plugin: P, _meta: PluginMeta) -> Self {
-        Self::with_config(plugin, GuestRuntimeConfig::default())
-    }
-
     /// Create a guest runtime with custom configuration.
     pub fn with_config(plugin: P, config: GuestRuntimeConfig) -> Self {
         Self {
@@ -134,30 +115,22 @@ impl<P: Plugin> GuestPluginRuntime<P> {
     pub async fn run(self) -> Result<()> {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
+        let work_dir: PathBuf = PathBuf::from(self.config.work_dir);
+
         // Ensure work directory exists.
-        tokio::fs::create_dir_all(&self.config.work_dir)
+        tokio::fs::create_dir_all(&work_dir)
             .await
             .map_err(|e| SdkError::Init(format!("failed to create work_dir: {}", e)))?;
 
         // Set up the result stash for large payloads. On startup, sweep any
         // orphan files left behind by a prior crashed run.
-        let stash_dir = self.config.work_dir.join("_stash");
+        let stash_dir = work_dir.join("_stash");
         if let Err(e) = ResultStash::sweep_orphans_on_startup(&stash_dir) {
             warn!(error = %e, "failed to sweep result stash orphans on startup");
         }
-        let stash_config = {
-            let threshold = std::env::var("MALBOX_STASH_THRESHOLD")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(1024 * 1024);
-            let ttl_secs = std::env::var("MALBOX_STASH_TTL")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(120);
-            StashConfig {
-                threshold_bytes: threshold,
-                ttl: std::time::Duration::from_secs(ttl_secs),
-            }
+        let stash_config = StashConfig {
+            threshold_bytes: self.config.stash_threshold_bytes,
+            ttl: std::time::Duration::from_secs(self.config.stash_ttl_secs),
         };
         let stash = Arc::new(
             ResultStash::new(stash_dir, stash_config)
@@ -194,9 +167,10 @@ impl<P: Plugin> GuestPluginRuntime<P> {
             None => {
                 // Overflow file lives under work_dir/_logs/ so orphan sweep
                 // can identify old files.
-                let log_dir = std::env::var("MALBOX_LOG_OVERFLOW_DIR")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| self.config.work_dir.join("_logs"));
+                let log_dir: PathBuf = match self.config.log_overflow_dir {
+                    Some(s) => PathBuf::from(s),
+                    None => work_dir.join("_logs"),
+                };
                 if let Err(e) = std::fs::create_dir_all(&log_dir) {
                     warn!(error = %e, "failed to create log overflow dir");
                 }
@@ -205,7 +179,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
                     log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
 
                 let bus = Arc::new(LogBus::with_overflow(1024, overflow_path));
-                crate::internal::init_tracing(Some(Arc::clone(&bus)));
+                crate::internal::init_tracing(self.config.log_filter, Some(Arc::clone(&bus)));
                 bus
             }
         };
@@ -213,7 +187,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let handler = GuestPluginBridge {
             plugin: self.plugin,
             shutdown_tx: std::sync::Mutex::new(Some(shutdown_tx)),
-            work_dir: self.config.work_dir,
+            work_dir: work_dir.clone(),
             execution_notifiers: std::sync::Mutex::new(HashMap::new()),
             last_execution: std::sync::Mutex::new(None),
             log_bus: Arc::clone(&log_bus),
@@ -245,5 +219,28 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| SdkError::Init(format!("failed to create tokio runtime: {}", e)))?;
         rt.block_on(self.run())
+    }
+}
+
+#[cfg(test)]
+mod guest_runtime_config_tests {
+    use super::*;
+
+    const STATIC_SANITY: GuestRuntimeConfig = GuestRuntimeConfig {
+        listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            50100,
+        )),
+        work_dir: "/opt/malbox",
+        log_overflow_dir: None,
+        stash_threshold_bytes: 1_048_576,
+        stash_ttl_secs: 120,
+        log_filter: "info",
+    };
+
+    #[test]
+    fn guest_runtime_config_is_const_constructible() {
+        // Compilation of STATIC_SANITY above is the actual check.
+        assert_eq!(STATIC_SANITY.listen_addr.port(), 50100);
     }
 }

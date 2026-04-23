@@ -43,6 +43,12 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
     let default_impl = generate_default_impl(struct_name, &input.fields);
     let main_fn = codegen::generate_main(struct_name, kind, is_unit_struct);
 
+    // Runtime-config codegen (guest plugins only — host uses a fixed default).
+    let runtime_const = match kind {
+        PluginKind::Guest => generate_runtime_const(&input)?,
+        PluginKind::Host => proc_macro2::TokenStream::new(),
+    };
+
     Ok(quote! {
         #clean_struct
 
@@ -62,9 +68,70 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
                     execution: #execution,
                 }
             };
+
+            #runtime_const
         }
 
         #main_fn
+    })
+}
+
+/// Read `plugin.toml` at macro expansion time and emit a `__MALBOX_RUNTIME`
+/// associated const containing the resolved runtime configuration.
+///
+/// Only called for `#[guest_plugin]` — host plugins use a fixed default and
+/// don't require a `[runtime]` section.
+fn generate_runtime_const(input: &syn::ItemStruct) -> syn::Result<proc_macro2::TokenStream> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").map_err(|_| {
+        syn::Error::new_spanned(input, "CARGO_MANIFEST_DIR not set during macro expansion")
+    })?;
+    let toml_path = std::path::Path::new(&manifest_dir).join("plugin.toml");
+    let contents = std::fs::read_to_string(&toml_path).map_err(|e| {
+        syn::Error::new_spanned(
+            input,
+            format!(
+                "failed to read {}: {} — plugin.toml must exist at the crate root for #[guest_plugin]",
+                toml_path.display(),
+                e
+            ),
+        )
+    })?;
+    let manifest: malbox_plugin_manifest::PluginManifest = toml::from_str(&contents)
+        .map_err(|e| syn::Error::new_spanned(input, format!("failed to parse plugin.toml: {e}")))?;
+
+    let raw = manifest.runtime.clone().unwrap_or_default();
+    let resolved = malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&raw);
+    resolved.validate().map_err(|e| {
+        syn::Error::new_spanned(input, format!("invalid [runtime] in plugin.toml: {e}"))
+    })?;
+
+    let port = resolved.port;
+    let work_dir = resolved.work_dir.to_string_lossy().into_owned();
+    let log_overflow_dir_lit = match &raw.log_overflow_dir {
+        Some(_) => {
+            let s = resolved.log_overflow_dir.to_string_lossy().into_owned();
+            quote::quote! { Some(#s) }
+        }
+        None => quote::quote! { None },
+    };
+    let stash_threshold = resolved.stash_threshold_bytes;
+    let stash_ttl = resolved.stash_ttl_secs;
+    let log_filter = resolved.log_filter.clone();
+
+    Ok(quote::quote! {
+        #[doc(hidden)]
+        pub const __MALBOX_RUNTIME:
+            malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig =
+            malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig {
+                listen_addr: std::net::SocketAddr::V4(
+                    std::net::SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, #port),
+                ),
+                work_dir: #work_dir,
+                log_overflow_dir: #log_overflow_dir_lit,
+                stash_threshold_bytes: #stash_threshold,
+                stash_ttl_secs: #stash_ttl,
+                log_filter: #log_filter,
+            };
     })
 }
 

@@ -10,6 +10,7 @@ plugin = []
 
 [dependencies]
 malbox-plugin-transport = { path = "../malbox-plugin-transport", features = ["ipc"] }
+malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
 
 iceoryx2-loggers = { version = "0.8.1", default-features = false, features = ["std", "tracing"] }
 
@@ -18,7 +19,6 @@ tokio = { workspace = true }
 dashmap = "6"
 notify = "8.2.0"
 arc-swap = "1.8.2"
-semver.workspace = true
 serde.workspace = true
 toml.workspace = true
 prost = "0.14.3"

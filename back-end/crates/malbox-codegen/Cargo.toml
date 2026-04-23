@@ -1,0 +1,15 @@
+[package]
+name = "malbox-codegen"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "malbox-codegen"
+path = "src/main.rs"
+
+[dependencies]
+malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -18,6 +18,7 @@ use malbox_plugin_sdk::types::{ExecutionContext, PluginMeta, PluginState, Plugin
 
 use crate::error::set_last_error;
 use crate::ffi_callbacks::VtablePlugin;
+use crate::ffi_types::MalboxGuestRuntimeConfig;
 use crate::ffi_types::{
     MALBOX_ABI_VERSION, MalboxExecutionContext, MalboxPluginMeta, MalboxPluginState,
     MalboxPluginType, MalboxPluginVtable,
@@ -127,7 +128,7 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
 
     let plugin = VtablePlugin::new(vtable);
 
-    malbox_plugin_sdk::internal::init_tracing(None);
+    malbox_plugin_sdk::internal::init_tracing("info", None);
 
     let runtime = match HostRuntime::new(plugin, plugin_meta) {
         Ok(r) => r,
@@ -160,13 +161,14 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
 ///
 /// - `vtable.plugin_ptr` and all non-null function pointers in `vtable` must
 ///   remain valid for the lifetime of the process.
-/// - All non-null string pointer fields in `meta` must point to valid
-///   null-terminated C strings for the duration of this call.
+/// - All non-null string pointer fields in `meta` and `config` must point to
+///   valid null-terminated C strings for the duration of this call.
 #[cfg(feature = "guest")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_run_guest_plugin(
     vtable: MalboxPluginVtable,
     meta: MalboxPluginMeta,
+    config: MalboxGuestRuntimeConfig,
 ) -> i32 {
     if vtable.abi_version != MALBOX_ABI_VERSION {
         set_last_error(&format!(
@@ -184,17 +186,51 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         }
     };
 
+    if config.work_dir.is_null() {
+        set_last_error("config.work_dir is null");
+        return -1;
+    }
+    if config.log_filter.is_null() {
+        set_last_error("config.log_filter is null");
+        return -1;
+    }
+
+    let work_dir_cstr = unsafe { std::ffi::CStr::from_ptr(config.work_dir) };
+    let work_dir = match work_dir_cstr.to_str() {
+        Ok(s) => std::path::PathBuf::from(s),
+        Err(e) => {
+            set_last_error(&format!("config.work_dir is not valid UTF-8: {e}"));
+            return -1;
+        }
+    };
+
+    let log_overflow_dir: Option<std::path::PathBuf> = if config.log_overflow_dir.is_null() {
+        None
+    } else {
+        let s = unsafe { std::ffi::CStr::from_ptr(config.log_overflow_dir) };
+        match s.to_str() {
+            Ok(s) => Some(std::path::PathBuf::from(s)),
+            Err(e) => {
+                set_last_error(&format!("config.log_overflow_dir is not valid UTF-8: {e}"));
+                return -1;
+            }
+        }
+    };
+
+    let log_filter_cstr = unsafe { std::ffi::CStr::from_ptr(config.log_filter) };
+    let log_filter: String = match log_filter_cstr.to_str() {
+        Ok(s) => s.to_owned(),
+        Err(e) => {
+            set_last_error(&format!("config.log_filter is not valid UTF-8: {e}"));
+            return -1;
+        }
+    };
+
     let plugin = VtablePlugin::new(vtable);
 
-    // Derive the work_dir the same way the Rust SDK does (env var or default).
-    let work_dir = std::env::var("MALBOX_WORK_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/malbox"));
-
-    // Set up log overflow directory and sweep orphans from prior crashed runs.
-    let log_dir = std::env::var("MALBOX_LOG_OVERFLOW_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| work_dir.join("_logs"));
+    let log_dir = log_overflow_dir
+        .clone()
+        .unwrap_or_else(|| work_dir.join("_logs"));
     let _ = std::fs::create_dir_all(&log_dir);
     malbox_plugin_sdk::runtime::guest::sweep_log_overflow_orphans(&log_dir);
     let overflow_path = log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
@@ -203,10 +239,37 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         1024,
         overflow_path,
     ));
-    malbox_plugin_sdk::internal::init_tracing(Some(std::sync::Arc::clone(&log_bus)));
+    malbox_plugin_sdk::internal::init_tracing(&log_filter, Some(std::sync::Arc::clone(&log_bus)));
     crate::ffi_log::set_global_log_bus(std::sync::Arc::clone(&log_bus));
 
-    let runtime = GuestPluginRuntime::new(plugin, plugin_meta).with_log_bus(log_bus);
+    // GuestRuntimeConfig stores its paths / filter as `&'static str`. The
+    // strings come from C++ constexpr storage (the plugin's generated header),
+    // so they outlive the call. But CStr::to_str borrows from the C pointer
+    // transiently; we leak owned copies to promote them to `'static`.
+    let work_dir_static: &'static str =
+        Box::leak(work_dir.to_string_lossy().into_owned().into_boxed_str());
+    let log_filter_static: &'static str = Box::leak(log_filter.into_boxed_str());
+    let log_overflow_static: Option<&'static str> =
+        log_overflow_dir.map(|p| &*Box::leak(p.to_string_lossy().into_owned().into_boxed_str()));
+
+    let rt_config = malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig {
+        listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            config.port,
+        )),
+        work_dir: work_dir_static,
+        log_overflow_dir: log_overflow_static,
+        stash_threshold_bytes: config.stash_threshold_bytes,
+        stash_ttl_secs: config.stash_ttl_secs,
+        log_filter: log_filter_static,
+    };
+
+    // `plugin_meta` comes from C++ but we no longer pass it to `with_config`
+    // (the SDK's `with_config` takes only plugin + config). Keep it alive to
+    // ensure its `&'static str` strings aren't dropped mid-run.
+    let _meta_keepalive = plugin_meta;
+
+    let runtime = GuestPluginRuntime::with_config(plugin, rt_config).with_log_bus(log_bus);
 
     match runtime.run_blocking() {
         Ok(()) => 0,
@@ -281,12 +344,55 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
-        let rc = unsafe { malbox_run_guest_plugin(vtable, meta) };
+        let filter = std::ffi::CString::new("info").unwrap();
+        let work_dir = std::ffi::CString::new("/tmp/malbox").unwrap();
+        let config = MalboxGuestRuntimeConfig {
+            port: 50051,
+            work_dir: work_dir.as_ptr(),
+            log_overflow_dir: std::ptr::null(),
+            stash_threshold_bytes: 1_048_576,
+            stash_ttl_secs: 120,
+            log_filter: filter.as_ptr(),
+        };
+        let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
         assert_eq!(rc, -1);
 
         let err = crate::error::last_error_string();
         assert!(err.is_some());
         assert!(err.unwrap().contains("ABI version mismatch"));
+    }
+
+    #[cfg(feature = "guest")]
+    #[test]
+    fn guest_plugin_rejects_null_work_dir() {
+        let (name, version, desc, authors) = make_meta_cstrings();
+        let meta = MalboxPluginMeta {
+            name: name.as_ptr(),
+            version: version.as_ptr(),
+            description: desc.as_ptr(),
+            authors: authors.as_ptr(),
+            plugin_type: MalboxPluginType::Guest,
+            state: MalboxPluginState::Ephemeral,
+            execution: MalboxExecutionContext::Parallel,
+        };
+        let vtable = MalboxPluginVtable {
+            abi_version: MALBOX_ABI_VERSION,
+            ..MalboxPluginVtable::default()
+        };
+        let filter = std::ffi::CString::new("info").unwrap();
+        let config = MalboxGuestRuntimeConfig {
+            port: 50051,
+            work_dir: std::ptr::null(),
+            log_overflow_dir: std::ptr::null(),
+            stash_threshold_bytes: 1_048_576,
+            stash_ttl_secs: 120,
+            log_filter: filter.as_ptr(),
+        };
+
+        let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
+        assert_eq!(rc, -1);
+        let err = crate::error::last_error_string().unwrap();
+        assert!(err.contains("work_dir"));
     }
 
     // Null meta fields

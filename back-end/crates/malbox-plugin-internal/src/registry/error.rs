@@ -21,20 +21,9 @@ pub enum ScanError {
     #[error("invalid manifest in {}: {source}", path.display())]
     Manifest {
         path: PathBuf,
-        source: ManifestError,
+        #[source]
+        source: malbox_plugin_manifest::ManifestError,
     },
-}
-
-#[derive(Debug, Error)]
-pub enum ManifestError {
-    #[error("failed to read manifest: {0}")]
-    Io(std::io::Error),
-
-    #[error("failed to parse TOML: {0}")]
-    Parse(toml::de::Error),
-
-    #[error("validation failed: {0}")]
-    Validation(String),
 }
 
 #[derive(Debug, Error)]

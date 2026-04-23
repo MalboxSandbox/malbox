@@ -70,10 +70,20 @@ impl Scanner {
 
         let is_guest = manifest.plugin.plugin_type == PluginTypeConfig::Guest;
 
-        // Check binary exists and (for host plugins) is executable
-        let status = match check_binary(&binary_path, is_guest) {
-            Ok(()) => PluginStatus::Registered,
-            Err(reason) => PluginStatus::Invalid(reason),
+        // Resolve the runtime section (filling defaults) and validate.
+        let raw_runtime = manifest.runtime.clone().unwrap_or_default();
+        let resolved_runtime =
+            malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&raw_runtime);
+
+        let (status, runtime_config) = match resolved_runtime.validate() {
+            Ok(()) => match check_binary(&binary_path, is_guest) {
+                Ok(()) => (PluginStatus::Registered, Some(resolved_runtime)),
+                Err(reason) => (PluginStatus::Invalid(reason), Some(resolved_runtime)),
+            },
+            Err(e) => (
+                PluginStatus::Invalid(format!("invalid runtime config: {e}")),
+                None,
+            ),
         };
 
         Ok(PluginEntry {
@@ -83,6 +93,7 @@ impl Scanner {
             plugin_dir: dir.to_path_buf(),
             registered_at: SystemTime::now(),
             status,
+            runtime_config,
         })
     }
 }
@@ -340,5 +351,71 @@ execution = "exclusive"
         let scanner = Scanner::new(tmp.path().to_path_buf());
         let entries = scanner.scan_all().unwrap();
         assert!(entries.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod runtime_validation_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn write_plugin_dir(name: &str, manifest: &str) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let plugin_dir = dir.path().join(name);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("plugin.toml"), manifest).unwrap();
+        // Bare "binary" file so resolve_binary_path succeeds.
+        std::fs::write(plugin_dir.join(name), b"").unwrap();
+        dir
+    }
+
+    #[test]
+    fn scanner_marks_plugin_invalid_when_runtime_port_out_of_range() {
+        let dir = write_plugin_dir(
+            "bad-port-plugin",
+            r#"
+[plugin]
+name = "bad-port-plugin"
+version = "0.1.0"
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+
+[runtime]
+port = 80
+"#,
+        );
+        let scanner = Scanner::new(dir.path().to_path_buf());
+        let entries = scanner.scan_all().unwrap();
+        assert_eq!(entries.len(), 1);
+        match &entries[0].status {
+            PluginStatus::Invalid(reason) => assert!(reason.contains("port")),
+            s => panic!("expected Invalid, got {:?}", s),
+        }
+    }
+
+    #[test]
+    fn scanner_exposes_resolved_runtime_config() {
+        let dir = write_plugin_dir(
+            "good-plugin",
+            r#"
+[plugin]
+name = "good-plugin"
+version = "0.1.0"
+type = "guest"
+state = "ephemeral"
+execution = "exclusive"
+
+[runtime]
+port = 50100
+work_dir = "/opt/malbox"
+"#,
+        );
+        let scanner = Scanner::new(dir.path().to_path_buf());
+        let entries = scanner.scan_all().unwrap();
+        let runtime = entries[0].runtime_config.as_ref().expect("runtime_config");
+        assert_eq!(runtime.port, 50100);
+        assert_eq!(runtime.work_dir, std::path::PathBuf::from("/opt/malbox"));
+        assert_eq!(runtime.log_filter, "info");
     }
 }

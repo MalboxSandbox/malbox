@@ -15,6 +15,20 @@
 #include <malbox/context.hpp>
 
 namespace malbox {
+
+/// Runtime configuration baked into the plugin at build time.
+///
+/// All paths must be absolute and valid UTF-8. `log_overflow_dir` may be
+/// nullptr — in that case the runtime uses `<work_dir>/_logs`.
+struct RuntimeConfig {
+    std::uint16_t port;
+    const char*   work_dir;
+    const char*   log_overflow_dir;   // nullable
+    std::size_t   stash_threshold_bytes;
+    std::uint64_t stash_ttl_secs;
+    const char*   log_filter;
+};
+
 namespace detail {
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,10 +200,23 @@ inline void run_host_plugin(std::unique_ptr<Plugin> plugin, const PluginMeta& me
 ///
 /// This function blocks until the runtime shuts down. Call it from main().
 /// Throws malbox::Error on failure.
-inline void run_guest_plugin(std::unique_ptr<Plugin> plugin, const PluginMeta& meta) {
+inline void run_guest_plugin(
+    std::unique_ptr<Plugin>  plugin,
+    const PluginMeta&        meta,
+    const RuntimeConfig&     config)
+{
     MalboxPluginVtable vtable = detail::build_vtable(plugin.get());
     MalboxPluginMeta   c_meta = detail::build_c_meta(meta);
-    detail::check_rc(malbox_run_guest_plugin(vtable, c_meta));
+
+    MalboxGuestRuntimeConfig c_config{};
+    c_config.port                   = config.port;
+    c_config.work_dir               = config.work_dir;
+    c_config.log_overflow_dir       = config.log_overflow_dir;
+    c_config.stash_threshold_bytes  = config.stash_threshold_bytes;
+    c_config.stash_ttl_secs         = config.stash_ttl_secs;
+    c_config.log_filter             = config.log_filter;
+
+    detail::check_rc(malbox_run_guest_plugin(vtable, c_meta, c_config));
 }
 
 /// Run a plugin through a synthetic test lifecycle without starting any transport.
