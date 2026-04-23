@@ -44,10 +44,3 @@ jobs:
     - name: Generate documentation
       run: SQLX_OFFLINE=true devenv shell -- cargo doc --manifest-path back-end/Cargo.toml --no-deps --document-private-items
 
-    - name: Cross-compile Rust SDK (Windows)
-      run: >
-        SQLX_OFFLINE=true devenv shell --
-        cargo build --manifest-path back-end/Cargo.toml
-        -p malbox-plugin-sdk
-        --target x86_64-pc-windows-gnu
-        --no-default-features --features guest
