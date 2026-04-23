@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO task_results (task_id, plugin_name, result_name, format, role, size_bytes, file_path)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING id, task_id, plugin_name, result_name,\n                  format AS \"format: ResultFormat\",\n                  role   AS \"role: ResultRole\",\n                  size_bytes, file_path, created_on\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "plugin_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "result_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "format: ResultFormat",
+        "type_info": {
+          "Custom": {
+            "name": "result_format",
+            "kind": {
+              "Enum": [
+                "json",
+                "bytes"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "role: ResultRole",
+        "type_info": {
+          "Custom": {
+            "name": "task_result_role",
+            "kind": {
+              "Enum": [
+                "report",
+                "artifact"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "result_format",
+            "kind": {
+              "Enum": [
+                "json",
+                "bytes"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "task_result_role",
+            "kind": {
+              "Enum": [
+                "report",
+                "artifact"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7063a866acead8cda4a87a9d71ad6655c7b5ab61b5898d7c968964314f13ed9c"
+}

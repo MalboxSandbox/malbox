@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO task_results (task_id, plugin_name, result_name, format, size_bytes, file_path)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id, task_id, plugin_name, result_name,\n                  format AS \"format: ResultFormat\",\n                  size_bytes, file_path, created_on\n        ",
+  "query": "\n        SELECT id, task_id, plugin_name, result_name,\n               format AS \"format: ResultFormat\",\n               role   AS \"role: ResultRole\",\n               size_bytes, file_path, created_on\n        FROM task_results\n        WHERE task_id = $1 AND role = 'report'::task_result_role\n        ORDER BY created_on\n        ",
   "describe": {
     "columns": [
       {
@@ -40,38 +40,38 @@
       },
       {
         "ordinal": 5,
+        "name": "role: ResultRole",
+        "type_info": {
+          "Custom": {
+            "name": "task_result_role",
+            "kind": {
+              "Enum": [
+                "report",
+                "artifact"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "size_bytes",
         "type_info": "Int8"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "file_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_on",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int4",
-        "Text",
-        "Text",
-        {
-          "Custom": {
-            "name": "result_format",
-            "kind": {
-              "Enum": [
-                "json",
-                "bytes"
-              ]
-            }
-          }
-        },
-        "Int8",
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
@@ -82,8 +82,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "cf802e2d80d0b32fef91a6de57449b3f96b62d342f8e59362d835d6bee760f16"
+  "hash": "e45ea93f2db6e26228b77aa8fb1600bf32fedb93bcc724fe097413b39c9444a5"
 }

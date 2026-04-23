@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, task_id, plugin_name, result_name,\n               format AS \"format: ResultFormat\",\n               size_bytes, file_path, created_on\n        FROM task_results\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT id, task_id, plugin_name, result_name,\n               format AS \"format: ResultFormat\",\n               role   AS \"role: ResultRole\",\n               size_bytes, file_path, created_on\n        FROM task_results\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -40,16 +40,31 @@
       },
       {
         "ordinal": 5,
+        "name": "role: ResultRole",
+        "type_info": {
+          "Custom": {
+            "name": "task_result_role",
+            "kind": {
+              "Enum": [
+                "report",
+                "artifact"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "size_bytes",
         "type_info": "Int8"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "file_path",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_on",
         "type_info": "Timestamptz"
       }
@@ -67,8 +82,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "997d00f6ba84cf0765daa778687503e88ffe8062cc8526bdba9f58bea16a7893"
+  "hash": "35baf2d2717519df46991e3e8fa3ef710c0ba1149d1d6487b420fe0ad78f427b"
 }
