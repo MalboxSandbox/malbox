@@ -17,6 +17,12 @@ Execution contexts define how plugins coordinate with each other during task exe
 
 State management controls how plugins maintain data across their lifecycle. Plugins can be completely isolated between tasks, share state globally, or selectively share context with specific plugins or tasks. The right choice depends on whether your plugin benefits from persistence (like keeping ML models loaded) or requires clean state for each execution.
 
+## Runtime Configuration
+
+Guest plugins carry their runtime settings in the `[runtime]` section of their `plugin.toml`. The SDK bakes these values into the plugin binary at build time.
+
+To change a runtime setting, edit `plugin.toml` and rebuild the plugin. See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full field list and defaults.
+
 ## Custom Plugin Settings
 
 Beyond system-level configuration, plugin developers can expose custom settings specific to their plugins. Users can adjust these settings to customize plugin behavior without modifying the plugin itself.

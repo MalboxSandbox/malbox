@@ -42,7 +42,7 @@ malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["host"] }
 
 ### `plugin.toml`
 
-Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin.
+Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin, and its `[runtime]` section is baked into the plugin binary at compile time by the SDK's proc-macro.
 
 ```toml
 [plugin]
@@ -54,11 +54,28 @@ type = "guest"                    # or "host"
 state = "ephemeral"               # or "persistent", "scoped"
 execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 
+[runtime]
+port = 50051                      # gRPC listen port (default: 50051)
+work_dir = "/tmp/malbox"          # working directory (default: /tmp/malbox)
+log_filter = "info"               # tracing filter (default: "info")
+
 [results.my_result]
 description = "What this result contains"
 user_visible = true
 display_name = "My Result"
 render = "json"
+```
+
+All `[runtime]` fields are optional and have sensible defaults. See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full list and defaults.
+
+### `build.rs`
+
+Add a one-line `build.rs` to ensure cargo re-runs the macro when `plugin.toml` changes:
+
+```rust
+fn main() {
+    println!("cargo:rerun-if-changed=plugin.toml");
+}
 ```
 
 See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.

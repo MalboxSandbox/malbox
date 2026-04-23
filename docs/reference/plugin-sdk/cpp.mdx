@@ -348,11 +348,45 @@ Metadata passed to the runtime at startup. All string fields must be null-termin
   </Tab>
 </Tabs>
 
+## RuntimeConfig
+
+Runtime configuration baked into the plugin binary at build time. Generated from `plugin.toml` by `malbox-codegen` (invoked via CMake's `malbox_generate_runtime_config`).
+
+```cpp
+#include "malbox_runtime_config.hpp"   // generated header
+
+// Access via: malbox::generated::runtime_config
+```
+
+<ResponseField name="port" type="std::uint16_t" required>
+  gRPC listen port.
+</ResponseField>
+<ResponseField name="work_dir" type="const char*" required>
+  Absolute path to the working directory for file push/pull and command execution.
+</ResponseField>
+<ResponseField name="log_overflow_dir" type="const char*">
+  Absolute path to the log overflow directory. Nullable - when `nullptr`, derived as `<work_dir>/_logs`.
+</ResponseField>
+<ResponseField name="stash_threshold_bytes" type="std::size_t" required>
+  Result stash spill threshold in bytes.
+</ResponseField>
+<ResponseField name="stash_ttl_secs" type="std::uint64_t" required>
+  Result stash entry TTL in seconds.
+</ResponseField>
+<ResponseField name="log_filter" type="const char*" required>
+  Tracing `EnvFilter` directive string (e.g. `"info"`, `"info,hyper=warn"`).
+</ResponseField>
+
 ## Runtime Entry Points
 
 <CodeGroup>
 ```cpp Guest plugin
-malbox::run_guest_plugin(std::make_unique<MyPlugin>(), meta);
+#include "malbox_runtime_config.hpp"
+
+malbox::run_guest_plugin(
+    std::make_unique<MyPlugin>(),
+    meta,
+    malbox::generated::runtime_config);
 ```
 ```cpp Host plugin
 malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
@@ -366,6 +400,9 @@ Both functions block until the runtime shuts down. They throw `malbox::Error` on
 </ResponseField>
 <ResponseField name="meta" type="PluginMeta" required>
   Plugin metadata describing name, version, type, state, and execution context.
+</ResponseField>
+<ResponseField name="config" type="const RuntimeConfig&" required>
+  Compile-time runtime configuration generated from `plugin.toml`. Required for guest plugins only.
 </ResponseField>
 
 ## Error Handling
@@ -403,4 +440,5 @@ When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute co
 | `malbox/context.hpp` | `malbox::Context` wrapper |
 | `malbox/result.hpp` | `malbox::PluginResult` |
 | `malbox/handlers.hpp` | `malbox::Plugin` base class |
-| `malbox/runtime.hpp` | Entry points and trampolines |
+| `malbox/runtime.hpp` | Entry points, `RuntimeConfig`, and trampolines |
+| `malbox_runtime_config.hpp` | Generated compile-time `constexpr RuntimeConfig` from `plugin.toml` |

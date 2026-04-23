@@ -43,9 +43,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(MalboxPluginSDK REQUIRED)
 
-add_executable(my-plugin src/main.cpp)
+# Generate the compile-time runtime-config header from plugin.toml.
+malbox_generate_runtime_config(
+    MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/plugin.toml
+    OUTPUT   ${CMAKE_CURRENT_BINARY_DIR}/generated/malbox_runtime_config.hpp
+)
+
+add_executable(my-plugin src/main.cpp ${MALBOX_GENERATED_HEADERS})
+target_include_directories(my-plugin PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(my-plugin PRIVATE MalboxPluginSDK::MalboxPluginSDK)
 ```
+
+The `malbox_generate_runtime_config` function invokes the `malbox-codegen` CLI (shipped with the SDK) to read your `plugin.toml` and emit a `malbox_runtime_config.hpp` header with `constexpr` values. The header is regenerated whenever `plugin.toml` changes.
 
 ### `plugin.toml`
 
@@ -61,6 +70,11 @@ type = "guest"                    # or "host"
 state = "ephemeral"               # or "persistent", "scoped"
 execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 
+[runtime]
+port = 50051                      # gRPC listen port (default: 50051)
+work_dir = "C:\\malbox\\work"     # working directory (default: /tmp/malbox or C:\malbox\work)
+log_filter = "info"               # tracing filter (default: "info")
+
 [results.my_result]
 description = "What this result contains"
 user_visible = true
@@ -68,12 +82,15 @@ display_name = "My Result"
 render = "json"
 ```
 
+All `[runtime]` fields are optional and have sensible defaults. The values are baked into the plugin binary at build time via the generated `malbox_runtime_config.hpp` header - they are not read from the environment at launch.
+
 See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
 
 ### `src/main.cpp`
 
 ```cpp
 #include <malbox/plugin.hpp>
+#include "malbox_runtime_config.hpp"   // generated from plugin.toml
 
 class MyPlugin final : public malbox::Plugin {
 public:
@@ -115,7 +132,10 @@ int main() {
     meta.state       = malbox::PluginState::Ephemeral;
     meta.execution   = malbox::ExecutionContext::Exclusive;
 
-    malbox::run_guest_plugin(std::make_unique<MyPlugin>(), meta);
+    malbox::run_guest_plugin(
+        std::make_unique<MyPlugin>(),
+        meta,
+        malbox::generated::runtime_config);
 }
 ```
 

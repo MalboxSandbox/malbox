@@ -29,3 +29,36 @@ This page documents all plugin configuration options. For conceptual information
 | Ephemeral | Fresh state per task, no persistence |
 | Scoped | Selective sharing with specific plugins or tasks |
 
+## Runtime Configuration
+
+The `[runtime]` section in `plugin.toml` controls how the guest plugin runtime behaves. All values are baked into the plugin binary at compile time.
+
+```toml
+[runtime]
+port                   = 50051
+work_dir               = "/tmp/malbox"
+log_overflow_dir       = "/tmp/malbox/_logs"
+stash_threshold_bytes  = 1048576
+stash_ttl_secs         = 120
+log_filter             = "info"
+```
+
+All fields are optional. When omitted, the SDK uses the defaults shown below.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `port` | `u16` | `50051` | gRPC listen port. Must be >= 1024. |
+| `work_dir` | `string` | `/tmp/malbox` (unix) or `C:\malbox\work` (windows) | Absolute path to the working directory used for file push/pull and command execution `cwd`. |
+| `log_overflow_dir` | `string` | `<work_dir>/_logs` | Absolute path to the log overflow spill directory. When omitted, derived from `work_dir`. |
+| `stash_threshold_bytes` | `integer` | `1048576` (1 MiB) | Result payloads larger than this are spilled to disk via the result stash. Must be >= 4096. |
+| `stash_ttl_secs` | `integer` | `120` | How long stashed result entries are kept before TTL sweep reclaims them. Must be >= 1. |
+| `log_filter` | `string` | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. |
+
+<Note>
+Changing any runtime setting requires rebuilding the plugin.
+
+The daemon validates the `[runtime]` section when scanning plugin manifests.
+
+Plugins with invalid values (e.g., a relative `work_dir` or a port below 1024) are marked `Invalid` in the registry and will not be started.
+</Note>
+
