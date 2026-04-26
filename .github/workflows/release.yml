@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  SQLX_OFFLINE: "true"
+  LINUX_TARGET: x86_64-unknown-linux-gnu
+  WINDOWS_TARGET: x86_64-pc-windows-gnu
+
+jobs:
+  build-backend:
+    name: Build back-end binaries
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+    - uses: actions/checkout@v6
+    - uses: cachix/install-nix-action@v31
+    - uses: cachix/cachix-action@v17
+      with:
+        name: devenv
+    - name: Install devenv
+      run: nix profile install nixpkgs#devenv
+
+    - name: Build release binaries (Linux)
+      run: >
+        devenv shell --
+        cargo build --release
+        --manifest-path Cargo.toml
+        -p malbox-cli -p malbox-daemon
+
+    - name: Package binaries
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        STAGING="malbox-${VERSION}-linux-x64"
+        mkdir -p "${STAGING}"
+        cp "target/${LINUX_TARGET}/release/malbox-cli" "${STAGING}/"
+        cp "target/${LINUX_TARGET}/release/malbox-daemon" "${STAGING}/"
+        tar czf "${STAGING}.tar.gz" "${STAGING}"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-linux-x64
+        path: back-end/malbox-*-linux-x64.tar.gz
+
+  build-cpp-sdk-linux:
+    name: Build C++ SDK (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+    - uses: actions/checkout@v6
+    - uses: cachix/install-nix-action@v31
+    - uses: cachix/cachix-action@v17
+      with:
+        name: devenv
+    - name: Install devenv
+      run: nix profile install nixpkgs#devenv
+
+    - name: Build C++ SDK distribution (Linux)
+      run: devenv shell -- cargo xtask dist-cpp-sdk --target linux
+
+    - name: Package SDK
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        DIST="crates/malbox-plugin-sdk-cpp/dist-linux"
+        mv "${DIST}" "malbox-plugin-sdk-cpp-${VERSION}-linux-x64"
+        tar czf "malbox-plugin-sdk-cpp-${VERSION}-linux-x64.tar.gz" \
+          "malbox-plugin-sdk-cpp-${VERSION}-linux-x64"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cpp-sdk-linux-x64
+        path: back-end/malbox-plugin-sdk-cpp-*-linux-x64.tar.gz
+
+  build-cpp-sdk-windows:
+    name: Build C++ SDK (Windows)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back-end
+    steps:
+    - uses: actions/checkout@v6
+    - uses: cachix/install-nix-action@v31
+    - uses: cachix/cachix-action@v17
+      with:
+        name: devenv
+    - name: Install devenv
+      run: nix profile install nixpkgs#devenv
+
+    - name: Cross-compile C++ SDK distribution (Windows)
+      run: devenv shell -- cargo xtask dist-cpp-sdk --target windows
+
+    - name: Package SDK
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        DIST="crates/malbox-plugin-sdk-cpp/dist-windows"
+        mv "${DIST}" "malbox-plugin-sdk-cpp-${VERSION}-windows-x64"
+        tar czf "malbox-plugin-sdk-cpp-${VERSION}-windows-x64.tar.gz" \
+          "malbox-plugin-sdk-cpp-${VERSION}-windows-x64"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cpp-sdk-windows-x64
+        path: back-end/malbox-plugin-sdk-cpp-*-windows-x64.tar.gz
+
+  release:
+    name: Create GitHub Release
+    needs: [build-backend, build-cpp-sdk-linux, build-cpp-sdk-windows]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
+
+    - name: Create release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+
+        gh release create "${VERSION}" \
+          --title "${VERSION}" \
+          --prerelease \
+          --generate-notes \
+          artifacts/*.tar.gz
