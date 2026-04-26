@@ -5,8 +5,7 @@
 //! C/C++ headers, and CMake config files.
 
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -29,6 +28,13 @@ impl Target {
         match self {
             Target::Linux => "libmalbox_plugin_sdk_cpp.a",
             Target::Windows => "malbox_plugin_sdk_cpp.lib",
+        }
+    }
+
+    fn codegen_bin_name(self) -> &'static str {
+        match self {
+            Target::Linux => "malbox-codegen",
+            Target::Windows => "malbox-codegen.exe",
         }
     }
 
@@ -65,11 +71,16 @@ pub fn run() {
         ]);
     }
 
-    run_cmd(
-        Command::new("cargo")
-            .args(&cargo_args)
-            .current_dir(&root),
-    );
+    run_cmd(Command::new("cargo").args(&cargo_args).current_dir(&root));
+
+    println!("Building malbox-codegen (release, {rust_target})...");
+
+    let mut codegen_args = vec!["build", "--release", "-p", "malbox-codegen"];
+    if target == Target::Windows {
+        codegen_args.extend(["--target", rust_target]);
+    }
+
+    run_cmd(Command::new("cargo").args(&codegen_args).current_dir(&root));
 
     // Step 2: Assemble dist/
 
@@ -122,6 +133,19 @@ pub fn run() {
             copy_file(&toolchain_src, &cmake_dst.join("mingw-w64-x86_64.cmake"));
         }
     }
+
+    // dist/bin/malbox-codegen
+    let bin_dst = dist.join("bin");
+    fs::create_dir_all(&bin_dst)
+        .unwrap_or_else(|e| panic!("failed to create `{}`: {e}", bin_dst.display()));
+
+    let codegen_src = root
+        .join("target")
+        .join(rust_target)
+        .join("release")
+        .join(target.codegen_bin_name());
+
+    copy_file(&codegen_src, &bin_dst.join(target.codegen_bin_name()));
 
     println!("Done! Distribution assembled at: {}", dist.display());
 }
