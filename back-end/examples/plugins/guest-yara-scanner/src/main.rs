@@ -32,7 +32,6 @@ fn rules() -> &'static yara_x::Rules {
 }
 
 #[malbox::guest_plugin]
-#[malbox(state = "ephemeral", execution = "parallel")]
 struct YaraScanner;
 
 #[malbox::handlers]

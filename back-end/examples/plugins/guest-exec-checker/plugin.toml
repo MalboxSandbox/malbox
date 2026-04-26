@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Verifies that the submitted sample is executing on the guest OS"
 authors = ["Malbox Team"]
 type = "guest"
+
+[runtime]
 state = "ephemeral"
 execution = "exclusive"
 

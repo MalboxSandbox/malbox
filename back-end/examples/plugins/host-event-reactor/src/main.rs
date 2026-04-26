@@ -10,7 +10,6 @@ use std::sync::Mutex;
 /// events emitted by the daemon and other plugins — collecting results as
 /// they arrive and building a combined report when a task finishes.
 #[malbox::host_plugin]
-#[malbox(state = "persistent", execution = "unrestricted")]
 struct EventReactor {
     /// Accumulated result count per task (simple in-memory tracking).
     task_results: Mutex<Vec<TaskReport>>,

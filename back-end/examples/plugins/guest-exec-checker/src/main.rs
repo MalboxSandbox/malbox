@@ -15,7 +15,6 @@ struct ExecStatus {
 }
 
 #[malbox::guest_plugin]
-#[malbox(state = "ephemeral", execution = "exclusive")]
 struct ExecChecker;
 
 #[malbox::handlers]

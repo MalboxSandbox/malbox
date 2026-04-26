@@ -1,0 +1,10 @@
+[plugin]
+name = "host-event-reactor"
+version = "0.1.0"
+description = "Example host plugin that reacts to system events"
+authors = ["Malbox Team"]
+type = "host"
+
+[runtime]
+state = "persistent"
+execution = "unrestricted"

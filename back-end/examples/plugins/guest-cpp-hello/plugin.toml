@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Example guest plugin written in C++"
 authors = ["Malbox Team"]
 type = "guest"
+
+[runtime]
 state = "ephemeral"
 execution = "exclusive"
 

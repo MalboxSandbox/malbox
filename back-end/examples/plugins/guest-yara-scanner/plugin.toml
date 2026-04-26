@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "Scans samples inside the guest VM using signature-based rules"
 authors = ["Malbox Team"]
 type = "guest"
+
+[runtime]
 state = "ephemeral"
-execution = "exclusive"
+execution = "parallel"
 
 [results.report]
 description = "Structured report envelope (verdict, IOCs, MITRE TTPs, matches)"

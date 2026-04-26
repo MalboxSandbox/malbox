@@ -1,0 +1,10 @@
+[plugin]
+name = "host-file-info"
+version = "0.1.0"
+description = "Example host plugin that extracts basic file information"
+authors = ["Malbox Team"]
+type = "host"
+
+[runtime]
+state = "persistent"
+execution = "parallel"

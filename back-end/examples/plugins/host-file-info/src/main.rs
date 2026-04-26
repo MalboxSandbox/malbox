@@ -4,7 +4,6 @@ use malbox::prelude::*;
 use sha2::{Digest, Sha256};
 
 #[malbox::host_plugin]
-#[malbox(state = "persistent", execution = "parallel")]
 struct FileInfoPlugin;
 
 #[derive(Serialize)]
@@ -32,10 +31,7 @@ impl FileInfoPlugin {
 
         info!(task_id = task.id(), %hash, size, "Computed file info");
 
-        ctx.push_result(PluginResult::json(
-            "file_info",
-            &FileInfo { hash, size },
-        )?)?;
+        ctx.push_result(PluginResult::json("file_info", &FileInfo { hash, size })?)?;
         Ok(())
     }
 }

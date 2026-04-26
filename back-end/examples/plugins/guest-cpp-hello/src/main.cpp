@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include <malbox/plugin.hpp>
+#include "malbox_runtime_config.hpp"
 
 class HelloPlugin final : public malbox::Plugin {
 public:
@@ -46,6 +47,9 @@ int main() {
     meta.state       = malbox::PluginState::Ephemeral;
     meta.execution   = malbox::ExecutionContext::Exclusive;
 
-    malbox::run_guest_plugin(std::make_unique<HelloPlugin>(), meta);
+    malbox::run_guest_plugin(
+        std::make_unique<HelloPlugin>(),
+        meta,
+        malbox::generated::runtime_config);
     return 0;
 }

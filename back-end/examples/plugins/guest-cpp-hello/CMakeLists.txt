@@ -6,5 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(MalboxPluginSDK REQUIRED)
 
-add_executable(guest-cpp-hello src/main.cpp)
+malbox_generate_runtime_config(
+    MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/plugin.toml
+    OUTPUT   ${CMAKE_CURRENT_BINARY_DIR}/generated/malbox_runtime_config.hpp
+)
+
+add_executable(guest-cpp-hello
+    src/main.cpp
+    ${MALBOX_GENERATED_HEADERS}
+)
+target_include_directories(guest-cpp-hello PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(guest-cpp-hello PRIVATE MalboxPluginSDK::MalboxPluginSDK)
