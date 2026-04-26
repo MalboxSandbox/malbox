@@ -47,7 +47,10 @@
                     },
                     {
                         "group": "Contributing",
-                        "pages": ["contributing/guidelines"]
+                        "pages": [
+                            "contributing/guidelines",
+                            "contributing/dev-environment"
+                        ]
                     }
                 ]
             },
@@ -67,10 +70,6 @@
                             "plugin-guides/creating-a-rust-plugin",
                             "plugin-guides/creating-a-cpp-plugin"
                         ]
-                    },
-                    {
-                        "group": "Contributing",
-                        "pages": ["contributing/first-contribution"]
                     }
                 ]
             },

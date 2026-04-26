@@ -66,9 +66,9 @@ sqlx migrate run
 From the repository root:
 
 ```bash
+devenv up -d # start the PostgreSQL server
 cd back-end
-cargo build
-cargo run --bin malbox-daemon
+cargo run --p malbox-daemon
 ```
 
 The daemon starts an HTTP server on `http://127.0.0.1:8080`.
@@ -201,9 +201,9 @@ PostgreSQL may not have started yet. Check its status:
 pg_isready -h 127.0.0.1 -p 5432
 ```
 
-If it reports no connection, exit and re-enter `devenv shell` - PostgreSQL starts as part of the shell initialization.
+If it reports no connection, make sure you started the PostgreSQL service via `devenv up -d`.
 
-### SQLx compile errors about missing queries
+### SQLx compile errors about missing queries in CI
 
 If you see SQLx compile-time errors, make sure the offline query cache is up to date:
 
