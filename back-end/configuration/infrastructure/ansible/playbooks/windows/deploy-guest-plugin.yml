@@ -4,27 +4,49 @@
   gather_facts: yes
 
   vars:
-    malbox_plugins_dir: C:\malbox\plugins
-    malbox_work_dir: C:\malbox\work
-    malbox_logs_dir: C:\malbox\logs
+    # Plugin binaries and startup scripts live here. Not configurable per
+    # plugin because it's an install-time concern, not a runtime one.
+    malbox_plugins_dir: C:\ProgramData\malbox\plugins
     # guest_plugins is injected by the ansible provisioner as an extra var.
-    # It is a list of objects: [{name, binary, toml, port}, ...]
+    # Each entry has: {name, binary, toml, port, paths}
+    # paths.sample_dir, paths.artifact_dir, paths.stash_dir, paths.log_dir
+    # are resolved from the plugin's [runtime.paths] in plugin.toml.
     guest_plugins: []
 
   tasks:
-    - name: Create shared malbox directories
-      win_file:
-        path: "{{ item }}"
-        state: directory
-      loop:
-        - "{{ malbox_work_dir }}"
-        - "{{ malbox_logs_dir }}"
-
-    - name: Create plugin directory
+    - name: Create plugin install directory
       win_file:
         path: "{{ malbox_plugins_dir }}\\{{ item.name }}"
         state: directory
       loop: "{{ guest_plugins }}"
+
+    - name: Create plugin sample directory
+      win_file:
+        path: "{{ item.paths.sample_dir }}"
+        state: directory
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin artifact directory
+      win_file:
+        path: "{{ item.paths.artifact_dir }}"
+        state: directory
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin stash directory
+      win_file:
+        path: "{{ item.paths.stash_dir }}"
+        state: directory
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin log directory
+      win_file:
+        path: "{{ item.paths.log_dir }}"
+        state: directory
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
 
     - name: Copy guest plugin binary
       win_copy:
@@ -39,13 +61,14 @@
       loop: "{{ guest_plugins }}"
 
     - name: Create guest plugin startup script
+      # Runtime settings (port, log_filter, stash thresholds, etc.) are baked
+      # into the plugin binary at compile time from its plugin.toml [runtime]
+      # section. The startup script just launches the binary and redirects
+      # stdout/stderr to the plugin's log_dir for post-mortem triage.
       win_copy:
         content: |
           @echo off
-          set RUST_LOG=info
-          set MALBOX_WORK_DIR={{ malbox_work_dir }}
-          set MALBOX_PLUGIN_PORT={{ item.port }}
-          "{{ malbox_plugins_dir }}\{{ item.name }}\{{ item.name }}.exe" >> "{{ malbox_logs_dir }}\{{ item.name }}.log" 2>&1
+          "{{ malbox_plugins_dir }}\{{ item.name }}\{{ item.name }}.exe" >> "{{ item.paths.log_dir | default('C:\\ProgramData\\malbox\\logs') }}\{{ item.name }}.log" 2>&1
         dest: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
       loop: "{{ guest_plugins }}"
 
