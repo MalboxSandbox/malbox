@@ -237,7 +237,7 @@ impl PluginHandle {
     pub async fn release(self) {
         let mut instance = self.instance.lock().await;
 
-        match self.entry.manifest.plugin.state {
+        match self.entry.manifest.runtime.state {
             PluginStateConfig::Persistent => {
                 instance.lifecycle = PluginLifecycle::Ready;
             }

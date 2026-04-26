@@ -61,7 +61,7 @@ impl PluginManager {
 
         // Spawn all persistent host plugins at startup.
         for entry in snapshot.list() {
-            let is_persistent = entry.manifest.plugin.state == PluginStateConfig::Persistent;
+            let is_persistent = entry.manifest.runtime.state == PluginStateConfig::Persistent;
             let is_host = entry.manifest.plugin.plugin_type == PluginTypeConfig::Host;
 
             if is_persistent && is_host {
@@ -109,7 +109,7 @@ impl PluginManager {
             .get(plugin_id)
             .ok_or_else(|| ManagerError::PluginNotFound(plugin_id.clone()))?;
 
-        match entry.manifest.plugin.state {
+        match entry.manifest.runtime.state {
             PluginStateConfig::Persistent => {
                 let instance_lock = self
                     .instances
@@ -296,7 +296,7 @@ impl PluginManager {
 
         // Spawn new persistent host plugins that should be running.
         for entry in snapshot.list() {
-            let is_persistent = entry.manifest.plugin.state == PluginStateConfig::Persistent;
+            let is_persistent = entry.manifest.runtime.state == PluginStateConfig::Persistent;
             let is_host = entry.manifest.plugin.plugin_type == PluginTypeConfig::Host;
 
             if is_persistent && is_host && !self.instances.contains_key(&entry.id) {

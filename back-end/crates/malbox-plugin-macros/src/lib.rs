@@ -24,7 +24,6 @@ use proc_macro::TokenStream;
 /// # Example
 /// ```ignore
 /// #[malbox::host_plugin]
-/// #[malbox(state = "persistent", execution = "parallel")]
 /// struct MyPlugin;
 /// ```
 #[proc_macro_attribute]
@@ -41,7 +40,6 @@ pub fn host_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// # Example
 /// ```ignore
 /// #[malbox::guest_plugin]
-/// #[malbox(state = "ephemeral", execution = "parallel")]
 /// struct MyPlugin;
 /// ```
 #[proc_macro_attribute]

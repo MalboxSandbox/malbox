@@ -42,9 +42,10 @@ use tracing::{info, warn};
 #[derive(Debug, Clone, Copy)]
 pub struct GuestRuntimeConfig {
     pub listen_addr: SocketAddr,
-    pub work_dir: &'static str,
-    /// When `None`, derived as `<work_dir>/_logs` at runtime.
-    pub log_overflow_dir: Option<&'static str>,
+    pub sample_dir: &'static str,
+    pub artifact_dir: &'static str,
+    pub stash_dir: &'static str,
+    pub log_dir: &'static str,
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: &'static str,
@@ -115,16 +116,25 @@ impl<P: Plugin> GuestPluginRuntime<P> {
     pub async fn run(self) -> Result<()> {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-        let work_dir: PathBuf = PathBuf::from(self.config.work_dir);
+        let sample_dir: PathBuf = PathBuf::from(self.config.sample_dir);
+        let artifact_dir: PathBuf = PathBuf::from(self.config.artifact_dir);
+        let stash_dir: PathBuf = PathBuf::from(self.config.stash_dir);
+        let log_dir: PathBuf = PathBuf::from(self.config.log_dir);
 
-        // Ensure work directory exists.
-        tokio::fs::create_dir_all(&work_dir)
-            .await
-            .map_err(|e| SdkError::Init(format!("failed to create work_dir: {}", e)))?;
+        // Ensure all runtime directories exist.
+        for (label, dir) in [
+            ("sample_dir", &sample_dir),
+            ("artifact_dir", &artifact_dir),
+            ("stash_dir", &stash_dir),
+            ("log_dir", &log_dir),
+        ] {
+            tokio::fs::create_dir_all(dir)
+                .await
+                .map_err(|e| SdkError::Init(format!("failed to create {}: {}", label, e)))?;
+        }
 
         // Set up the result stash for large payloads. On startup, sweep any
         // orphan files left behind by a prior crashed run.
-        let stash_dir = work_dir.join("_stash");
         if let Err(e) = ResultStash::sweep_orphans_on_startup(&stash_dir) {
             warn!(error = %e, "failed to sweep result stash orphans on startup");
         }
@@ -165,15 +175,6 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let log_bus = match self.log_bus {
             Some(bus) => bus,
             None => {
-                // Overflow file lives under work_dir/_logs/ so orphan sweep
-                // can identify old files.
-                let log_dir: PathBuf = match self.config.log_overflow_dir {
-                    Some(s) => PathBuf::from(s),
-                    None => work_dir.join("_logs"),
-                };
-                if let Err(e) = std::fs::create_dir_all(&log_dir) {
-                    warn!(error = %e, "failed to create log overflow dir");
-                }
                 sweep_log_overflow_orphans(&log_dir);
                 let overflow_path =
                     log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
@@ -187,7 +188,8 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let handler = GuestPluginBridge {
             plugin: self.plugin,
             shutdown_tx: std::sync::Mutex::new(Some(shutdown_tx)),
-            work_dir: work_dir.clone(),
+            sample_dir,
+            artifact_dir,
             execution_notifiers: std::sync::Mutex::new(HashMap::new()),
             last_execution: std::sync::Mutex::new(None),
             log_bus: Arc::clone(&log_bus),
@@ -231,8 +233,10 @@ mod guest_runtime_config_tests {
             std::net::Ipv4Addr::UNSPECIFIED,
             50100,
         )),
-        work_dir: "/opt/malbox",
-        log_overflow_dir: None,
+        sample_dir: "/opt/malbox/samples",
+        artifact_dir: "/opt/malbox/artifacts",
+        stash_dir: "/opt/malbox/stash",
+        log_dir: "/opt/malbox/logs",
         stash_threshold_bytes: 1_048_576,
         stash_ttl_secs: 120,
         log_filter: "info",

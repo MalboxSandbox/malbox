@@ -16,6 +16,8 @@ fn create_plugin(parent: &Path, name: &str) {
 name = "{name}"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "ephemeral"
 execution = "parallel"
 "#

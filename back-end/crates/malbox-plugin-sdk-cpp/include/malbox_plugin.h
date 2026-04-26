@@ -311,16 +311,15 @@ typedef struct MalboxPluginMeta {
  * Runtime configuration baked into a guest plugin at build time.
  *
  * Passed by-value to [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
- * All string pointers must be valid, null-terminated UTF-8 C strings whose
- * storage lives at least for the duration of that call.
+ * All string pointers must be non-null, valid, null-terminated UTF-8 C strings
+ * whose storage lives at least for the duration of that call.
  */
 typedef struct MalboxGuestRuntimeConfig {
     uint16_t port;
-    const char *work_dir;
-    /**
-     * Nullable: when null, derived as `<work_dir>/_logs` at runtime.
-     */
-    const char *log_overflow_dir;
+    const char *sample_dir;
+    const char *artifact_dir;
+    const char *stash_dir;
+    const char *log_dir;
     uintptr_t stash_threshold_bytes;
     uint64_t stash_ttl_secs;
     const char *log_filter;

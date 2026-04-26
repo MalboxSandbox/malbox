@@ -18,12 +18,13 @@ namespace malbox {
 
 /// Runtime configuration baked into the plugin at build time.
 ///
-/// All paths must be absolute and valid UTF-8. `log_overflow_dir` may be
-/// nullptr — in that case the runtime uses `<work_dir>/_logs`.
+/// All paths must be absolute, non-null, and valid UTF-8.
 struct RuntimeConfig {
     std::uint16_t port;
-    const char*   work_dir;
-    const char*   log_overflow_dir;   // nullable
+    const char*   sample_dir;
+    const char*   artifact_dir;
+    const char*   stash_dir;
+    const char*   log_dir;
     std::size_t   stash_threshold_bytes;
     std::uint64_t stash_ttl_secs;
     const char*   log_filter;
@@ -210,8 +211,10 @@ inline void run_guest_plugin(
 
     MalboxGuestRuntimeConfig c_config{};
     c_config.port                   = config.port;
-    c_config.work_dir               = config.work_dir;
-    c_config.log_overflow_dir       = config.log_overflow_dir;
+    c_config.sample_dir             = config.sample_dir;
+    c_config.artifact_dir           = config.artifact_dir;
+    c_config.stash_dir              = config.stash_dir;
+    c_config.log_dir                = config.log_dir;
     c_config.stash_threshold_bytes  = config.stash_threshold_bytes;
     c_config.stash_ttl_secs         = config.stash_ttl_secs;
     c_config.log_filter             = config.log_filter;

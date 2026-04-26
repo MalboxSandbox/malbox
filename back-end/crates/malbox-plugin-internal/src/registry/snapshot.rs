@@ -55,7 +55,7 @@ impl PluginSnapshot {
         self.inner
             .plugins
             .values()
-            .filter(|e| e.manifest.plugin.execution == ctx)
+            .filter(|e| e.manifest.runtime.execution == ctx)
             .collect()
     }
 
@@ -94,6 +94,7 @@ mod tests {
         plugin_type: PluginTypeConfig,
         execution: ExecutionContextConfig,
     ) -> PluginEntry {
+        use malbox_plugin_manifest::{PathsConfig, StashConfig};
         PluginEntry {
             id: PluginId::new(name),
             manifest: PluginManifest {
@@ -103,14 +104,19 @@ mod tests {
                     description: None,
                     authors: vec![],
                     plugin_type,
-                    state: PluginStateConfig::Ephemeral,
-                    execution,
                     binary: None,
                 },
                 scope: None,
                 results: HashMap::new(),
                 events: None,
-                runtime: None,
+                runtime: RuntimeConfig {
+                    state: PluginStateConfig::Ephemeral,
+                    execution,
+                    port: None,
+                    log_filter: None,
+                    paths: PathsConfig::default(),
+                    stash: StashConfig::default(),
+                },
             },
             binary_path: PathBuf::from(format!("/plugins/{name}/{name}")),
             plugin_dir: PathBuf::from(format!("/plugins/{name}")),

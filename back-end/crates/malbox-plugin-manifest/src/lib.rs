@@ -15,4 +15,4 @@ pub use manifest::{
     PluginStateConfig, PluginTypeConfig, ResultConfig, ScopeConfig, parse_manifest,
     validate_manifest,
 };
-pub use runtime::{ResolvedRuntimeConfig, RuntimeConfig};
+pub use runtime::{PathsConfig, ResolvedRuntimeConfig, RuntimeConfig, StashConfig};

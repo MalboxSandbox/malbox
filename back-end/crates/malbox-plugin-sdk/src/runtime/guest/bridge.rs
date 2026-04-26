@@ -34,7 +34,8 @@ use super::stream::{execute_task, log_entry_to_proto};
 pub(super) struct GuestPluginBridge<P: Send + Sync + 'static> {
     pub(super) plugin: Arc<P>,
     pub(super) shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
-    pub(super) work_dir: PathBuf,
+    pub(super) sample_dir: PathBuf,
+    pub(super) artifact_dir: PathBuf,
     pub(super) execution_notifiers: std::sync::Mutex<HashMap<i32, ExecutionNotifier>>,
     /// Most recent execution info, so tasks created after ExecuteCommand
     /// can still pick it up via wait_for_execution.
@@ -97,10 +98,10 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
     ) {
         let plugin = self.plugin.clone();
 
-        // Resolve the sample path relative to the work directory so plugin
+        // Resolve the sample path relative to the sample directory so plugin
         // handlers can read it via task.sample_bytes().
         let full_sample_path = if Path::new(&sample_path).is_relative() && !sample_path.is_empty() {
-            self.work_dir.join(&sample_path)
+            self.sample_dir.join(&sample_path)
         } else {
             PathBuf::from(&sample_path)
         };
@@ -149,11 +150,11 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
     }
 
     async fn on_push_file(&self, dest: &str, data: Vec<u8>) -> std::result::Result<(), String> {
-        push_file(&self.work_dir, dest, data).await
+        push_file(&self.sample_dir, dest, data).await
     }
 
     async fn on_pull_file(&self, source: &str) -> std::result::Result<Vec<u8>, String> {
-        pull_file(&self.work_dir, source).await
+        pull_file(&self.artifact_dir, source).await
     }
 
     async fn on_execute_command(
@@ -191,7 +192,7 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
             },
             None => {
                 default_execute_command(
-                    &self.work_dir,
+                    &self.sample_dir,
                     command,
                     args,
                     cwd,
@@ -316,15 +317,20 @@ mod tests {
     struct NoopPlugin;
     impl Plugin for NoopPlugin {}
 
-    fn test_bridge(work_dir: PathBuf) -> GuestPluginBridge<NoopPlugin> {
-        let stash_dir = work_dir.join("_stash");
+    fn test_bridge(base_dir: PathBuf) -> GuestPluginBridge<NoopPlugin> {
+        let sample_dir = base_dir.join("samples");
+        let artifact_dir = base_dir.join("artifacts");
+        let stash_dir = base_dir.join("_stash");
+        std::fs::create_dir_all(&sample_dir).unwrap();
+        std::fs::create_dir_all(&artifact_dir).unwrap();
         let stash = Arc::new(
             crate::stash::ResultStash::new(stash_dir, Default::default()).expect("stash init"),
         );
         GuestPluginBridge {
             plugin: Arc::new(NoopPlugin),
             shutdown_tx: std::sync::Mutex::new(None),
-            work_dir,
+            sample_dir,
+            artifact_dir,
             execution_notifiers: std::sync::Mutex::new(HashMap::new()),
             last_execution: std::sync::Mutex::new(None),
             log_bus: Arc::new(LogBus::new(64)),
@@ -333,12 +339,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bridge_push_file_writes_to_work_dir() {
+    async fn bridge_push_file_writes_to_sample_dir() {
         let dir = tempfile::tempdir().unwrap();
         let bridge = test_bridge(dir.path().to_path_buf());
 
         let result = bridge
-            .on_push_file("samples/test.exe", b"MZ\x90\x00".to_vec())
+            .on_push_file("test.exe", b"MZ\x90\x00".to_vec())
             .await;
         assert!(result.is_ok());
 

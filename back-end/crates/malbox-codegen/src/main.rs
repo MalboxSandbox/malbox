@@ -35,29 +35,22 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), String> {
     let manifest = parse_manifest(&cli.manifest).map_err(|e| e.to_string())?;
-    let raw = manifest.runtime.clone().unwrap_or_default();
-    let resolved = ResolvedRuntimeConfig::from_raw(&raw);
+    let resolved = ResolvedRuntimeConfig::from_raw(&manifest.runtime);
     resolved
         .validate()
         .map_err(|e| format!("invalid [runtime] in {}: {e}", cli.manifest.display()))?;
 
     let output = match cli.lang {
-        Lang::Cpp => emit_cpp(&resolved, raw.log_overflow_dir.is_none()),
+        Lang::Cpp => emit_cpp(&resolved),
     };
     std::fs::write(&cli.output, output)
         .map_err(|e| format!("failed to write {}: {e}", cli.output.display()))?;
     Ok(())
 }
 
-fn emit_cpp(r: &ResolvedRuntimeConfig, log_overflow_is_derived: bool) -> String {
-    let log_overflow_literal = if log_overflow_is_derived {
-        "nullptr".to_string()
-    } else {
-        format!("{:?}", r.log_overflow_dir.to_string_lossy())
-    };
-    let work_dir = r.work_dir.to_string_lossy().into_owned();
+fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
     format!(
-        "// AUTO-GENERATED from plugin.toml by malbox-codegen — do not edit by hand.\n\
+        "// AUTO-GENERATED from plugin.toml by malbox-codegen - do not edit by hand.\n\
          #pragma once\n\
          #include <cstddef>\n\
          #include <cstdint>\n\
@@ -66,16 +59,20 @@ fn emit_cpp(r: &ResolvedRuntimeConfig, log_overflow_is_derived: bool) -> String 
          namespace malbox::generated {{\n\
          inline constexpr ::malbox::RuntimeConfig runtime_config{{\n\
          \x20   .port                   = {port},\n\
-         \x20   .work_dir               = {work_dir:?},\n\
-         \x20   .log_overflow_dir       = {log_overflow_literal},\n\
+         \x20   .sample_dir             = {sample_dir:?},\n\
+         \x20   .artifact_dir           = {artifact_dir:?},\n\
+         \x20   .stash_dir              = {stash_dir:?},\n\
+         \x20   .log_dir                = {log_dir:?},\n\
          \x20   .stash_threshold_bytes  = {threshold},\n\
          \x20   .stash_ttl_secs         = {ttl},\n\
          \x20   .log_filter             = {log_filter:?},\n\
          }};\n\
          }} // namespace malbox::generated\n",
         port = r.port,
-        work_dir = work_dir,
-        log_overflow_literal = log_overflow_literal,
+        sample_dir = r.sample_dir.to_string_lossy(),
+        artifact_dir = r.artifact_dir.to_string_lossy(),
+        stash_dir = r.stash_dir.to_string_lossy(),
+        log_dir = r.log_dir.to_string_lossy(),
         threshold = r.stash_threshold_bytes,
         ttl = r.stash_ttl_secs,
         log_filter = r.log_filter,

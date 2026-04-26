@@ -71,9 +71,8 @@ impl Scanner {
         let is_guest = manifest.plugin.plugin_type == PluginTypeConfig::Guest;
 
         // Resolve the runtime section (filling defaults) and validate.
-        let raw_runtime = manifest.runtime.clone().unwrap_or_default();
         let resolved_runtime =
-            malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&raw_runtime);
+            malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&manifest.runtime);
 
         let (status, runtime_config) = match resolved_runtime.validate() {
             Ok(()) => match check_binary(&binary_path, is_guest) {
@@ -165,6 +164,8 @@ mod tests {
 name = "{name}"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "ephemeral"
 execution = "parallel"
 "#
@@ -267,9 +268,11 @@ execution = "parallel"
 name = "custom-bin"
 version = "1.0.0"
 type = "host"
+binary = "my-custom-binary"
+
+[runtime]
 state = "ephemeral"
 execution = "parallel"
-binary = "my-custom-binary"
 "#;
         std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
 
@@ -290,6 +293,8 @@ binary = "my-custom-binary"
 name = "{name}"
 version = "1.0.0"
 type = "guest"
+
+[runtime]
 state = "ephemeral"
 execution = "exclusive"
 "#
@@ -378,10 +383,10 @@ mod runtime_validation_tests {
 name = "bad-port-plugin"
 version = "0.1.0"
 type = "guest"
-state = "ephemeral"
-execution = "exclusive"
 
 [runtime]
+state = "ephemeral"
+execution = "exclusive"
 port = 80
 "#,
         );
@@ -403,19 +408,21 @@ port = 80
 name = "good-plugin"
 version = "0.1.0"
 type = "guest"
-state = "ephemeral"
-execution = "exclusive"
 
 [runtime]
+state = "ephemeral"
+execution = "exclusive"
 port = 50100
-work_dir = "/opt/malbox"
 "#,
         );
         let scanner = Scanner::new(dir.path().to_path_buf());
         let entries = scanner.scan_all().unwrap();
         let runtime = entries[0].runtime_config.as_ref().expect("runtime_config");
         assert_eq!(runtime.port, 50100);
-        assert_eq!(runtime.work_dir, std::path::PathBuf::from("/opt/malbox"));
+        assert_eq!(
+            runtime.sample_dir,
+            std::path::PathBuf::from("/tmp/malbox/samples")
+        );
         assert_eq!(runtime.log_filter, "info");
     }
 }

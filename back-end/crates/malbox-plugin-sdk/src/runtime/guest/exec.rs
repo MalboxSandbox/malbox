@@ -20,9 +20,9 @@ use super::files::resolve_path;
 /// Spawn an OS command using `tokio::process::Command`.
 ///
 /// This is the fallback executor used when `Plugin::on_execute_command`
-/// returns `None`. The `cwd` is resolved against `work_dir` for safety.
+/// returns `None`. The `cwd` is resolved against `base_dir` for safety.
 pub(super) async fn default_execute_command(
-    work_dir: &Path,
+    base_dir: &Path,
     command: &str,
     args: &[String],
     cwd: Option<&str>,
@@ -34,7 +34,7 @@ pub(super) async fn default_execute_command(
     cmd.args(args).envs(&env);
 
     if let Some(cwd) = cwd {
-        cmd.current_dir(resolve_path(work_dir, cwd)?);
+        cmd.current_dir(resolve_path(base_dir, cwd)?);
     }
 
     if background {

@@ -15,8 +15,7 @@ pub struct PluginManifest {
     pub results: HashMap<String, ResultConfig>,
     #[serde(default)]
     pub events: Option<EventsConfig>,
-    #[serde(default)]
-    pub runtime: Option<RuntimeConfig>,
+    pub runtime: RuntimeConfig,
 }
 
 /// Core plugin metadata.
@@ -30,8 +29,6 @@ pub struct PluginInfo {
     pub authors: Vec<String>,
     #[serde(rename = "type")]
     pub plugin_type: PluginTypeConfig,
-    pub state: PluginStateConfig,
-    pub execution: ExecutionContextConfig,
     /// Optional explicit binary name (defaults to directory name).
     #[serde(default)]
     pub binary: Option<String>,
@@ -124,7 +121,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), ManifestError>
         ))
     })?;
 
-    if manifest.plugin.state == PluginStateConfig::Scoped && manifest.scope.is_none() {
+    if manifest.runtime.state == PluginStateConfig::Scoped && manifest.scope.is_none() {
         return Err(ManifestError::Invalid(
             "plugin with state 'scoped' must have a [scope] section".into(),
         ));

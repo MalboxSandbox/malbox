@@ -1,6 +1,6 @@
 use malbox_plugin_manifest::{
-    ManifestError, PluginManifest, PluginTypeConfig, ResolvedRuntimeConfig, RuntimeConfig,
-    parse_manifest, validate_manifest,
+    ManifestError, PathsConfig, PluginManifest, PluginStateConfig, PluginTypeConfig,
+    ResolvedRuntimeConfig, RuntimeConfig, StashConfig, parse_manifest, validate_manifest,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -11,6 +11,8 @@ fn valid_manifest_toml() -> &'static str {
 name = "pe-parser"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "persistent"
 execution = "parallel"
 "#
@@ -62,6 +64,8 @@ fn parse_manifest_with_results() {
 name = "pe-parser"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "persistent"
 execution = "parallel"
 
@@ -89,6 +93,8 @@ fn parse_manifest_with_events() {
 name = "aggregator"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "persistent"
 execution = "parallel"
 
@@ -113,13 +119,15 @@ fn write_toml(contents: &str) -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn parses_minimal_manifest_without_runtime_section() {
+fn parses_manifest_with_runtime_section() {
     let f = write_toml(
         r#"
 [plugin]
 name = "example"
 version = "0.1.0"
 type = "guest"
+
+[runtime]
 state = "ephemeral"
 execution = "exclusive"
 "#,
@@ -127,19 +135,28 @@ execution = "exclusive"
     let m = parse_manifest(f.path()).expect("parse");
     assert_eq!(m.plugin.name, "example");
     assert_eq!(m.plugin.plugin_type, PluginTypeConfig::Guest);
-    assert!(m.runtime.is_none());
+    assert_eq!(m.runtime.state, PluginStateConfig::Ephemeral);
+}
+
+fn make_runtime(state: &str, execution: &str) -> RuntimeConfig {
+    toml::from_str(&format!(
+        r#"
+state = "{state}"
+execution = "{execution}"
+"#
+    ))
+    .unwrap()
 }
 
 #[test]
 fn resolve_fills_defaults_when_all_none() {
-    let raw = RuntimeConfig::default();
+    let raw = make_runtime("ephemeral", "exclusive");
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert_eq!(r.port, 50051);
     #[cfg(unix)]
-    assert_eq!(r.work_dir, PathBuf::from("/tmp/malbox"));
+    assert_eq!(r.sample_dir, PathBuf::from("/tmp/malbox/samples"));
     #[cfg(windows)]
-    assert_eq!(r.work_dir, PathBuf::from(r"C:\malbox\work"));
-    assert_eq!(r.log_overflow_dir, r.work_dir.join("_logs"));
+    assert_eq!(r.sample_dir, PathBuf::from(r"C:\malbox\samples"));
     assert_eq!(r.stash_threshold_bytes, 1_048_576);
     assert_eq!(r.stash_ttl_secs, 120);
     assert_eq!(r.log_filter, "info");
@@ -148,38 +165,36 @@ fn resolve_fills_defaults_when_all_none() {
 #[test]
 fn resolve_respects_explicit_fields() {
     let raw = RuntimeConfig {
+        state: PluginStateConfig::Ephemeral,
+        execution: malbox_plugin_manifest::ExecutionContextConfig::Exclusive,
         port: Some(50100),
-        work_dir: Some(PathBuf::from("/opt/malbox")),
-        log_overflow_dir: Some(PathBuf::from("/var/log/malbox")),
-        stash_threshold_bytes: Some(2_000_000),
-        stash_ttl_secs: Some(300),
+        paths: PathsConfig {
+            sample_dir: Some(PathBuf::from("/opt/malbox/samples")),
+            artifact_dir: Some(PathBuf::from("/opt/malbox/artifacts")),
+            stash_dir: Some(PathBuf::from("/opt/malbox/stash")),
+            log_dir: Some(PathBuf::from("/opt/malbox/logs")),
+        },
+        stash: StashConfig {
+            threshold_bytes: Some(2_000_000),
+            ttl_secs: Some(300),
+        },
         log_filter: Some("debug".into()),
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert_eq!(r.port, 50100);
-    assert_eq!(r.work_dir, PathBuf::from("/opt/malbox"));
-    assert_eq!(r.log_overflow_dir, PathBuf::from("/var/log/malbox"));
+    assert_eq!(r.sample_dir, PathBuf::from("/opt/malbox/samples"));
+    assert_eq!(r.artifact_dir, PathBuf::from("/opt/malbox/artifacts"));
+    assert_eq!(r.stash_dir, PathBuf::from("/opt/malbox/stash"));
+    assert_eq!(r.log_dir, PathBuf::from("/opt/malbox/logs"));
     assert_eq!(r.stash_threshold_bytes, 2_000_000);
     assert_eq!(r.stash_ttl_secs, 300);
     assert_eq!(r.log_filter, "debug");
 }
 
 #[test]
-fn resolve_derives_log_overflow_from_work_dir_when_missing() {
-    let raw = RuntimeConfig {
-        work_dir: Some(PathBuf::from("/opt/malbox")),
-        ..RuntimeConfig::default()
-    };
-    let r = ResolvedRuntimeConfig::from_raw(&raw);
-    assert_eq!(r.log_overflow_dir, PathBuf::from("/opt/malbox/_logs"));
-}
-
-#[test]
 fn validate_rejects_privileged_port() {
-    let raw = RuntimeConfig {
-        port: Some(80),
-        ..RuntimeConfig::default()
-    };
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.port = Some(80);
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     let err = r.validate().unwrap_err();
     assert!(
@@ -189,11 +204,9 @@ fn validate_rejects_privileged_port() {
 }
 
 #[test]
-fn validate_rejects_relative_work_dir() {
-    let raw = RuntimeConfig {
-        work_dir: Some(PathBuf::from("relative/path")),
-        ..RuntimeConfig::default()
-    };
+fn validate_rejects_relative_sample_dir() {
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.paths.sample_dir = Some(PathBuf::from("relative/path"));
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     let err = r.validate().unwrap_err();
     assert!(
@@ -204,22 +217,17 @@ fn validate_rejects_relative_work_dir() {
 
 #[test]
 fn validate_rejects_bad_log_filter() {
-    let raw = RuntimeConfig {
-        log_filter: Some("!!!not a filter!!!".into()),
-        ..RuntimeConfig::default()
-    };
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.log_filter = Some("!!!not a filter!!!".into());
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert!(r.validate().is_err());
 }
 
 #[test]
 fn validate_accepts_good_config() {
-    let raw = RuntimeConfig {
-        port: Some(50100),
-        work_dir: Some(PathBuf::from("/opt/malbox")),
-        log_filter: Some("info,hyper=warn".into()),
-        ..RuntimeConfig::default()
-    };
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.port = Some(50100);
+    raw.log_filter = Some("info,hyper=warn".into());
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert!(r.validate().is_ok());
 }

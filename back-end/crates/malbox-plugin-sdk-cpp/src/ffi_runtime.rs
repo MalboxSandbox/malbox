@@ -43,6 +43,22 @@ unsafe fn static_str_from_ptr(ptr: *const c_char, field: &str) -> Result<&'stati
     Ok(owned)
 }
 
+/// Convert a non-null `*const c_char` config field to a leaked `&'static str`.
+///
+/// Sets the last FFI error and returns `Err(())` on failure (null pointer or
+/// invalid UTF-8). Intended for the non-nullable path fields in
+/// [`MalboxGuestRuntimeConfig`].
+unsafe fn leak_cstr_to_static(ptr: *const c_char, field: &str) -> Result<&'static str, ()> {
+    let cstr = unsafe { CStr::from_ptr(ptr) };
+    match cstr.to_str() {
+        Ok(s) => Ok(&*Box::leak(s.to_owned().into_boxed_str())),
+        Err(e) => {
+            set_last_error(&format!("config.{field} is not valid UTF-8: {e}"));
+            Err(())
+        }
+    }
+}
+
 /// Convert a C `MalboxPluginMeta` to a Rust `PluginMeta`.
 ///
 /// # Safety
@@ -186,82 +202,68 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         }
     };
 
-    if config.work_dir.is_null() {
-        set_last_error("config.work_dir is null");
-        return -1;
-    }
-    if config.log_filter.is_null() {
-        set_last_error("config.log_filter is null");
-        return -1;
-    }
-
-    let work_dir_cstr = unsafe { std::ffi::CStr::from_ptr(config.work_dir) };
-    let work_dir = match work_dir_cstr.to_str() {
-        Ok(s) => std::path::PathBuf::from(s),
-        Err(e) => {
-            set_last_error(&format!("config.work_dir is not valid UTF-8: {e}"));
+    // Null-check all non-nullable path fields and log_filter.
+    for (ptr, name) in [
+        (config.sample_dir, "sample_dir"),
+        (config.artifact_dir, "artifact_dir"),
+        (config.stash_dir, "stash_dir"),
+        (config.log_dir, "log_dir"),
+        (config.log_filter, "log_filter"),
+    ] {
+        if ptr.is_null() {
+            set_last_error(&format!("config.{name} is null"));
             return -1;
         }
-    };
+    }
 
-    let log_overflow_dir: Option<std::path::PathBuf> = if config.log_overflow_dir.is_null() {
-        None
-    } else {
-        let s = unsafe { std::ffi::CStr::from_ptr(config.log_overflow_dir) };
-        match s.to_str() {
-            Ok(s) => Some(std::path::PathBuf::from(s)),
-            Err(e) => {
-                set_last_error(&format!("config.log_overflow_dir is not valid UTF-8: {e}"));
-                return -1;
-            }
-        }
+    // Convert each C string to a leaked `&'static str`.
+    let sample_dir = match unsafe { leak_cstr_to_static(config.sample_dir, "sample_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
     };
-
-    let log_filter_cstr = unsafe { std::ffi::CStr::from_ptr(config.log_filter) };
-    let log_filter: String = match log_filter_cstr.to_str() {
-        Ok(s) => s.to_owned(),
-        Err(e) => {
-            set_last_error(&format!("config.log_filter is not valid UTF-8: {e}"));
-            return -1;
-        }
+    let artifact_dir = match unsafe { leak_cstr_to_static(config.artifact_dir, "artifact_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let stash_dir = match unsafe { leak_cstr_to_static(config.stash_dir, "stash_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let log_dir = match unsafe { leak_cstr_to_static(config.log_dir, "log_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let log_filter = match unsafe { leak_cstr_to_static(config.log_filter, "log_filter") } {
+        Ok(s) => s,
+        Err(()) => return -1,
     };
 
     let plugin = VtablePlugin::new(vtable);
 
-    let log_dir = log_overflow_dir
-        .clone()
-        .unwrap_or_else(|| work_dir.join("_logs"));
-    let _ = std::fs::create_dir_all(&log_dir);
-    malbox_plugin_sdk::runtime::guest::sweep_log_overflow_orphans(&log_dir);
-    let overflow_path = log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
+    let log_dir_path = std::path::PathBuf::from(log_dir);
+    let _ = std::fs::create_dir_all(&log_dir_path);
+    malbox_plugin_sdk::runtime::guest::sweep_log_overflow_orphans(&log_dir_path);
+    let overflow_path = log_dir_path.join(format!("run-{}.overflow.jsonl", std::process::id()));
 
     let log_bus = std::sync::Arc::new(malbox_plugin_sdk::log::LogBus::with_overflow(
         1024,
         overflow_path,
     ));
-    malbox_plugin_sdk::internal::init_tracing(&log_filter, Some(std::sync::Arc::clone(&log_bus)));
+    malbox_plugin_sdk::internal::init_tracing(log_filter, Some(std::sync::Arc::clone(&log_bus)));
     crate::ffi_log::set_global_log_bus(std::sync::Arc::clone(&log_bus));
-
-    // GuestRuntimeConfig stores its paths / filter as `&'static str`. The
-    // strings come from C++ constexpr storage (the plugin's generated header),
-    // so they outlive the call. But CStr::to_str borrows from the C pointer
-    // transiently; we leak owned copies to promote them to `'static`.
-    let work_dir_static: &'static str =
-        Box::leak(work_dir.to_string_lossy().into_owned().into_boxed_str());
-    let log_filter_static: &'static str = Box::leak(log_filter.into_boxed_str());
-    let log_overflow_static: Option<&'static str> =
-        log_overflow_dir.map(|p| &*Box::leak(p.to_string_lossy().into_owned().into_boxed_str()));
 
     let rt_config = malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig {
         listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
             std::net::Ipv4Addr::UNSPECIFIED,
             config.port,
         )),
-        work_dir: work_dir_static,
-        log_overflow_dir: log_overflow_static,
+        sample_dir,
+        artifact_dir,
+        stash_dir,
+        log_dir,
         stash_threshold_bytes: config.stash_threshold_bytes,
         stash_ttl_secs: config.stash_ttl_secs,
-        log_filter: log_filter_static,
+        log_filter,
     };
 
     // `plugin_meta` comes from C++ but we no longer pass it to `with_config`
@@ -345,11 +347,16 @@ mod tests {
         };
 
         let filter = std::ffi::CString::new("info").unwrap();
-        let work_dir = std::ffi::CString::new("/tmp/malbox").unwrap();
+        let sample_dir = std::ffi::CString::new("/tmp/malbox/samples").unwrap();
+        let artifact_dir = std::ffi::CString::new("/tmp/malbox/artifacts").unwrap();
+        let stash_dir = std::ffi::CString::new("/tmp/malbox/stash").unwrap();
+        let log_dir = std::ffi::CString::new("/tmp/malbox/logs").unwrap();
         let config = MalboxGuestRuntimeConfig {
             port: 50051,
-            work_dir: work_dir.as_ptr(),
-            log_overflow_dir: std::ptr::null(),
+            sample_dir: sample_dir.as_ptr(),
+            artifact_dir: artifact_dir.as_ptr(),
+            stash_dir: stash_dir.as_ptr(),
+            log_dir: log_dir.as_ptr(),
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
@@ -364,7 +371,7 @@ mod tests {
 
     #[cfg(feature = "guest")]
     #[test]
-    fn guest_plugin_rejects_null_work_dir() {
+    fn guest_plugin_rejects_null_sample_dir() {
         let (name, version, desc, authors) = make_meta_cstrings();
         let meta = MalboxPluginMeta {
             name: name.as_ptr(),
@@ -380,10 +387,15 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
         let filter = std::ffi::CString::new("info").unwrap();
+        let artifact_dir = std::ffi::CString::new("/tmp/malbox/artifacts").unwrap();
+        let stash_dir = std::ffi::CString::new("/tmp/malbox/stash").unwrap();
+        let log_dir = std::ffi::CString::new("/tmp/malbox/logs").unwrap();
         let config = MalboxGuestRuntimeConfig {
             port: 50051,
-            work_dir: std::ptr::null(),
-            log_overflow_dir: std::ptr::null(),
+            sample_dir: std::ptr::null(),
+            artifact_dir: artifact_dir.as_ptr(),
+            stash_dir: stash_dir.as_ptr(),
+            log_dir: log_dir.as_ptr(),
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
@@ -392,7 +404,7 @@ mod tests {
         let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
         assert_eq!(rc, -1);
         let err = crate::error::last_error_string().unwrap();
-        assert!(err.contains("work_dir"));
+        assert!(err.contains("sample_dir"));
     }
 
     // Null meta fields

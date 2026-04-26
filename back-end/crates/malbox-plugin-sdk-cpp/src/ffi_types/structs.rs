@@ -43,15 +43,16 @@ pub struct MalboxPluginMeta {
 /// Runtime configuration baked into a guest plugin at build time.
 ///
 /// Passed by-value to [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
-/// All string pointers must be valid, null-terminated UTF-8 C strings whose
-/// storage lives at least for the duration of that call.
+/// All string pointers must be non-null, valid, null-terminated UTF-8 C strings
+/// whose storage lives at least for the duration of that call.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MalboxGuestRuntimeConfig {
     pub port: u16,
-    pub work_dir: *const c_char,
-    /// Nullable: when null, derived as `<work_dir>/_logs` at runtime.
-    pub log_overflow_dir: *const c_char,
+    pub sample_dir: *const c_char,
+    pub artifact_dir: *const c_char,
+    pub stash_dir: *const c_char,
+    pub log_dir: *const c_char,
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: *const c_char,

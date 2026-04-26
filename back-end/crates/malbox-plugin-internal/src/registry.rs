@@ -135,6 +135,8 @@ mod tests {
 name = "{name}"
 version = "1.0.0"
 type = "host"
+
+[runtime]
 state = "ephemeral"
 execution = "parallel"
 "#

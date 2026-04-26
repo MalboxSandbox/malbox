@@ -8,13 +8,16 @@ fn emits_cpp_header_with_expected_constexpr() {
 name = "test"
 version = "0.1.0"
 type = "guest"
-state = "ephemeral"
-execution = "exclusive"
 
 [runtime]
+state = "ephemeral"
+execution = "exclusive"
 port = 50123
-work_dir = "/opt/malbox"
 log_filter = "debug"
+
+[runtime.paths]
+sample_dir = "/opt/malbox/samples"
+artifact_dir = "/opt/malbox/artifacts"
 "#;
     let tmp = tempfile::tempdir().unwrap();
     let manifest_path = tmp.path().join("plugin.toml");
@@ -42,33 +45,31 @@ log_filter = "debug"
         "got: {header}"
     );
     assert!(
-        header.contains(r#".work_dir               = "/opt/malbox""#),
+        header.contains(r#".sample_dir             = "/opt/malbox/samples""#),
+        "got: {header}"
+    );
+    assert!(
+        header.contains(r#".artifact_dir           = "/opt/malbox/artifacts""#),
         "got: {header}"
     );
     assert!(
         header.contains(r#".log_filter             = "debug""#),
         "got: {header}"
     );
-    assert!(
-        header.contains(".log_overflow_dir       = nullptr"),
-        "got: {header}"
-    );
 }
 
 #[test]
-fn emits_explicit_log_overflow_dir_when_set() {
+fn emits_default_paths_when_not_specified() {
     let toml = br#"
 [plugin]
 name = "test2"
 version = "0.1.0"
 type = "guest"
-state = "ephemeral"
-execution = "exclusive"
 
 [runtime]
+state = "ephemeral"
+execution = "exclusive"
 port = 50200
-work_dir = "/opt/malbox"
-log_overflow_dir = "/var/log/malbox"
 "#;
     let tmp = tempfile::tempdir().unwrap();
     let manifest_path = tmp.path().join("plugin.toml");
@@ -92,12 +93,12 @@ log_overflow_dir = "/var/log/malbox"
 
     let header = std::fs::read_to_string(&output_path).unwrap();
     assert!(
-        header.contains(r#".log_overflow_dir       = "/var/log/malbox""#),
-        "got: {header}"
+        header.contains(r#".sample_dir             = "/tmp/malbox/samples""#),
+        "expected default sample_dir; got: {header}"
     );
     assert!(
-        !header.contains("nullptr"),
-        "nullptr should not appear when log_overflow_dir is explicit; got: {header}"
+        header.contains(r#".stash_dir              = "/tmp/malbox/stash""#),
+        "expected default stash_dir; got: {header}"
     );
 }
 
@@ -108,10 +109,10 @@ fn fails_on_invalid_runtime_section() {
 name = "test3"
 version = "0.1.0"
 type = "guest"
-state = "ephemeral"
-execution = "exclusive"
 
 [runtime]
+state = "ephemeral"
+execution = "exclusive"
 port = 80
 "#;
     let tmp = tempfile::tempdir().unwrap();
