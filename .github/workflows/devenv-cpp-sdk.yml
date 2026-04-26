@@ -8,6 +8,12 @@ on:
       - 'back-end/crates/malbox-plugin-sdk/**'
       - 'back-end/crates/malbox-plugin-transport/**'
       - 'back-end/xtask/**'
+      - 'back-end/devenv.nix'
+      - 'back-end/devenv.yaml'
+      - 'back-end/devenv.lock'
+      - 'devenv.nix'
+      - 'devenv.yaml'
+      - 'devenv.lock'
       - '.github/workflows/devenv-cpp-sdk.yml'
   pull_request:
     branches: ["main", "dev*"]
@@ -16,6 +22,12 @@ on:
       - 'back-end/crates/malbox-plugin-sdk/**'
       - 'back-end/crates/malbox-plugin-transport/**'
       - 'back-end/xtask/**'
+      - 'back-end/devenv.nix'
+      - 'back-end/devenv.yaml'
+      - 'back-end/devenv.lock'
+      - 'devenv.nix'
+      - 'devenv.yaml'
+      - 'devenv.lock'
       - '.github/workflows/devenv-cpp-sdk.yml'
 
 jobs:

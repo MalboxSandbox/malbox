@@ -6,12 +6,24 @@ on:
     paths:
       - 'back-end/crates/malbox-plugin-sdk/**'
       - 'back-end/crates/malbox-plugin-transport/**'
+      - 'back-end/devenv.nix'
+      - 'back-end/devenv.yaml'
+      - 'back-end/devenv.lock'
+      - 'devenv.nix'
+      - 'devenv.yaml'
+      - 'devenv.lock'
       - '.github/workflows/devenv-rust-cross.yml'
   pull_request:
     branches: ["main", "dev*"]
     paths:
       - 'back-end/crates/malbox-plugin-sdk/**'
       - 'back-end/crates/malbox-plugin-transport/**'
+      - 'back-end/devenv.nix'
+      - 'back-end/devenv.yaml'
+      - 'back-end/devenv.lock'
+      - 'devenv.nix'
+      - 'devenv.yaml'
+      - 'devenv.lock'
       - '.github/workflows/devenv-rust-cross.yml'
 
 jobs:
