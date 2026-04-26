@@ -1,8 +1,27 @@
 use crate::error::ManifestError;
-use crate::manifest::{ExecutionContextConfig, PluginStateConfig};
+use crate::manifest::{ExecutionContextConfig, PluginStateConfig, PluginTypeConfig};
 
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn is_windows_absolute(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    let bytes = s.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+fn is_absolute_for_plugin(path: &Path, plugin_type: PluginTypeConfig) -> bool {
+    if path.is_absolute() {
+        return true;
+    }
+    match plugin_type {
+        PluginTypeConfig::Guest => is_windows_absolute(path),
+        PluginTypeConfig::Host => false,
+    }
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,32 +102,32 @@ impl ResolvedRuntimeConfig {
         }
     }
 
-    pub fn validate(&self) -> Result<(), ManifestError> {
+    pub fn validate(&self, plugin_type: PluginTypeConfig) -> Result<(), ManifestError> {
         if self.port < 1024 {
             return Err(ManifestError::Invalid(format!(
                 "runtime.port must be >= 1024, got {}",
                 self.port
             )));
         }
-        if !self.sample_dir.is_absolute() {
+        if !is_absolute_for_plugin(&self.sample_dir, plugin_type) {
             return Err(ManifestError::Invalid(format!(
                 "runtime.paths.sample_dir must be absolute: {}",
                 self.sample_dir.display()
             )));
         }
-        if !self.artifact_dir.is_absolute() {
+        if !is_absolute_for_plugin(&self.artifact_dir, plugin_type) {
             return Err(ManifestError::Invalid(format!(
                 "runtime.paths.artifact_dir must be absolute: {}",
                 self.artifact_dir.display()
             )));
         }
-        if !self.stash_dir.is_absolute() {
+        if !is_absolute_for_plugin(&self.stash_dir, plugin_type) {
             return Err(ManifestError::Invalid(format!(
                 "runtime.paths.stash_dir must be absolute: {}",
                 self.stash_dir.display()
             )));
         }
-        if !self.log_dir.is_absolute() {
+        if !is_absolute_for_plugin(&self.log_dir, plugin_type) {
             return Err(ManifestError::Invalid(format!(
                 "runtime.paths.log_dir must be absolute: {}",
                 self.log_dir.display()

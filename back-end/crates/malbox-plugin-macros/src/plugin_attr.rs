@@ -123,9 +123,11 @@ fn generate_runtime_const(
     input: &syn::ItemStruct,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let resolved = malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&manifest.runtime);
-    resolved.validate().map_err(|e| {
-        syn::Error::new_spanned(input, format!("invalid [runtime] in plugin.toml: {e}"))
-    })?;
+    resolved
+        .validate(manifest.plugin.plugin_type)
+        .map_err(|e| {
+            syn::Error::new_spanned(input, format!("invalid [runtime] in plugin.toml: {e}"))
+        })?;
 
     let port = resolved.port;
     let sample_dir = resolved.sample_dir.to_string_lossy().into_owned();

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::manager::ipc_channels::HostTaskChannels;
 use crate::registry::types::PluginEntry;
 
 /// Lifecycle state machine for a running plugin process.
@@ -119,6 +120,12 @@ pub struct PluginInstance {
     ///
     /// `None` for host plugins or before the gRPC connection is established.
     pub grpc_client: Option<crate::transport::daemon::GrpcClient>,
+    /// Daemon-side IPC task channels for host plugins.
+    ///
+    /// Holds the request publisher and result receiver used during
+    /// [`execute_host_task`](crate::manager::handle::PluginHandle). `None` until
+    /// the channels are opened after the plugin process starts.
+    pub task_channels: Option<HostTaskChannels>,
     /// Wall-clock time when the plugin process was started.
     pub started_at: Option<Instant>,
     /// Wall-clock time of the most recent successful health check.
@@ -136,6 +143,7 @@ impl PluginInstance {
             lifecycle: PluginLifecycle::Starting,
             process: None,
             grpc_client: None,
+            task_channels: None,
             started_at: None,
             last_health_check: None,
             log_file_path: None,
@@ -149,6 +157,7 @@ impl fmt::Debug for PluginInstance {
             .field("plugin_id", &self.entry.id)
             .field("lifecycle", &self.lifecycle)
             .field("has_process", &self.process.is_some())
+            .field("has_task_channels", &self.task_channels.is_some())
             .field("started_at", &self.started_at)
             .field("last_health_check", &self.last_health_check)
             .field("log_file_path", &self.log_file_path)

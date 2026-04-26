@@ -5,7 +5,7 @@ edition = "2024"
 description = "SDK for building Malbox analysis plugins"
 
 [features]
-host = []
+host = ["malbox-plugin-transport/ipc"]
 guest = []
 testkit = []
 

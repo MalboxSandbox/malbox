@@ -196,7 +196,7 @@ fn validate_rejects_privileged_port() {
     let mut raw = make_runtime("ephemeral", "exclusive");
     raw.port = Some(80);
     let r = ResolvedRuntimeConfig::from_raw(&raw);
-    let err = r.validate().unwrap_err();
+    let err = r.validate(PluginTypeConfig::Host).unwrap_err();
     assert!(
         matches!(err, ManifestError::Invalid(ref msg) if msg.contains("port")),
         "got {err:?}"
@@ -208,7 +208,7 @@ fn validate_rejects_relative_sample_dir() {
     let mut raw = make_runtime("ephemeral", "exclusive");
     raw.paths.sample_dir = Some(PathBuf::from("relative/path"));
     let r = ResolvedRuntimeConfig::from_raw(&raw);
-    let err = r.validate().unwrap_err();
+    let err = r.validate(PluginTypeConfig::Host).unwrap_err();
     assert!(
         matches!(err, ManifestError::Invalid(ref msg) if msg.contains("absolute")),
         "got {err:?}"
@@ -220,7 +220,7 @@ fn validate_rejects_bad_log_filter() {
     let mut raw = make_runtime("ephemeral", "exclusive");
     raw.log_filter = Some("!!!not a filter!!!".into());
     let r = ResolvedRuntimeConfig::from_raw(&raw);
-    assert!(r.validate().is_err());
+    assert!(r.validate(PluginTypeConfig::Host).is_err());
 }
 
 #[test]
@@ -229,5 +229,51 @@ fn validate_accepts_good_config() {
     raw.port = Some(50100);
     raw.log_filter = Some("info,hyper=warn".into());
     let r = ResolvedRuntimeConfig::from_raw(&raw);
-    assert!(r.validate().is_ok());
+    assert!(r.validate(PluginTypeConfig::Host).is_ok());
+}
+
+#[test]
+fn validate_accepts_windows_paths_for_guest_plugin() {
+    let raw = RuntimeConfig {
+        state: PluginStateConfig::Ephemeral,
+        execution: malbox_plugin_manifest::ExecutionContextConfig::Exclusive,
+        port: Some(50051),
+        paths: PathsConfig {
+            sample_dir: Some(PathBuf::from(r"C:\ProgramData")),
+            artifact_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Artifacts")),
+            stash_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Stash")),
+            log_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Logs")),
+        },
+        stash: StashConfig {
+            threshold_bytes: None,
+            ttl_secs: None,
+        },
+        log_filter: Some("info".into()),
+    };
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    assert!(r.validate(PluginTypeConfig::Guest).is_ok());
+}
+
+#[test]
+fn validate_rejects_windows_paths_for_host_plugin() {
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.paths.sample_dir = Some(PathBuf::from(r"C:\ProgramData"));
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    let err = r.validate(PluginTypeConfig::Host).unwrap_err();
+    assert!(
+        matches!(err, ManifestError::Invalid(ref msg) if msg.contains("absolute")),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn validate_rejects_relative_paths_for_guest_plugin() {
+    let mut raw = make_runtime("ephemeral", "exclusive");
+    raw.paths.sample_dir = Some(PathBuf::from("relative/path"));
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    let err = r.validate(PluginTypeConfig::Guest).unwrap_err();
+    assert!(
+        matches!(err, ManifestError::Invalid(ref msg) if msg.contains("absolute")),
+        "got {err:?}"
+    );
 }

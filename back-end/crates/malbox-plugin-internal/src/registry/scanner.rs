@@ -74,7 +74,8 @@ impl Scanner {
         let resolved_runtime =
             malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&manifest.runtime);
 
-        let (status, runtime_config) = match resolved_runtime.validate() {
+        let (status, runtime_config) = match resolved_runtime.validate(manifest.plugin.plugin_type)
+        {
             Ok(()) => match check_binary(&binary_path, is_guest) {
                 Ok(()) => (PluginStatus::Registered, Some(resolved_runtime)),
                 Err(reason) => (PluginStatus::Invalid(reason), Some(resolved_runtime)),

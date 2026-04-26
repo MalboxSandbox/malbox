@@ -9,6 +9,7 @@ exclude = [
     "examples/plugins/guest-yara-scanner",
     "examples/plugins/guest-exec-checker",
     "examples/plugins/host-event-reactor",
+    "examples/plugins/host-string-extractor",
     "xtask",
 ]
 [workspace.dependencies]

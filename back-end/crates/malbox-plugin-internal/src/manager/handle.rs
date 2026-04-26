@@ -6,16 +6,23 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use prost::Message;
 use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
 
+use malbox_plugin_transport::ipc::{IpcService, Node};
+use malbox_plugin_transport::messages::events::Event;
+use malbox_plugin_transport::traits::TransportEmitter;
+
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
+use crate::manager::ipc_channels::HostTaskChannels;
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
 use crate::transport::grpc::proto;
+use crate::transport::ipc::EventEmitter;
 
 /// Format of a plugin output payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +50,8 @@ pub struct PluginHandle {
     plugin_id: PluginId,
     entry: Arc<PluginEntry>,
     instance: Arc<Mutex<PluginInstance>>,
+    ipc_node: Arc<Node<IpcService>>,
+    emitter: Arc<EventEmitter>,
 }
 
 impl PluginHandle {
@@ -51,11 +60,15 @@ impl PluginHandle {
         plugin_id: PluginId,
         entry: Arc<PluginEntry>,
         instance: Arc<Mutex<PluginInstance>>,
+        ipc_node: Arc<Node<IpcService>>,
+        emitter: Arc<EventEmitter>,
     ) -> Self {
         Self {
             plugin_id,
             entry,
             instance,
+            ipc_node,
+            emitter,
         }
     }
 
@@ -92,14 +105,141 @@ impl PluginHandle {
     /// Execute a task on a host plugin via IPC.
     async fn execute_host_task(
         &self,
-        _task_id: i32,
-        _sample_path: &str,
-        _config: HashMap<String, String>,
+        task_id: i32,
+        sample_path: &str,
+        config: HashMap<String, String>,
     ) -> Result<Vec<PluginOutput>> {
-        // TODO: Implement host IPC task execution — emit TaskStarting event
-        // over iceoryx2, wait for result events, and collect into Vec<PluginOutput>.
-        warn!(plugin = %self.plugin_id, "host IPC task execution not yet implemented");
-        Ok(vec![])
+        use crate::transport::grpc::proto::{
+            self as proto, ResultFormat as ProtoFormat, ResultKind,
+        };
+
+        const HOST_TASK_POLL_TIMEOUT: Duration = Duration::from_millis(500);
+
+        debug!(plugin = %self.plugin_id, task_id, "executing task on host plugin via IPC");
+
+        // Ensure task channels exist (lazy init, cached on instance).
+        {
+            let mut instance = self.instance.lock().await;
+            if instance.task_channels.is_none() {
+                let channels = HostTaskChannels::new(&self.ipc_node, self.plugin_id.as_str())?;
+                instance.task_channels = Some(channels);
+            }
+        }
+
+        // Publish request data.
+        let request = proto::TaskRequest {
+            task_id,
+            sample_path: sample_path.to_string(),
+            config,
+        };
+        let request_bytes = Message::encode_to_vec(&request);
+
+        {
+            let instance = self.instance.lock().await;
+            let channels = instance.task_channels.as_ref().unwrap();
+            channels
+                .request_publisher
+                .publish(&request_bytes)
+                .map_err(|e| {
+                    ManagerError::ExecutionFailed(
+                        self.plugin_id.clone(),
+                        format!("failed to publish task request: {e}"),
+                    )
+                })?;
+        }
+
+        // Signal the plugin via broadcast event.
+        // The scheduler emits TaskStarting earlier in its pipeline, but the request
+        // data is only now on the per-plugin channel. We emit again so the plugin
+        // sees the event after data is available.
+        let _ = self.emitter.emit(Event::TaskStarting { task_id });
+
+        // Poll for results (blocking iceoryx2 call - run in spawn_blocking).
+        let instance = Arc::clone(&self.instance);
+        let plugin_id = self.plugin_id.clone();
+
+        let outputs = tokio::task::spawn_blocking(move || {
+            let mut outputs: Vec<PluginOutput> = Vec::new();
+
+            loop {
+                let instance_guard = instance.blocking_lock();
+                let channels = instance_guard.task_channels.as_ref().unwrap();
+
+                match channels.result_receiver.wait(HOST_TASK_POLL_TIMEOUT) {
+                    Ok(Some((header, payload))) => {
+                        drop(instance_guard);
+
+                        if header.is_final == 1 {
+                            break;
+                        }
+
+                        let kind = ResultKind::try_from(header.kind).unwrap_or(ResultKind::Result);
+
+                        match kind {
+                            ResultKind::Progress | ResultKind::Ready => {
+                                debug!(
+                                    plugin = %plugin_id,
+                                    task_id = header.task_id,
+                                    ?kind,
+                                    "received IPC progress/ready"
+                                );
+                            }
+                            ResultKind::Result | ResultKind::ResultRef => {
+                                let result: proto::TaskResult = Message::decode(payload.as_slice())
+                                    .map_err(|e| {
+                                        ManagerError::ExecutionFailed(
+                                            plugin_id.clone(),
+                                            format!("failed to decode result payload: {e}"),
+                                        )
+                                    })?;
+
+                                let format = match ProtoFormat::try_from(header.format) {
+                                    Ok(ProtoFormat::Json) => OutputFormat::Json,
+                                    _ => OutputFormat::Bytes,
+                                };
+
+                                if !result.result_name.is_empty() {
+                                    info!(
+                                        plugin = %plugin_id,
+                                        task_id = header.task_id,
+                                        result_name = %result.result_name,
+                                        data_len = result.data.len(),
+                                        "received inline IPC task result"
+                                    );
+                                    outputs.push(PluginOutput {
+                                        result_name: result.result_name,
+                                        data: result.data,
+                                        format,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        drop(instance_guard);
+                        // Timeout - the scheduler's outer timeout handles long tasks.
+                    }
+                    Err(e) => {
+                        drop(instance_guard);
+                        return Err(ManagerError::ExecutionFailed(
+                            plugin_id.clone(),
+                            format!("IPC result receive error: {e}"),
+                        ));
+                    }
+                }
+            }
+
+            Ok(outputs)
+        })
+        .await
+        .map_err(|e| {
+            ManagerError::ExecutionFailed(
+                self.plugin_id.clone(),
+                format!("spawn_blocking panicked: {e}"),
+            )
+        })??;
+
+        Ok(outputs)
     }
 
     /// Execute a task on a guest plugin via gRPC streaming.

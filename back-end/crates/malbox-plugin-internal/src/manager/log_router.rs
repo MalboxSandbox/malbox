@@ -75,6 +75,7 @@ pub fn spawn_log_consumer(
                 Ok(Some(entry)) => {
                     forward_to_tracing(&plugin_id, &entry);
                     write_to_file(&mut writer, &entry);
+                    let _ = writer.flush();
                 }
                 Ok(None) => {
                     debug!(plugin = %plugin_id, "log stream ended (EOF)");

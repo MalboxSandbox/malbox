@@ -9,6 +9,7 @@ pub mod error;
 pub mod handle;
 pub mod health;
 pub mod instance;
+pub mod ipc_channels;
 pub mod log_router;
 
 use std::sync::Arc;
@@ -18,6 +19,8 @@ use dashmap::DashMap;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, instrument, warn};
+
+use malbox_plugin_transport::ipc::{IpcService, Node};
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::PluginHandle;
@@ -40,6 +43,7 @@ pub struct PluginManager {
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     registry: Arc<PluginRegistry>,
     emitter: Arc<EventEmitter>,
+    ipc_node: Arc<Node<IpcService>>,
     /// Held to keep the background health-check task alive for the lifetime of the manager.
     #[allow(dead_code)]
     health_check_handle: JoinHandle<()>,
@@ -53,6 +57,7 @@ impl PluginManager {
     pub async fn new(
         registry: Arc<PluginRegistry>,
         emitter: Arc<EventEmitter>,
+        ipc_node: Arc<Node<IpcService>>,
         health_check_interval: Duration,
     ) -> Result<Self> {
         let snapshot = registry.snapshot();
@@ -88,6 +93,7 @@ impl PluginManager {
             instances,
             registry,
             emitter,
+            ipc_node,
             health_check_handle,
             shutdown_tx,
         })
@@ -127,6 +133,8 @@ impl PluginManager {
                     plugin_id.clone(),
                     Arc::clone(entry),
                     Arc::clone(instance_lock.value()),
+                    Arc::clone(&self.ipc_node),
+                    Arc::clone(&self.emitter),
                 ))
             }
             PluginStateConfig::Ephemeral => {
@@ -141,6 +149,8 @@ impl PluginManager {
                             plugin_id.clone(),
                             Arc::clone(entry),
                             Arc::clone(instance_lock.value()),
+                            Arc::clone(&self.ipc_node),
+                            Arc::clone(&self.emitter),
                         ));
                     }
                 }
@@ -156,6 +166,8 @@ impl PluginManager {
                     plugin_id.clone(),
                     Arc::clone(entry),
                     instance_lock,
+                    Arc::clone(&self.ipc_node),
+                    Arc::clone(&self.emitter),
                 ))
             }
             PluginStateConfig::Scoped => Err(ManagerError::ScopedNotImplemented),
@@ -200,6 +212,7 @@ impl PluginManager {
             lifecycle: PluginLifecycle::Ready,
             process: None,
             grpc_client: Some(grpc_client),
+            task_channels: None,
             started_at: Some(Instant::now()),
             last_health_check: None,
             log_file_path: None,
@@ -351,6 +364,11 @@ impl PluginManager {
     pub fn emitter(&self) -> &Arc<EventEmitter> {
         &self.emitter
     }
+
+    /// Returns a reference to the shared iceoryx2 IPC node.
+    pub fn ipc_node(&self) -> &Arc<Node<IpcService>> {
+        &self.ipc_node
+    }
 }
 
 /// Spawn a host plugin as a child process.
@@ -359,6 +377,7 @@ impl PluginManager {
 /// state with the process handle attached.
 async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
     let child = tokio::process::Command::new(&entry.binary_path)
+        .env("MALBOX_PLUGIN_ID", entry.id.as_str())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| ManagerError::SpawnFailed(entry.id.clone(), e.to_string()))?;
@@ -368,6 +387,7 @@ async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
         lifecycle: PluginLifecycle::Starting,
         process: Some(child),
         grpc_client: None,
+        task_channels: None,
         started_at: Some(Instant::now()),
         last_health_check: None,
         log_file_path: None,

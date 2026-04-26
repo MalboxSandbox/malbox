@@ -37,7 +37,7 @@ fn run(cli: Cli) -> Result<(), String> {
     let manifest = parse_manifest(&cli.manifest).map_err(|e| e.to_string())?;
     let resolved = ResolvedRuntimeConfig::from_raw(&manifest.runtime);
     resolved
-        .validate()
+        .validate(manifest.plugin.plugin_type)
         .map_err(|e| format!("invalid [runtime] in {}: {e}", cli.manifest.display()))?;
 
     let output = match cli.lang {

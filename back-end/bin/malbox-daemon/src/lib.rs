@@ -175,14 +175,17 @@ pub async fn run(config: &Config) -> error::Result<()> {
     let plugin_manager = {
         let _span = info_span!("init.plugin_manager").entered();
 
-        let node = NodeBuilder::new()
-            .create::<IpcService>()
-            .map_err(|e| DaemonError::Internal(format!("Failed to create IPC node: {}", e)))?;
+        let ipc_node = Arc::new(
+            NodeBuilder::new()
+                .create::<IpcService>()
+                .map_err(|e| DaemonError::Internal(format!("Failed to create IPC node: {}", e)))?,
+        );
 
         let emitter = Arc::new(
-            EventEmitter::new(&node, daemon_channel::EVENTS, daemon_channel::PAYLOADS).map_err(
-                |e| DaemonError::Internal(format!("Failed to create event emitter: {}", e)),
-            )?,
+            EventEmitter::new(&ipc_node, daemon_channel::EVENTS, daemon_channel::PAYLOADS)
+                .map_err(|e| {
+                    DaemonError::Internal(format!("Failed to create event emitter: {}", e))
+                })?,
         );
 
         // Create plugin manager (replaces the logging-only event listener)
@@ -190,6 +193,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
             PluginManager::new(
                 Arc::clone(&registry),
                 emitter,
+                Arc::clone(&ipc_node),
                 std::time::Duration::from_secs(10),
             )
             .await
