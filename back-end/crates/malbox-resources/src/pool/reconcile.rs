@@ -117,6 +117,51 @@ impl MachinePool {
             }
         }
 
+        // Clean up stale provider snapshots not tracked in the DB.
+        if let Some(snapshot_cap) = self.provider.snapshot() {
+            for db_machine in &db_machines {
+                let machine_id = match db_machine.id {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let provider_id = match db_machine.provider_id.as_deref() {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let runtime_vm = match provider_vms.iter().find(|vm| vm.id.0 == provider_id) {
+                    Some(vm) => vm,
+                    None => continue,
+                };
+
+                let provider_snaps = match snapshot_cap.list_snapshots(runtime_vm).await {
+                    Ok(snaps) => snaps,
+                    Err(_) => continue,
+                };
+                let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
+                    .await
+                    .unwrap_or_default();
+
+                for ps in &provider_snaps {
+                    if !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0) {
+                        warn!(
+                            machine_id,
+                            snapshot = ps.name.as_str(),
+                            provider_id = %ps.id,
+                            "Deleting stale provider snapshot not tracked in DB"
+                        );
+                        if let Err(e) = snapshot_cap.delete_snapshot(&ps.id).await {
+                            warn!(
+                                machine_id,
+                                snapshot = ps.name.as_str(),
+                                error = %e,
+                                "Failed to delete stale provider snapshot"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         info!("Reconciliation complete");
         Ok(())
     }

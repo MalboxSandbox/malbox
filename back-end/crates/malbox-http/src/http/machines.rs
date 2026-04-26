@@ -7,7 +7,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use malbox_config::provisioning::ProvisionStep;
-use malbox_database::repositories::{provision_runs, snapshots};
+use malbox_database::repositories::snapshots;
 use malbox_resources::error::ResourceError;
 use serde::Deserialize;
 use tracing::{error, info};
@@ -81,30 +81,20 @@ async fn delete_snapshot(
             }
         };
 
-    // Delete provision runs that reference this snapshot first
-    if let Err(e) =
-        provision_runs::delete_provision_runs_for_snapshot(&state.pool, snapshot.id).await
+    // Delete from provider + DB via the machine pool.
+    if let Err(e) = state
+        .machine_pool
+        .delete_snapshot(machine_id, &snapshot)
+        .await
     {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to delete provision runs: {}", e)})),
+            Json(serde_json::json!({"error": e.to_string()})),
         )
             .into_response();
     }
 
-    match snapshots::delete_snapshot(&state.pool, snapshot.id).await {
-        Ok(Some(_)) => StatusCode::NO_CONTENT.into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Snapshot not found"})),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": e.to_string()})),
-        )
-            .into_response(),
-    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Provisioner-agnostic provision request.

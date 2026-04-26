@@ -88,6 +88,46 @@ impl MachinePool {
             .map_err(|e| ResourceError::Database(e.to_string()))
     }
 
+    /// Delete a snapshot from both the provider and the database.
+    ///
+    /// Provider deletion is best-effort: if it fails the DB record is still
+    /// removed so the system doesn't get stuck with an orphaned reference.
+    pub async fn delete_snapshot(
+        &self,
+        machine_id: i32,
+        snapshot: &malbox_database::repositories::snapshots::MachineSnapshot,
+    ) -> Result<()> {
+        use malbox_database::repositories::{provision_runs, snapshots};
+        use malbox_machinery::provider::capabilities::snapshot::SnapshotId;
+
+        if let Some(snapshot_cap) = self.provider.snapshot() {
+            let snap_id = SnapshotId(snapshot.provider_snapshot_id.clone());
+            if let Err(e) = snapshot_cap.delete_snapshot(&snap_id).await {
+                tracing::warn!(
+                    machine_id,
+                    snapshot = snapshot.name.as_str(),
+                    error = %e,
+                    "Failed to delete snapshot from provider (continuing with DB cleanup)"
+                );
+            }
+        }
+
+        provision_runs::delete_provision_runs_for_snapshot(&self.db, snapshot.id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        snapshots::delete_snapshot(&self.db, snapshot.id)
+            .await
+            .map_err(|e| ResourceError::Database(e.to_string()))?;
+
+        info!(
+            machine_id,
+            snapshot = snapshot.name.as_str(),
+            "Snapshot deleted"
+        );
+        Ok(())
+    }
+
     /// Fetch the guest plugin names from the active snapshot for a machine.
     ///
     /// Returns an empty list if there is no active snapshot or the snapshot
