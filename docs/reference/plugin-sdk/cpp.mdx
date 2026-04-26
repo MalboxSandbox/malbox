@@ -361,11 +361,17 @@ Runtime configuration baked into the plugin binary at build time. Generated from
 <ResponseField name="port" type="std::uint16_t" required>
   gRPC listen port.
 </ResponseField>
-<ResponseField name="work_dir" type="const char*" required>
-  Absolute path to the working directory for file push/pull and command execution.
+<ResponseField name="sample_dir" type="const char*" required>
+  Absolute path to the directory where the daemon pushes the sample for analysis.
 </ResponseField>
-<ResponseField name="log_overflow_dir" type="const char*">
-  Absolute path to the log overflow directory. Nullable - when `nullptr`, derived as `<work_dir>/_logs`.
+<ResponseField name="artifact_dir" type="const char*" required>
+  Absolute path to the directory where the plugin writes output artifacts.
+</ResponseField>
+<ResponseField name="stash_dir" type="const char*" required>
+  Absolute path to the internal result stash spillover directory.
+</ResponseField>
+<ResponseField name="log_dir" type="const char*" required>
+  Absolute path to the log overflow files directory.
 </ResponseField>
 <ResponseField name="stash_threshold_bytes" type="std::size_t" required>
   Result stash spill threshold in bytes.

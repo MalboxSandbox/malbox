@@ -51,13 +51,22 @@ version = "0.1.0"
 description = "My analysis plugin"
 authors = ["Your Name"]
 type = "guest"                    # or "host"
-state = "ephemeral"               # or "persistent", "scoped"
-execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 
 [runtime]
+state = "ephemeral"               # or "persistent", "scoped"
+execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 port = 50051                      # gRPC listen port (default: 50051)
-work_dir = "/tmp/malbox"          # working directory (default: /tmp/malbox)
 log_filter = "info"               # tracing filter (default: "info")
+
+[runtime.paths]
+sample_dir = "/tmp/malbox/samples"        # where daemon pushes the sample
+artifact_dir = "/tmp/malbox/artifacts"    # where plugin writes output
+stash_dir = "/tmp/malbox/stash"           # internal result stash spillover
+log_dir = "/tmp/malbox/logs"              # log overflow files
+
+[runtime.stash]
+threshold_bytes = 1048576
+ttl_secs = 120
 
 [results.my_result]
 description = "What this result contains"
@@ -90,7 +99,6 @@ extern crate malbox_plugin_sdk as malbox;
 use malbox::prelude::*;
 
 #[malbox::guest_plugin]
-#[malbox(state = "ephemeral", execution = "exclusive")]
 struct MyPlugin;
 
 #[malbox::handlers]
@@ -132,13 +140,7 @@ Use one of these on your struct to declare the plugin type:
 | `#[malbox::host_plugin]` | Host plugin - runs on the daemon machine via IPC |
 | `#[malbox::guest_plugin]` | Guest plugin - runs inside a VM/container via gRPC |
 
-Configure state and execution on the same struct:
-
-```rust
-#[malbox::host_plugin]
-#[malbox(state = "persistent", execution = "parallel")]
-struct MyPlugin;
-```
+State and execution settings are read from `plugin.toml`'s `[runtime]` section at compile time - no attribute configuration is needed on the struct.
 
 ## Handler methods
 
@@ -229,7 +231,6 @@ Your plugin struct can hold fields. For concurrent access with `ExecutionContext
 
 ```rust
 #[malbox::host_plugin]
-#[malbox(state = "persistent", execution = "parallel")]
 struct MyPlugin {
     cache: Mutex<HashMap<String, String>>,
 }
@@ -267,23 +268,23 @@ The Malbox devenv automatically configures the MinGW linker and library paths fo
 
 Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
 
-```
-~/.config/malbox/plugins/
-└── my-plugin/
-    ├── my-plugin          # Linux binary
-    └── plugin.toml
-```
+<Tree>
+  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
+    <Tree.File name="my-host-plugin-bin" />
+    <Tree.File name="plugin.toml" />
+  </Tree.Folder>
+</Tree>
 
 ### Guest plugins
 
 Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
 
-```
-~/.config/malbox/plugins/
-└── my-plugin/
-    ├── my-plugin.exe      # Windows binary (or Linux binary for Linux guests)
-    └── plugin.toml
-```
+<Tree>
+  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
+    <Tree.File name="my-guest-plugin-bin" />
+    <Tree.File name="plugin.toml" />
+  </Tree.Folder>
+</Tree>
 
 Provision into the VM using the deploy playbook:
 
@@ -292,7 +293,7 @@ cargo run -p malbox-cli machine provision <machine_id> \
   --provisioner ansible \
   --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
   --snapshot <snapshot_name> \
-  --plugins my-plugin
+  --plugins my-guest-plugin
 ```
 
 ## Examples

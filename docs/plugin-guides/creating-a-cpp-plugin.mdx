@@ -54,7 +54,9 @@ target_include_directories(my-plugin PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generat
 target_link_libraries(my-plugin PRIVATE MalboxPluginSDK::MalboxPluginSDK)
 ```
 
+<Info>
 The `malbox_generate_runtime_config` function invokes the `malbox-codegen` CLI (shipped with the SDK) to read your `plugin.toml` and emit a `malbox_runtime_config.hpp` header with `constexpr` values. The header is regenerated whenever `plugin.toml` changes.
+</Info>
 
 ### `plugin.toml`
 
@@ -67,13 +69,22 @@ version = "0.1.0"
 description = "My analysis plugin"
 authors = ["Your Name"]
 type = "guest"                    # or "host"
-state = "ephemeral"               # or "persistent", "scoped"
-execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 
 [runtime]
+state = "ephemeral"               # or "persistent", "scoped"
+execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
 port = 50051                      # gRPC listen port (default: 50051)
-work_dir = "C:\\malbox\\work"     # working directory (default: /tmp/malbox or C:\malbox\work)
 log_filter = "info"               # tracing filter (default: "info")
+
+[runtime.paths]
+sample_dir = "C:\\malbox\\samples"        # where daemon pushes the sample
+artifact_dir = "C:\\malbox\\artifacts"    # where plugin writes output
+stash_dir = "C:\\malbox\\stash"           # internal result stash spillover
+log_dir = "C:\\malbox\\logs"              # log overflow files
+
+[runtime.stash]
+threshold_bytes = 1048576
+ttl_secs = 120
 
 [results.my_result]
 description = "What this result contains"
@@ -81,8 +92,6 @@ user_visible = true
 display_name = "My Result"
 render = "json"
 ```
-
-All `[runtime]` fields are optional and have sensible defaults. The values are baked into the plugin binary at build time via the generated `malbox_runtime_config.hpp` header - they are not read from the environment at launch.
 
 See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
 
@@ -268,23 +277,23 @@ The MinGW toolchain file reads `MINGW_LIB_PATH` and `MINGW_INCLUDE_PATH` environ
 
 Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
 
-```
-~/.config/malbox/plugins/
-└── my-plugin/
-    ├── my-plugin          # Linux binary
-    └── plugin.toml
-```
+<Tree>
+  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
+    <Tree.File name="my-host-plugin-bin" />
+    <Tree.File name="plugin.toml" />
+  </Tree.Folder>
+</Tree>
 
 ### Guest plugins
 
 Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
 
-```
-~/.config/malbox/plugins/
-└── my-plugin/
-    ├── my-plugin.exe      # Windows binary (or Linux binary for Linux guests)
-    └── plugin.toml
-```
+<Tree>
+  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
+    <Tree.File name="my-guest-plugin-bin" />
+    <Tree.File name="plugin.toml" />
+  </Tree.Folder>
+</Tree>
 
 Provision into the VM using the deploy playbook:
 
@@ -293,7 +302,7 @@ cargo run -p malbox-cli machine provision <machine_id> \
   --provisioner ansible \
   --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
   --snapshot <snapshot_name> \
-  --plugins my-plugin
+  --plugins my-guest-plugin
 ```
 
 ## Examples
