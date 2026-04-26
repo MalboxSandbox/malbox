@@ -8,4 +8,5 @@ publish = false
 
 [dependencies]
 malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["host"] }
+malbox-plugin-transport = { path = "../../../crates/malbox-plugin-transport" }
 serde = { version = "1", features = ["derive"] }
