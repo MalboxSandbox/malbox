@@ -16,6 +16,16 @@
 
 namespace malbox {
 
+/// Auto-collection settings for a single directory.
+struct AutoCollectConfig {
+    bool                enabled;
+    const char* const*  include;
+    std::size_t         include_count;
+    const char* const*  exclude;
+    std::size_t         exclude_count;
+    std::uint64_t       max_file_size;
+};
+
 /// Runtime configuration baked into the plugin at build time.
 ///
 /// All paths must be absolute, non-null, and valid UTF-8.
@@ -25,9 +35,12 @@ struct RuntimeConfig {
     const char*   artifact_dir;
     const char*   stash_dir;
     const char*   log_dir;
+    const char*   external_log_dir;
     std::size_t   stash_threshold_bytes;
     std::uint64_t stash_ttl_secs;
     const char*   log_filter;
+    AutoCollectConfig auto_collect_artifacts;
+    AutoCollectConfig auto_collect_external_logs;
 };
 
 namespace detail {
@@ -209,15 +222,29 @@ inline void run_guest_plugin(
     MalboxPluginVtable vtable = detail::build_vtable(plugin.get());
     MalboxPluginMeta   c_meta = detail::build_c_meta(meta);
 
+    auto to_c_ac = [](const AutoCollectConfig& ac) -> MalboxAutoCollectConfig {
+        MalboxAutoCollectConfig c{};
+        c.enabled       = ac.enabled;
+        c.include       = ac.include;
+        c.include_count = ac.include_count;
+        c.exclude       = ac.exclude;
+        c.exclude_count = ac.exclude_count;
+        c.max_file_size = ac.max_file_size;
+        return c;
+    };
+
     MalboxGuestRuntimeConfig c_config{};
-    c_config.port                   = config.port;
-    c_config.sample_dir             = config.sample_dir;
-    c_config.artifact_dir           = config.artifact_dir;
-    c_config.stash_dir              = config.stash_dir;
-    c_config.log_dir                = config.log_dir;
-    c_config.stash_threshold_bytes  = config.stash_threshold_bytes;
-    c_config.stash_ttl_secs         = config.stash_ttl_secs;
-    c_config.log_filter             = config.log_filter;
+    c_config.port                       = config.port;
+    c_config.sample_dir                 = config.sample_dir;
+    c_config.artifact_dir               = config.artifact_dir;
+    c_config.stash_dir                  = config.stash_dir;
+    c_config.log_dir                    = config.log_dir;
+    c_config.external_log_dir           = config.external_log_dir;
+    c_config.stash_threshold_bytes      = config.stash_threshold_bytes;
+    c_config.stash_ttl_secs             = config.stash_ttl_secs;
+    c_config.log_filter                 = config.log_filter;
+    c_config.auto_collect_artifacts     = to_c_ac(config.auto_collect_artifacts);
+    c_config.auto_collect_external_logs = to_c_ac(config.auto_collect_external_logs);
 
     detail::check_rc(malbox_run_guest_plugin(vtable, c_meta, c_config));
 }

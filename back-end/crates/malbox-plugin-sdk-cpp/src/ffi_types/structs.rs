@@ -40,6 +40,18 @@ pub struct MalboxPluginMeta {
     pub execution: MalboxExecutionContext,
 }
 
+/// Auto-collection configuration for a single directory.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MalboxAutoCollectConfig {
+    pub enabled: bool,
+    pub include: *const *const c_char,
+    pub include_count: usize,
+    pub exclude: *const *const c_char,
+    pub exclude_count: usize,
+    pub max_file_size: u64,
+}
+
 /// Runtime configuration baked into a guest plugin at build time.
 ///
 /// Passed by-value to [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
@@ -53,9 +65,12 @@ pub struct MalboxGuestRuntimeConfig {
     pub artifact_dir: *const c_char,
     pub stash_dir: *const c_char,
     pub log_dir: *const c_char,
+    pub external_log_dir: *const c_char,
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: *const c_char,
+    pub auto_collect_artifacts: MalboxAutoCollectConfig,
+    pub auto_collect_external_logs: MalboxAutoCollectConfig,
 }
 
 #[cfg(test)]

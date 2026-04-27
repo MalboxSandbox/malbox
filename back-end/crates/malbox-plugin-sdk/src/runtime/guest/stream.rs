@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tonic::Status;
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 
+use super::collector::{self, AutoCollectSection};
 use super::exec::ExecutionWaiter;
 
 /// Run a plugin's `on_task` and stream results back over `result_tx`.
@@ -35,6 +36,10 @@ pub(super) fn execute_task<P: Plugin>(
     result_tx: mpsc::Sender<std::result::Result<proto::TaskResult, Status>>,
     waiter: ExecutionWaiter,
     stash: Arc<ResultStash>,
+    artifact_dir: PathBuf,
+    external_log_dir: PathBuf,
+    auto_collect_artifacts: AutoCollectSection,
+    auto_collect_external_logs: AutoCollectSection,
 ) {
     // Send READY signal to indicate the task handler is about to start.
     let ready_result = proto::TaskResult {
@@ -69,6 +74,34 @@ pub(super) fn execute_task<P: Plugin>(
 
     if let Err(e) = plugin.on_task(task, &ctx) {
         error!(error = %e, "Plugin task handler error");
+    }
+
+    // Auto-collect artifact files (with dedup against explicitly sent files).
+    if auto_collect_artifacts.enabled {
+        debug!("auto-collecting artifacts from {}", artifact_dir.display());
+        let claimed = ctx.claimed_paths();
+        collector::auto_collect(
+            &ctx,
+            &artifact_dir,
+            &auto_collect_artifacts,
+            Some(&claimed),
+            "artifacts",
+        );
+    }
+
+    // Auto-collect external log files (no dedup).
+    if auto_collect_external_logs.enabled {
+        debug!(
+            "auto-collecting external logs from {}",
+            external_log_dir.display()
+        );
+        collector::auto_collect(
+            &ctx,
+            &external_log_dir,
+            &auto_collect_external_logs,
+            None,
+            "ext-logs",
+        );
     }
 
     // Always send the final marker, regardless of success/failure.

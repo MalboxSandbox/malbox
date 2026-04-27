@@ -308,6 +308,18 @@ typedef struct MalboxPluginMeta {
 } MalboxPluginMeta;
 
 /**
+ * Auto-collection configuration for a single directory.
+ */
+typedef struct MalboxAutoCollectConfig {
+    bool enabled;
+    const char *const *include;
+    uintptr_t include_count;
+    const char *const *exclude;
+    uintptr_t exclude_count;
+    uint64_t max_file_size;
+} MalboxAutoCollectConfig;
+
+/**
  * Runtime configuration baked into a guest plugin at build time.
  *
  * Passed by-value to [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
@@ -320,9 +332,12 @@ typedef struct MalboxGuestRuntimeConfig {
     const char *artifact_dir;
     const char *stash_dir;
     const char *log_dir;
+    const char *external_log_dir;
     uintptr_t stash_threshold_bytes;
     uint64_t stash_ttl_secs;
     const char *log_filter;
+    struct MalboxAutoCollectConfig auto_collect_artifacts;
+    struct MalboxAutoCollectConfig auto_collect_external_logs;
 } MalboxGuestRuntimeConfig;
 
 /**

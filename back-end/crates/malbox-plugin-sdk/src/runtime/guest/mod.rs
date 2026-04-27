@@ -12,11 +12,14 @@
 //! - [`stream`] — result streaming + log entry conversion
 
 mod bridge;
+pub(crate) mod collector;
 pub mod exec;
 mod files;
 mod stream;
 
 pub use exec::{ExecutionNotifier, ExecutionWaiter, execution_channel};
+
+use collector::AutoCollectSection;
 
 use crate::error::{Result, SdkError};
 use crate::log::LogBus;
@@ -39,6 +42,15 @@ use tracing::{info, warn};
 /// Values are baked into the plugin binary at compile time (by the
 /// `#[guest_plugin]` macro, which reads them from `plugin.toml`). Paths are
 /// `&'static str` so a `const` can be constructed at macro expansion time.
+/// Compile-time auto-collection settings for a single directory.
+#[derive(Debug, Clone, Copy)]
+pub struct AutoCollectRuntimeConfig {
+    pub enabled: bool,
+    pub include: &'static [&'static str],
+    pub exclude: &'static [&'static str],
+    pub max_file_size: u64,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GuestRuntimeConfig {
     pub listen_addr: SocketAddr,
@@ -46,9 +58,12 @@ pub struct GuestRuntimeConfig {
     pub artifact_dir: &'static str,
     pub stash_dir: &'static str,
     pub log_dir: &'static str,
+    pub external_log_dir: &'static str,
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: &'static str,
+    pub auto_collect_artifacts: AutoCollectRuntimeConfig,
+    pub auto_collect_external_logs: AutoCollectRuntimeConfig,
 }
 
 /// Sweep log overflow files older than 10 minutes. Called once on runtime
@@ -120,6 +135,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
         let artifact_dir: PathBuf = PathBuf::from(self.config.artifact_dir);
         let stash_dir: PathBuf = PathBuf::from(self.config.stash_dir);
         let log_dir: PathBuf = PathBuf::from(self.config.log_dir);
+        let external_log_dir: PathBuf = PathBuf::from(self.config.external_log_dir);
 
         // Ensure all runtime directories exist.
         for (label, dir) in [
@@ -127,6 +143,7 @@ impl<P: Plugin> GuestPluginRuntime<P> {
             ("artifact_dir", &artifact_dir),
             ("stash_dir", &stash_dir),
             ("log_dir", &log_dir),
+            ("external_log_dir", &external_log_dir),
         ] {
             tokio::fs::create_dir_all(dir)
                 .await
@@ -185,15 +202,25 @@ impl<P: Plugin> GuestPluginRuntime<P> {
             }
         };
 
+        let to_section = |cfg: &AutoCollectRuntimeConfig| AutoCollectSection {
+            enabled: cfg.enabled,
+            include: cfg.include.iter().map(|s| (*s).to_string()).collect(),
+            exclude: cfg.exclude.iter().map(|s| (*s).to_string()).collect(),
+            max_file_size: cfg.max_file_size,
+        };
+
         let handler = GuestPluginBridge {
             plugin: self.plugin,
             shutdown_tx: std::sync::Mutex::new(Some(shutdown_tx)),
             sample_dir,
             artifact_dir,
+            external_log_dir,
             execution_notifiers: std::sync::Mutex::new(HashMap::new()),
             last_execution: std::sync::Mutex::new(None),
             log_bus: Arc::clone(&log_bus),
             stash: Arc::clone(&stash),
+            auto_collect_artifacts: to_section(&self.config.auto_collect_artifacts),
+            auto_collect_external_logs: to_section(&self.config.auto_collect_external_logs),
         };
 
         let server = GrpcServer::new(handler);
@@ -237,9 +264,22 @@ mod guest_runtime_config_tests {
         artifact_dir: "/opt/malbox/artifacts",
         stash_dir: "/opt/malbox/stash",
         log_dir: "/opt/malbox/logs",
+        external_log_dir: "/opt/malbox/ext-logs",
         stash_threshold_bytes: 1_048_576,
         stash_ttl_secs: 120,
         log_filter: "info",
+        auto_collect_artifacts: AutoCollectRuntimeConfig {
+            enabled: true,
+            include: &["**/*"],
+            exclude: &[],
+            max_file_size: 50 * 1024 * 1024,
+        },
+        auto_collect_external_logs: AutoCollectRuntimeConfig {
+            enabled: true,
+            include: &["**/*"],
+            exclude: &[],
+            max_file_size: 50 * 1024 * 1024,
+        },
     };
 
     #[test]

@@ -208,6 +208,7 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         (config.artifact_dir, "artifact_dir"),
         (config.stash_dir, "stash_dir"),
         (config.log_dir, "log_dir"),
+        (config.external_log_dir, "external_log_dir"),
         (config.log_filter, "log_filter"),
     ] {
         if ptr.is_null() {
@@ -233,10 +234,61 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         Ok(s) => s,
         Err(()) => return -1,
     };
+    let external_log_dir =
+        match unsafe { leak_cstr_to_static(config.external_log_dir, "external_log_dir") } {
+            Ok(s) => s,
+            Err(()) => return -1,
+        };
     let log_filter = match unsafe { leak_cstr_to_static(config.log_filter, "log_filter") } {
         Ok(s) => s,
         Err(()) => return -1,
     };
+
+    let convert_auto_collect = |ac: &crate::ffi_types::structs::MalboxAutoCollectConfig|
+        -> malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig
+    {
+        let include: &'static [&'static str] = if ac.include.is_null() || ac.include_count == 0 {
+            &[]
+        } else {
+            let slice = unsafe { std::slice::from_raw_parts(ac.include, ac.include_count) };
+            let leaked: Vec<&'static str> = slice
+                .iter()
+                .filter_map(|&p| {
+                    if p.is_null() {
+                        None
+                    } else {
+                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
+                    }
+                })
+                .collect();
+            Box::leak(leaked.into_boxed_slice())
+        };
+        let exclude: &'static [&'static str] = if ac.exclude.is_null() || ac.exclude_count == 0 {
+            &[]
+        } else {
+            let slice = unsafe { std::slice::from_raw_parts(ac.exclude, ac.exclude_count) };
+            let leaked: Vec<&'static str> = slice
+                .iter()
+                .filter_map(|&p| {
+                    if p.is_null() {
+                        None
+                    } else {
+                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
+                    }
+                })
+                .collect();
+            Box::leak(leaked.into_boxed_slice())
+        };
+        malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
+            enabled: ac.enabled,
+            include,
+            exclude,
+            max_file_size: ac.max_file_size,
+        }
+    };
+
+    let auto_collect_artifacts = convert_auto_collect(&config.auto_collect_artifacts);
+    let auto_collect_external_logs = convert_auto_collect(&config.auto_collect_external_logs);
 
     let plugin = VtablePlugin::new(vtable);
 
@@ -261,9 +313,12 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         artifact_dir,
         stash_dir,
         log_dir,
+        external_log_dir,
         stash_threshold_bytes: config.stash_threshold_bytes,
         stash_ttl_secs: config.stash_ttl_secs,
         log_filter,
+        auto_collect_artifacts,
+        auto_collect_external_logs,
     };
 
     // `plugin_meta` comes from C++ but we no longer pass it to `with_config`
@@ -351,15 +406,27 @@ mod tests {
         let artifact_dir = std::ffi::CString::new("/tmp/malbox/artifacts").unwrap();
         let stash_dir = std::ffi::CString::new("/tmp/malbox/stash").unwrap();
         let log_dir = std::ffi::CString::new("/tmp/malbox/logs").unwrap();
+        let external_log_dir = std::ffi::CString::new("/tmp/malbox/ext-logs").unwrap();
+        let disabled_ac = crate::ffi_types::structs::MalboxAutoCollectConfig {
+            enabled: false,
+            include: std::ptr::null(),
+            include_count: 0,
+            exclude: std::ptr::null(),
+            exclude_count: 0,
+            max_file_size: 0,
+        };
         let config = MalboxGuestRuntimeConfig {
             port: 50051,
             sample_dir: sample_dir.as_ptr(),
             artifact_dir: artifact_dir.as_ptr(),
             stash_dir: stash_dir.as_ptr(),
             log_dir: log_dir.as_ptr(),
+            external_log_dir: external_log_dir.as_ptr(),
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
+            auto_collect_artifacts: disabled_ac,
+            auto_collect_external_logs: disabled_ac,
         };
         let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
         assert_eq!(rc, -1);
@@ -390,15 +457,27 @@ mod tests {
         let artifact_dir = std::ffi::CString::new("/tmp/malbox/artifacts").unwrap();
         let stash_dir = std::ffi::CString::new("/tmp/malbox/stash").unwrap();
         let log_dir = std::ffi::CString::new("/tmp/malbox/logs").unwrap();
+        let external_log_dir = std::ffi::CString::new("/tmp/malbox/ext-logs").unwrap();
+        let disabled_ac = crate::ffi_types::structs::MalboxAutoCollectConfig {
+            enabled: false,
+            include: std::ptr::null(),
+            include_count: 0,
+            exclude: std::ptr::null(),
+            exclude_count: 0,
+            max_file_size: 0,
+        };
         let config = MalboxGuestRuntimeConfig {
             port: 50051,
             sample_dir: std::ptr::null(),
             artifact_dir: artifact_dir.as_ptr(),
             stash_dir: stash_dir.as_ptr(),
             log_dir: log_dir.as_ptr(),
+            external_log_dir: external_log_dir.as_ptr(),
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
+            auto_collect_artifacts: disabled_ac,
+            auto_collect_external_logs: disabled_ac,
         };
 
         let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };

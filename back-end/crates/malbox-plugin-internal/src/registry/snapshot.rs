@@ -116,6 +116,7 @@ mod tests {
                     log_filter: None,
                     paths: PathsConfig::default(),
                     stash: StashConfig::default(),
+                    auto_collect: Default::default(),
                 },
             },
             binary_path: PathBuf::from(format!("/plugins/{name}/{name}")),

@@ -134,9 +134,22 @@ fn generate_runtime_const(
     let artifact_dir = resolved.artifact_dir.to_string_lossy().into_owned();
     let stash_dir = resolved.stash_dir.to_string_lossy().into_owned();
     let log_dir = resolved.log_dir.to_string_lossy().into_owned();
+    let external_log_dir = resolved.external_log_dir.to_string_lossy().into_owned();
     let stash_threshold = resolved.stash_threshold_bytes;
     let stash_ttl = resolved.stash_ttl_secs;
     let log_filter = resolved.log_filter.clone();
+
+    let ac_art = &resolved.auto_collect_artifacts;
+    let ac_art_enabled = ac_art.enabled;
+    let ac_art_include: Vec<&str> = ac_art.include.iter().map(|s| s.as_str()).collect();
+    let ac_art_exclude: Vec<&str> = ac_art.exclude.iter().map(|s| s.as_str()).collect();
+    let ac_art_max = ac_art.max_file_size;
+
+    let ac_ext = &resolved.auto_collect_external_logs;
+    let ac_ext_enabled = ac_ext.enabled;
+    let ac_ext_include: Vec<&str> = ac_ext.include.iter().map(|s| s.as_str()).collect();
+    let ac_ext_exclude: Vec<&str> = ac_ext.exclude.iter().map(|s| s.as_str()).collect();
+    let ac_ext_max = ac_ext.max_file_size;
 
     Ok(quote::quote! {
         #[doc(hidden)]
@@ -150,9 +163,22 @@ fn generate_runtime_const(
                 artifact_dir: #artifact_dir,
                 stash_dir: #stash_dir,
                 log_dir: #log_dir,
+                external_log_dir: #external_log_dir,
                 stash_threshold_bytes: #stash_threshold,
                 stash_ttl_secs: #stash_ttl,
                 log_filter: #log_filter,
+                auto_collect_artifacts: malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
+                    enabled: #ac_art_enabled,
+                    include: &[#(#ac_art_include),*],
+                    exclude: &[#(#ac_art_exclude),*],
+                    max_file_size: #ac_art_max,
+                },
+                auto_collect_external_logs: malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
+                    enabled: #ac_ext_enabled,
+                    include: &[#(#ac_ext_include),*],
+                    exclude: &[#(#ac_ext_exclude),*],
+                    max_file_size: #ac_ext_max,
+                },
             };
     })
 }

@@ -8,6 +8,8 @@ use malbox_plugin_transport::grpc::proto;
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
 use prost::Message;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -44,6 +46,10 @@ pub struct Context<'a> {
     /// `wait_for_execution()` uses this instead of the hardcoded fallback
     /// so plugins automatically respect the user-requested timeout.
     analysis_timeout: Option<Duration>,
+    /// Canonical paths of files that have been explicitly sent via
+    /// `push_result(File { .. })` or marked via `mark_collected()`.
+    /// Used by artifact auto-collection to avoid sending duplicates.
+    claimed_paths: std::sync::Mutex<HashSet<PathBuf>>,
 }
 
 impl<'a> Context<'a> {
@@ -64,6 +70,7 @@ impl<'a> Context<'a> {
             task_id: 0,
             stash: None,
             analysis_timeout: None,
+            claimed_paths: std::sync::Mutex::new(HashSet::new()),
         }
     }
 
@@ -194,6 +201,9 @@ impl<'a> Context<'a> {
                 let stash = self.stash.as_ref().ok_or(SdkError::InvalidContext(
                     "push_result: no stash configured for file results",
                 ))?;
+                if let Ok(canonical) = std::fs::canonicalize(&path) {
+                    self.claimed_paths.lock().unwrap().insert(canonical);
+                }
                 let stash_format = proto_format_to_stash(format);
                 let handle = stash.insert_file(self.task_id, name.clone(), stash_format, path)?;
                 let size_bytes = stash.peek_size(&handle).unwrap_or(0);
@@ -227,6 +237,26 @@ impl<'a> Context<'a> {
                 "wait_for_execution called outside on_task",
             )),
         }
+    }
+
+    /// Mark a file as already handled, preventing artifact auto-collection
+    /// from sending it again.
+    ///
+    /// Use this when a plugin reads a file from the artifacts directory,
+    /// processes it, and sends derived data as Json/Bytes instead of the
+    /// raw file.
+    pub fn mark_collected(&self, path: impl AsRef<Path>) {
+        if let Ok(canonical) = std::fs::canonicalize(path.as_ref()) {
+            self.claimed_paths.lock().unwrap().insert(canonical);
+        }
+    }
+
+    /// Return a snapshot of all claimed file paths.
+    ///
+    /// Used internally by auto-collection to determine which files
+    /// have already been explicitly sent or marked.
+    pub(crate) fn claimed_paths(&self) -> HashSet<PathBuf> {
+        self.claimed_paths.lock().unwrap().clone()
     }
 }
 

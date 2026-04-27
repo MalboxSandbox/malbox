@@ -173,12 +173,14 @@ fn resolve_respects_explicit_fields() {
             artifact_dir: Some(PathBuf::from("/opt/malbox/artifacts")),
             stash_dir: Some(PathBuf::from("/opt/malbox/stash")),
             log_dir: Some(PathBuf::from("/opt/malbox/logs")),
+            external_log_dir: Some(PathBuf::from("/opt/malbox/ext-logs")),
         },
         stash: StashConfig {
             threshold_bytes: Some(2_000_000),
             ttl_secs: Some(300),
         },
         log_filter: Some("debug".into()),
+        auto_collect: Default::default(),
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert_eq!(r.port, 50100);
@@ -186,6 +188,7 @@ fn resolve_respects_explicit_fields() {
     assert_eq!(r.artifact_dir, PathBuf::from("/opt/malbox/artifacts"));
     assert_eq!(r.stash_dir, PathBuf::from("/opt/malbox/stash"));
     assert_eq!(r.log_dir, PathBuf::from("/opt/malbox/logs"));
+    assert_eq!(r.external_log_dir, PathBuf::from("/opt/malbox/ext-logs"));
     assert_eq!(r.stash_threshold_bytes, 2_000_000);
     assert_eq!(r.stash_ttl_secs, 300);
     assert_eq!(r.log_filter, "debug");
@@ -243,12 +246,14 @@ fn validate_accepts_windows_paths_for_guest_plugin() {
             artifact_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Artifacts")),
             stash_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Stash")),
             log_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\Logs")),
+            external_log_dir: Some(PathBuf::from(r"C:\ProgramData\Agent\ExtLogs")),
         },
         stash: StashConfig {
             threshold_bytes: None,
             ttl_secs: None,
         },
         log_filter: Some("info".into()),
+        auto_collect: Default::default(),
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert!(r.validate(PluginTypeConfig::Guest).is_ok());
@@ -276,4 +281,50 @@ fn validate_rejects_relative_paths_for_guest_plugin() {
         matches!(err, ManifestError::Invalid(ref msg) if msg.contains("absolute")),
         "got {err:?}"
     );
+}
+
+#[test]
+fn resolve_auto_collect_defaults() {
+    let raw = make_runtime("ephemeral", "exclusive");
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    assert!(r.auto_collect_artifacts.enabled);
+    assert_eq!(r.auto_collect_artifacts.include, vec!["**/*"]);
+    assert!(r.auto_collect_artifacts.exclude.is_empty());
+    assert_eq!(r.auto_collect_artifacts.max_file_size, 50 * 1024 * 1024);
+    assert!(r.auto_collect_external_logs.enabled);
+}
+
+#[test]
+fn parse_auto_collect_from_toml() {
+    let toml_str = r#"
+state = "ephemeral"
+execution = "exclusive"
+
+[auto_collect.artifacts]
+enabled = false
+include = ["*.bin", "*.exe"]
+exclude = ["*.tmp"]
+max_file_size = 10485760
+
+[auto_collect.external_logs]
+enabled = true
+exclude = ["*.lock"]
+"#;
+    let raw: RuntimeConfig = toml::from_str(toml_str).unwrap();
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    assert!(!r.auto_collect_artifacts.enabled);
+    assert_eq!(r.auto_collect_artifacts.include, vec!["*.bin", "*.exe"]);
+    assert_eq!(r.auto_collect_artifacts.exclude, vec!["*.tmp"]);
+    assert_eq!(r.auto_collect_artifacts.max_file_size, 10_485_760);
+    assert!(r.auto_collect_external_logs.enabled);
+    assert_eq!(r.auto_collect_external_logs.include, vec!["**/*"]);
+    assert_eq!(r.auto_collect_external_logs.exclude, vec!["*.lock"]);
+}
+
+#[test]
+fn resolve_external_log_dir_default() {
+    let raw = make_runtime("ephemeral", "exclusive");
+    let r = ResolvedRuntimeConfig::from_raw(&raw);
+    #[cfg(unix)]
+    assert_eq!(r.external_log_dir, PathBuf::from("/tmp/malbox/ext-logs"));
 }

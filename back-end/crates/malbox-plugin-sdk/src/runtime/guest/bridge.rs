@@ -26,6 +26,7 @@ use tokio::sync::{mpsc, oneshot};
 use tonic::Status;
 use tracing::error;
 
+use super::collector::AutoCollectSection;
 use super::exec::{ExecutionNotifier, default_execute_command, execution_channel};
 use super::files::{pull_file, push_file};
 use super::stream::{execute_task, log_entry_to_proto};
@@ -36,12 +37,15 @@ pub(super) struct GuestPluginBridge<P: Send + Sync + 'static> {
     pub(super) shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     pub(super) sample_dir: PathBuf,
     pub(super) artifact_dir: PathBuf,
+    pub(super) external_log_dir: PathBuf,
     pub(super) execution_notifiers: std::sync::Mutex<HashMap<i32, ExecutionNotifier>>,
     /// Most recent execution info, so tasks created after ExecuteCommand
     /// can still pick it up via wait_for_execution.
     pub(super) last_execution: std::sync::Mutex<Option<ExecutionInfo>>,
     pub(super) log_bus: Arc<LogBus>,
     pub(super) stash: Arc<ResultStash>,
+    pub(super) auto_collect_artifacts: AutoCollectSection,
+    pub(super) auto_collect_external_logs: AutoCollectSection,
 }
 
 #[tonic::async_trait]
@@ -119,6 +123,10 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
             .insert(task_id, notifier);
 
         let stash = Arc::clone(&self.stash);
+        let artifact_dir = self.artifact_dir.clone();
+        let external_log_dir = self.external_log_dir.clone();
+        let auto_collect_artifacts = self.auto_collect_artifacts.clone();
+        let auto_collect_external_logs = self.auto_collect_external_logs.clone();
         let _ = tokio::task::spawn_blocking(move || {
             execute_task(
                 plugin,
@@ -128,6 +136,10 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
                 result_tx,
                 waiter,
                 stash,
+                artifact_dir,
+                external_log_dir,
+                auto_collect_artifacts,
+                auto_collect_external_logs,
             );
         })
         .await;
@@ -320,21 +332,32 @@ mod tests {
     fn test_bridge(base_dir: PathBuf) -> GuestPluginBridge<NoopPlugin> {
         let sample_dir = base_dir.join("samples");
         let artifact_dir = base_dir.join("artifacts");
+        let external_log_dir = base_dir.join("ext-logs");
         let stash_dir = base_dir.join("_stash");
         std::fs::create_dir_all(&sample_dir).unwrap();
         std::fs::create_dir_all(&artifact_dir).unwrap();
+        std::fs::create_dir_all(&external_log_dir).unwrap();
         let stash = Arc::new(
             crate::stash::ResultStash::new(stash_dir, Default::default()).expect("stash init"),
         );
+        let disabled_section = AutoCollectSection {
+            enabled: false,
+            include: vec![],
+            exclude: vec![],
+            max_file_size: 0,
+        };
         GuestPluginBridge {
             plugin: Arc::new(NoopPlugin),
             shutdown_tx: std::sync::Mutex::new(None),
             sample_dir,
             artifact_dir,
+            external_log_dir,
             execution_notifiers: std::sync::Mutex::new(HashMap::new()),
             last_execution: std::sync::Mutex::new(None),
             log_bus: Arc::new(LogBus::new(64)),
             stash,
+            auto_collect_artifacts: disabled_section.clone(),
+            auto_collect_external_logs: disabled_section,
         }
     }
 
