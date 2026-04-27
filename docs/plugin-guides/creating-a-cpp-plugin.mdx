@@ -3,34 +3,21 @@ title: "Creating a C++ Plugin"
 description: "Step-by-step guide to building analysis plugins in C++ using the Malbox Plugin SDK"
 ---
 
+## Getting started
+
+Create a new repository from the [C++ plugin template](https://github.com/DualHorizon/malbox-plugin-template-cpp) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `CMakeLists.txt` and `plugin.toml` to match your plugin name.
+
+The template gives you a working plugin with CMake configuration, a `plugin.toml` manifest, example source code, and CI already set up.
+
 ## Prerequisites
 
 - C++20 compiler (GCC 11+, Clang 13+, or MSVC 2019 16.10+)
 - CMake 3.20+
-- The pre-built Malbox C++ SDK distribution
 - For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
 
-## Get the SDK
+## Project structure
 
-If you have the Rust toolchain available (e.g., you're a Malbox contributor):
-
-```bash
-cd back-end
-
-# Linux SDK
-cargo xtask dist-cpp-sdk
-
-# Windows SDK
-cargo xtask dist-cpp-sdk --target windows
-```
-
-This produces the SDK at `crates/malbox-plugin-sdk-cpp/dist-linux/` or `dist-windows/`.
-
-Otherwise, download the pre-built SDK archive from a release.
-
-## Create your plugin
-
-Your plugin project needs three files: a CMake build file, a plugin manifest, and your source code.
+Your plugin project has three essential files: a CMake build file, a plugin manifest, and your source code.
 
 ### `CMakeLists.txt`
 
@@ -108,23 +95,18 @@ public:
         // Called once before tasks arrive. Use config for initialization.
     }
 
-    std::vector<malbox::PluginResult> on_task(
-        const malbox::Task& task,
-        const malbox::Context& ctx
-    ) override {
-        // Read the sample
+    void on_task(const malbox::Task& task, const malbox::Context& ctx) override {
         auto sample = task.sample_bytes();
         ctx.emit_progress(0.5, "analyzing");
 
         // ... perform analysis ...
 
-        // Return results
         std::string json = R"({"status": "clean"})";
         auto data = std::span<const uint8_t>{
             reinterpret_cast<const uint8_t*>(json.data()),
             json.size()
         };
-        return { malbox::PluginResult::json("my_result", data) };
+        ctx.push_result(malbox::PluginResult::json("my_result", data));
     }
 
     void on_stop() override {
@@ -164,7 +146,7 @@ Override virtual methods on the `malbox::Plugin` base class:
 
 | Method | Signature | Required |
 |--------|-----------|----------|
-| `on_task` | `(const Task&, const Context&) -> std::vector<PluginResult>` | Yes |
+| `on_task` | `(const Task&, const Context&) -> void` | Yes |
 | `on_start` | `(const std::unordered_map<std::string, std::string>&) -> void` | No |
 | `on_stop` | `() -> void` | No |
 | `health_check` | `() -> HealthStatus` | No |
@@ -175,22 +157,45 @@ Override virtual methods on the `malbox::Plugin` base class:
 
 Only `on_task` is required (pure virtual). All other handlers default to no-ops.
 
-## Returning results
+## Pushing results
 
-Your `on_task` method returns a `std::vector<malbox::PluginResult>`. There are three result types:
+Results are pushed to the daemon during `on_task` via `ctx.push_result()`. You can call it multiple times to stream results incrementally. There are three result types:
 
 ```cpp
 // JSON-encoded result (pass raw UTF-8 bytes)
-PluginResult::json("name", byte_span);
+ctx.push_result(PluginResult::json("name", byte_span));
 
 // Raw binary result
-PluginResult::bytes("name", byte_span);
+ctx.push_result(PluginResult::bytes("name", byte_span));
 
 // Reference a file on disk (runtime reads it)
-PluginResult::file("name", "/path/to/file");
+ctx.push_result(PluginResult::file("name", "/path/to/file"));
 ```
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Reports
+
+For structured analysis output with verdicts, indicators, TTPs, and frontend-renderable sections, use the `ReportBuilder` to construct a `Report` and push it as a result:
+
+```cpp
+#include <malbox/report.hpp>
+
+using namespace malbox::report;
+
+auto report = ReportBuilder("my-plugin", "0.1.0")
+    .summary("Analysis complete")
+    .verdict(Classification::Malicious, 85, Confidence::High)
+    .indicator(Indicator("sha256", "abc123..."))
+    .section("overview", "Overview", [](SectionBuilder& s) {
+        s.markdown("Found malicious indicators");
+    })
+    .build();
+
+ctx.push_result(into_plugin_result(report));
+```
+
+See the [C++ SDK Reference](/reference/plugin-sdk/cpp) for the full report API.
 
 ## Handling errors
 
@@ -214,9 +219,7 @@ Beyond task processing, your plugin can react to system events by overriding the
 ```cpp
 class MyPlugin final : public malbox::Plugin {
 public:
-    std::vector<malbox::PluginResult> on_task(
-        const malbox::Task& task, const malbox::Context& ctx
-    ) override {
+    void on_task(const malbox::Task& task, const malbox::Context& ctx) override {
         // ...
     }
 

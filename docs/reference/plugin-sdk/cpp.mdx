@@ -13,7 +13,7 @@ Every plugin subclasses `malbox::Plugin` and implements `on_task` at minimum. Al
 #include <malbox/plugin.hpp>
 
 class MyPlugin final : public malbox::Plugin {
-    std::vector<PluginResult> on_task(const Task& task, const Context& ctx) override;
+    void on_task(const Task& task, const Context& ctx) override;
 };
 ```
 
@@ -21,20 +21,17 @@ class MyPlugin final : public malbox::Plugin {
 
 #### `on_task` (required)
 
-Called for each assigned analysis task. This is where your analysis logic lives.
+Called for each assigned analysis task. This is where your analysis logic lives. Push results to the daemon via `ctx.push_result()`.
 
 ```cpp
-virtual std::vector<PluginResult> on_task(const Task& task, const Context& ctx) = 0;
+virtual void on_task(const Task& task, const Context& ctx) = 0;
 ```
 
 <ResponseField name="task" type="const Task&" required>
   Handle to the current task. Provides access to the sample and task configuration. Non-owning, do not store.
 </ResponseField>
 <ResponseField name="ctx" type="const Context&" required>
-  Runtime communication handle for emitting progress, warnings, and events. Non-owning, do not store.
-</ResponseField>
-<ResponseField name="return" type="std::vector<PluginResult>">
-  One or more analysis results. Each result name should match a `[results.*]` entry in your `plugin.toml`.
+  Runtime communication handle for pushing results, emitting progress, warnings, and events. Non-owning, do not store.
 </ResponseField>
 
 #### `on_start`
@@ -205,6 +202,18 @@ std::optional<std::string> config_value(const std::string& key);
 
 Used to communicate with the runtime during task execution. `Context` is a non-owning handle, valid only during the callback. Do not store it.
 
+### `push_result()`
+
+Pushes a single result to the daemon. Call one or more times during `on_task` to stream results incrementally.
+
+```cpp
+void push_result(const PluginResult& result) const;
+```
+
+<ResponseField name="result" type="const PluginResult&" required>
+  The result to send to the daemon.
+</ResponseField>
+
 ### `emit_progress()`
 
 Reports task progress to the runtime.
@@ -263,7 +272,7 @@ void emit_event(Event event, Payload payload);
 
 ## PluginResult
 
-Returned from `on_task` to report analysis findings. Each result name should correspond to a `[results.*]` entry in your `plugin.toml`.
+Pushed via `ctx.push_result()` during `on_task` to report analysis findings. Each result name should correspond to a `[results.*]` entry in your `plugin.toml`.
 
 ### `PluginResult::json()`
 
@@ -309,6 +318,288 @@ static PluginResult file(const std::string& name, const std::string& path);
 <ResponseField name="path" type="const std::string&" required>
   Absolute filesystem path to the result file.
 </ResponseField>
+
+## Report
+
+`#include <malbox/report.hpp>`
+
+A structured result envelope with semantic metadata and a presentation layer for frontend rendering. All report types live in the `malbox::report` namespace.
+
+### `Report`
+
+```cpp
+struct Report {
+    uint32_t schema_version = SCHEMA_VERSION;
+    PluginInfo plugin;
+    std::optional<Verdict> verdict;
+    std::vector<Indicator> indicators;
+    std::vector<Ttp> ttps;
+    std::vector<ArtifactRef> artifacts;
+    std::optional<std::string> summary;
+    std::vector<Section> sections;
+    std::string raw_json;
+};
+```
+
+### `to_json()`
+
+Serializes a report to a JSON string.
+
+```cpp
+std::string to_json(const Report& r);
+```
+
+### `into_plugin_result()`
+
+Serializes a report and wraps it as a `PluginResult` with the well-known name `"report"`.
+
+```cpp
+PluginResult into_plugin_result(const Report& r);
+```
+
+### `PluginInfo`
+
+```cpp
+struct PluginInfo {
+    std::string id;
+    std::string version;
+    std::optional<std::string> display_name;
+};
+```
+
+### Semantic Types
+
+#### `Classification`
+
+```cpp
+enum class Classification : uint8_t { Clean, Suspicious, Malicious, Unknown };
+```
+
+#### `Confidence`
+
+```cpp
+enum class Confidence : uint8_t { Low, Medium, High };
+```
+
+#### `Verdict`
+
+```cpp
+struct Verdict {
+    Classification classification;
+    std::optional<uint8_t> score;       // 0-100
+    std::optional<Confidence> confidence;
+    std::vector<std::string> labels;    // free-form tags
+};
+```
+
+#### `Indicator`
+
+IOC with an open-vocabulary `kind` (e.g. `"sha256"`, `"ipv4"`, `"domain"`, `"yara_rule"`).
+
+```cpp
+struct Indicator {
+    std::string kind;
+    std::string value;
+    std::optional<std::string> context;
+    std::optional<std::string> first_seen;  // ISO 8601 timestamp
+
+    Indicator(std::string kind, std::string value);
+    Indicator& context(std::string ctx);
+    Indicator& first_seen(std::string ts);
+};
+```
+
+#### `Ttp`
+
+MITRE ATT&CK technique reference.
+
+```cpp
+struct Ttp {
+    std::string id;                     // e.g. "T1055" or "T1055.005"
+    std::string name;                   // e.g. "Process Injection"
+    std::optional<std::string> evidence;
+
+    Ttp(std::string id, std::string name);
+    Ttp& evidence(std::string ev);
+};
+```
+
+#### `ArtifactRef`
+
+Reference to a sibling `PluginResult` by name.
+
+```cpp
+struct ArtifactRef {
+    std::string result_name;
+    std::string kind;                   // e.g. "yara", "pcap", "json"
+    std::optional<std::string> description;
+
+    ArtifactRef(std::string result_name, std::string kind);
+    ArtifactRef& description(std::string desc);
+};
+```
+
+### Presentation Types
+
+#### `Section`
+
+```cpp
+struct Section {
+    std::string id;
+    std::string title;
+    std::vector<Block> blocks;
+};
+```
+
+#### `Block`
+
+A `std::variant` of all supported block types:
+
+```cpp
+using Block = std::variant<
+    BlockMarkdown, BlockCallout, BlockHeading, BlockDivider,
+    BlockKv, BlockTable, BlockCode, BlockJson, BlockHex,
+    BlockImage, BlockDownload, BlockIocs, BlockTtps,
+    BlockTree, BlockTimeline, BlockGraph
+>;
+```
+
+#### Block Types
+
+| Type | Fields |
+|------|--------|
+| `BlockMarkdown` | `text` |
+| `BlockCallout` | `level` (`CalloutLevel`), `text` |
+| `BlockHeading` | `level` (1-6), `text` |
+| `BlockDivider` | (none) |
+| `BlockKv` | `pairs` (`std::vector<KvPair>`) |
+| `BlockTable` | `columns` (`std::vector<Column>`), `rows_json` (`std::vector<std::string>`), `sortable`, `searchable` |
+| `BlockCode` | `language`, `text` |
+| `BlockJson` | `data_json` (pre-encoded), `collapsed` |
+| `BlockHex` | `bytes_b64`, `offset` |
+| `BlockImage` | `artifact` (result name), `caption` |
+| `BlockDownload` | `artifact` (result name), `label` |
+| `BlockIocs` | `items` (`std::vector<Indicator>`) |
+| `BlockTtps` | `items` (`std::vector<Ttp>`) |
+| `BlockTree` | `nodes` (`std::vector<TreeNode>`) |
+| `BlockTimeline` | `events` (`std::vector<TimelineEvent>`) |
+| `BlockGraph` | `nodes` (`std::vector<GraphNode>`), `edges` (`std::vector<GraphEdge>`) |
+
+#### `CalloutLevel`
+
+```cpp
+enum class CalloutLevel : uint8_t { Info, Success, Warn, Error };
+```
+
+#### Helper Structs
+
+```cpp
+struct KvPair {
+    std::string key;
+    std::string value;
+    bool mono = false;
+};
+
+struct Column {
+    std::string key;
+    std::string label;
+    std::string type;   // "string", "number", etc.
+};
+
+struct TreeNode {
+    std::string label;
+    std::string metadata_json;          // pre-encoded JSON
+    std::vector<TreeNode> children;
+};
+
+struct TimelineEvent {
+    std::string timestamp;              // ISO 8601
+    std::string label;
+    std::optional<std::string> severity;
+    std::string metadata_json;
+};
+
+struct GraphNode {
+    std::string id;
+    std::string label;
+    std::string metadata_json;
+};
+
+struct GraphEdge {
+    std::string from;
+    std::string to;
+    std::optional<std::string> label;
+};
+```
+
+### `ReportBuilder`
+
+Fluent API for constructing a `Report`.
+
+```cpp
+class ReportBuilder {
+public:
+    ReportBuilder(std::string plugin_id, std::string plugin_version);
+
+    ReportBuilder& display_name(std::string name);
+    ReportBuilder& summary(std::string s);
+    ReportBuilder& verdict(Classification c,
+        std::optional<uint8_t> score = {},
+        std::optional<Confidence> conf = {});
+    ReportBuilder& labels(std::vector<std::string> ls);
+    ReportBuilder& indicator(Indicator i);
+    ReportBuilder& ttp(Ttp t);
+    ReportBuilder& artifact(ArtifactRef a);
+    ReportBuilder& raw(std::string pre_encoded_json);
+
+    ReportBuilder& section(SectionBuilder sb);
+
+    template <typename F>
+    ReportBuilder& section(std::string id, std::string title, F&& fn);
+
+    Report build();
+};
+```
+
+### `SectionBuilder`
+
+Fluent API for constructing a `Section` with typed blocks.
+
+```cpp
+class SectionBuilder {
+public:
+    SectionBuilder(std::string id, std::string title);
+
+    SectionBuilder& block(Block b);
+    SectionBuilder& markdown(std::string text);
+    SectionBuilder& callout(CalloutLevel level, std::string text);
+    SectionBuilder& heading(uint8_t level, std::string text);
+    SectionBuilder& divider();
+    SectionBuilder& kv(std::vector<KvPair> pairs);
+    SectionBuilder& table(std::vector<Column> cols,
+        std::vector<std::string> rows_json,
+        bool sortable = true, bool searchable = false);
+    SectionBuilder& code(std::string language, std::string text);
+    SectionBuilder& json(std::string data_json, bool collapsed = true);
+    SectionBuilder& hex(std::string bytes_b64, uint64_t offset = 0);
+    SectionBuilder& image(std::string artifact, std::optional<std::string> caption = {});
+    SectionBuilder& download(std::string artifact, std::string label);
+    SectionBuilder& iocs(std::vector<Indicator> items);
+    SectionBuilder& ttps(std::vector<Ttp> items);
+    SectionBuilder& tree(std::vector<TreeNode> nodes);
+    SectionBuilder& timeline(std::vector<TimelineEvent> events);
+    SectionBuilder& graph(std::vector<GraphNode> nodes, std::vector<GraphEdge> edges);
+
+    Section build();
+};
+```
+
+### Constants
+
+```cpp
+constexpr uint32_t SCHEMA_VERSION = 1;
+constexpr const char* REPORT_RESULT_NAME = "report";
+```
 
 ## PluginMeta
 
@@ -468,6 +759,7 @@ When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute co
 | `malbox/task.hpp` | `malbox::Task` wrapper |
 | `malbox/context.hpp` | `malbox::Context` wrapper |
 | `malbox/result.hpp` | `malbox::PluginResult` |
+| `malbox/report.hpp` | `malbox::report::Report`, builders, semantic types, and block types |
 | `malbox/handlers.hpp` | `malbox::Plugin` base class |
 | `malbox/runtime.hpp` | Entry points, `RuntimeConfig`, and trampolines |
 | `malbox_runtime_config.hpp` | Generated compile-time `constexpr RuntimeConfig` from `plugin.toml` |

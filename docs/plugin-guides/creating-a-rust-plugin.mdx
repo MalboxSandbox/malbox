@@ -3,23 +3,22 @@ title: "Creating a Rust Plugin"
 description: "Step-by-step guide to building analysis plugins in Rust using the Malbox Plugin SDK"
 ---
 
+## Getting started
+
+Create a new repository from the [Rust plugin template](https://github.com/DualHorizon/malbox-plugin-template-rust) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `Cargo.toml` and `plugin.toml` to match your plugin name.
+
+The template gives you a working plugin with Cargo configuration, a `plugin.toml` manifest, a `build.rs`, example source code, and CI already set up.
+
 ## Prerequisites
 
 - Rust toolchain (stable, 2024 edition)
-- The `malbox-plugin-sdk` crate (path dependency or from a release)
 - For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
 
-## Get the SDK
-
-If you have the Rust toolchain available (e.g., you're a Malbox contributor), the SDK is available as a path dependency at `crates/malbox-plugin-sdk`.
-
-Otherwise, download the SDK crate from a release and reference it as a path or published dependency.
-
-## Create your plugin
+## Project structure
 
 ### `Cargo.toml`
 
-Create a new binary crate and add the SDK as a dependency. Enable the `host` or `guest` feature depending on your plugin type.
+The SDK is declared as a dependency with either the `host` or `guest` feature enabled depending on your plugin type.
 
 For a **guest** plugin:
 
@@ -80,7 +79,7 @@ All `[runtime]` fields are optional and have sensible defaults. See the [Plugin 
 
 ### `build.rs`
 
-Add a one-line `build.rs` to ensure cargo re-runs the macro when `plugin.toml` changes:
+The `build.rs` ensures cargo re-runs the proc-macro when `plugin.toml` changes:
 
 ```rust
 fn main() {
@@ -111,15 +110,16 @@ impl MyPlugin {
     }
 
     #[malbox::on_task]
-    fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
+    fn process(&self, task: Task, ctx: &Context) -> Result<()> {
         let sample = task.sample_bytes()?;
         ctx.emit_progress(0.5, "analyzing")?;
 
         // ... perform analysis ...
 
-        Ok(vec![PluginResult::json("my_result", &serde_json::json!({
+        ctx.push_result(PluginResult::json("my_result", &serde_json::json!({
             "status": "clean"
-        }))?])
+        }))?)?;
+        Ok(())
     }
 
     #[malbox::on_stop]
@@ -149,7 +149,7 @@ Annotate methods inside a `#[malbox::handlers]` impl block:
 
 | Attribute | Signature | Required |
 |-----------|-----------|----------|
-| `#[malbox::on_task]` | `fn(&self, Task, &Context) -> Result<Vec<PluginResult>>` | Yes |
+| `#[malbox::on_task]` | `fn(&self, Task, &Context) -> Result<()>` | Yes |
 | `#[malbox::on_start]` | `fn(&self) -> Result<()>` | No |
 | `#[malbox::on_stop]` | `fn(&self) -> Result<()>` | No |
 | `#[malbox::health_check]` | `fn(&self) -> HealthStatus` | No |
@@ -157,37 +157,52 @@ Annotate methods inside a `#[malbox::handlers]` impl block:
 
 Only `#[malbox::on_task]` is required. All other handlers are optional and default to no-ops.
 
-## Returning results
+## Pushing results
 
-Your `on_task` handler returns `Result<Vec<PluginResult>>`. There are three result types:
+Results are pushed to the daemon during `on_task` via `ctx.push_result()`. You can call it multiple times to stream results incrementally. There are three result types:
 
 ```rust
-// JSON - automatically serializes any serde::Serialize type
-PluginResult::json("name", &my_struct)?
-
-// Raw bytes
-PluginResult::bytes("name", raw_data)
-
-// File reference - the runtime reads the file
-PluginResult::file("name", "/path/to/file")
+ctx.push_result(PluginResult::json("name", &my_struct)?)?;
+ctx.push_result(PluginResult::bytes("name", raw_data))?;
+ctx.push_result(PluginResult::file("name", "/path/to/file"))?;
 ```
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
 
+For structured analysis output with verdicts, indicators, TTPs, and frontend-renderable sections, use the `ReportBuilder` to construct a `Report` and push it as a result:
+
+```rust
+use malbox::types::report::{ReportBuilder, Classification, Confidence, Indicator};
+
+let report = ReportBuilder::new("my-plugin", "0.1.0")
+    .summary("Analysis complete")
+    .verdict(Classification::Malicious, Some(85), Some(Confidence::High))
+    .indicator(Indicator::new("sha256", "abc123..."))
+    .section("overview", "Overview", |s| {
+        s.markdown("Found malicious indicators")
+    })
+    .build();
+
+ctx.push_result(report.into_plugin_result()?)?;
+```
+
+See the [Rust SDK Reference](/reference/plugin-sdk/rust) for the full report API.
+
 ## Handling errors
 
-The SDK uses its own `Result<T>` type aliased to `std::result::Result<T, SdkError>`. Handler methods that return `Result<()>` or `Result<Vec<PluginResult>>` can use `?` to propagate errors naturally.
+The SDK uses its own `Result<T>` type aliased to `std::result::Result<T, SdkError>`. Handler methods return `Result<()>` and can use `?` to propagate errors naturally.
 
 ```rust
 #[malbox::on_task]
-fn process(&self, task: Task, ctx: &Context) -> Result<Vec<PluginResult>> {
-    let sample = task.sample_bytes()?;  // propagates SdkError::Io on failure
+fn process(&self, task: Task, ctx: &Context) -> Result<()> {
+    let sample = task.sample_bytes()?;
 
     if sample.is_empty() {
         return Err(SdkError::Plugin(anyhow::anyhow!("empty sample")));
     }
 
-    Ok(vec![PluginResult::json("result", &"ok")?])
+    ctx.push_result(PluginResult::json("result", &"ok")?)?;
+    Ok(())
 }
 ```
 
