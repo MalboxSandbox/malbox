@@ -59,10 +59,11 @@ port = 50051                      # gRPC listen port (default: 50051)
 log_filter = "info"               # tracing filter (default: "info")
 
 [runtime.paths]
-sample_dir = "/tmp/malbox/samples"        # where daemon pushes the sample
-artifact_dir = "/tmp/malbox/artifacts"    # where plugin writes output
-stash_dir = "/tmp/malbox/stash"           # internal result stash spillover
-log_dir = "/tmp/malbox/logs"              # log overflow files
+sample_dir       = "/tmp/malbox/samples"      # where daemon pushes the sample
+artifact_dir     = "/tmp/malbox/artifacts"    # where plugin writes output (auto-collected)
+stash_dir        = "/tmp/malbox/stash"        # internal result stash spillover
+log_dir          = "/tmp/malbox/logs"         # SDK-internal log overflow files
+external_log_dir = "/tmp/malbox/ext-logs"     # external tool/driver logs (auto-collected)
 
 [runtime.stash]
 threshold_bytes = 1048576

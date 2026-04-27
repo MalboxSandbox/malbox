@@ -232,6 +232,20 @@ void warn(const std::string& message);
   The warning message to attach.
 </ResponseField>
 
+### `mark_collected()`
+
+Marks a file as already handled, preventing artifact auto-collection from sending it again.
+
+Use this when a plugin reads a file from the artifacts directory, processes it, and sends derived data as Json/Bytes instead of the raw file. Files sent via `push_result(PluginResult::file(...))` are automatically marked.
+
+```cpp
+void mark_collected(const std::string& path);
+```
+
+<ResponseField name="path" type="const std::string&" required>
+  Absolute path to the file to mark as handled.
+</ResponseField>
+
 ### `emit_event()`
 
 Emits a raw system event. This is an advanced escape hatch for custom event routing.
@@ -371,7 +385,10 @@ Runtime configuration baked into the plugin binary at build time. Generated from
   Absolute path to the internal result stash spillover directory.
 </ResponseField>
 <ResponseField name="log_dir" type="const char*" required>
-  Absolute path to the log overflow files directory.
+  Absolute path to the SDK-internal log overflow files directory.
+</ResponseField>
+<ResponseField name="external_log_dir" type="const char*" required>
+  Absolute path to external log files directory (kernel drivers, custom tools). Auto-collected after task execution.
 </ResponseField>
 <ResponseField name="stash_threshold_bytes" type="std::size_t" required>
   Result stash spill threshold in bytes.
@@ -381,6 +398,12 @@ Runtime configuration baked into the plugin binary at build time. Generated from
 </ResponseField>
 <ResponseField name="log_filter" type="const char*" required>
   Tracing `EnvFilter` directive string (e.g. `"info"`, `"info,hyper=warn"`).
+</ResponseField>
+<ResponseField name="auto_collect_artifacts" type="AutoCollectConfig" required>
+  Auto-collection settings for artifact files. Contains `enabled`, `include`/`exclude` glob patterns, and `max_file_size`.
+</ResponseField>
+<ResponseField name="auto_collect_external_logs" type="AutoCollectConfig" required>
+  Auto-collection settings for external log files. Contains `enabled`, `include`/`exclude` glob patterns, and `max_file_size`.
 </ResponseField>
 
 ## Runtime Entry Points

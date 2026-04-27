@@ -41,14 +41,27 @@ port       = 50051
 log_filter = "info"
 
 [runtime.paths]
-sample_dir   = "/tmp/malbox/samples"
-artifact_dir = "/tmp/malbox/artifacts"
-stash_dir    = "/tmp/malbox/stash"
-log_dir      = "/tmp/malbox/logs"
+sample_dir       = "/tmp/malbox/samples"
+artifact_dir     = "/tmp/malbox/artifacts"
+stash_dir        = "/tmp/malbox/stash"
+log_dir          = "/tmp/malbox/logs"
+external_log_dir = "/tmp/malbox/ext-logs"
 
 [runtime.stash]
 threshold_bytes = 1048576
 ttl_secs        = 120
+
+[runtime.auto_collect.artifacts]
+enabled  = true
+include  = ["**/*"]
+exclude  = []
+max_file_size = 52428800
+
+[runtime.auto_collect.external_logs]
+enabled  = true
+include  = ["**/*"]
+exclude  = []
+max_file_size = 52428800
 ```
 
 `state` and `execution` are required. All other fields are optional with sensible defaults.
@@ -65,9 +78,10 @@ ttl_secs        = 120
 | Field | Type | Default (unix) | Default (windows) | Description |
 |-------|------|-----------------|--------------------|----|
 | `sample_dir` | `string` | `/tmp/malbox/samples` | `C:\malbox\samples` | Where the daemon pushes the sample for analysis. |
-| `artifact_dir` | `string` | `/tmp/malbox/artifacts` | `C:\malbox\artifacts` | Where the plugin writes output artifacts. |
+| `artifact_dir` | `string` | `/tmp/malbox/artifacts` | `C:\malbox\artifacts` | Where the plugin writes output artifacts. Auto-collected after task execution. |
 | `stash_dir` | `string` | `/tmp/malbox/stash` | `C:\malbox\stash` | Internal result stash spillover directory. |
-| `log_dir` | `string` | `/tmp/malbox/logs` | `C:\malbox\logs` | Log overflow files directory. |
+| `log_dir` | `string` | `/tmp/malbox/logs` | `C:\malbox\logs` | SDK-internal log overflow files directory. |
+| `external_log_dir` | `string` | `/tmp/malbox/ext-logs` | `C:\malbox\ext-logs` | External log files from kernel drivers or other tools. Auto-collected after task execution. |
 
 ### `[runtime.stash]`
 
@@ -75,6 +89,32 @@ ttl_secs        = 120
 |-------|------|---------|-------------|
 | `threshold_bytes` | `integer` | `1048576` (1 MiB) | Result payloads larger than this are spilled to disk via the result stash. Must be >= 4096. |
 | `ttl_secs` | `integer` | `120` | How long stashed result entries are kept before TTL sweep reclaims them. Must be >= 1. |
+
+### `[runtime.auto_collect]`
+
+Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. Files in these directories are streamed back to the daemon as results without the plugin needing to send them explicitly via `push_result`.
+
+<Note>
+For artifacts, files that were already sent explicitly (via `ctx.push_result(PluginResult::file(...))`) or marked via `ctx.mark_collected()` are skipped to avoid duplicates. External logs are always collected without dedup.
+</Note>
+
+#### `[runtime.auto_collect.artifacts]`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether to auto-collect files from `artifact_dir`. |
+| `include` | `string[]` | `["**/*"]` | Glob patterns for files to include. |
+| `exclude` | `string[]` | `[]` | Glob patterns for files to exclude. |
+| `max_file_size` | `integer` | `52428800` (50 MiB) | Files larger than this are skipped. |
+
+#### `[runtime.auto_collect.external_logs]`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether to auto-collect files from `external_log_dir`. |
+| `include` | `string[]` | `["**/*"]` | Glob patterns for files to include. |
+| `exclude` | `string[]` | `[]` | Glob patterns for files to exclude. |
+| `max_file_size` | `integer` | `52428800` (50 MiB) | Files larger than this are skipped. |
 
 <Note>
 Changing any runtime setting requires rebuilding the plugin.
