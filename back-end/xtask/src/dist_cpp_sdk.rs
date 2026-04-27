@@ -24,6 +24,13 @@ impl Target {
         }
     }
 
+    fn codegen_rust_target(self) -> &'static str {
+        match self {
+            Target::Linux => "x86_64-unknown-linux-musl",
+            Target::Windows => "x86_64-pc-windows-gnu",
+        }
+    }
+
     fn lib_name(self) -> &'static str {
         match self {
             Target::Linux => "libmalbox_plugin_sdk_cpp.a",
@@ -73,14 +80,21 @@ pub fn run() {
 
     run_cmd(Command::new("cargo").args(&cargo_args).current_dir(&root));
 
-    println!("Building malbox-codegen (release, {rust_target})...");
+    let codegen_target = target.codegen_rust_target();
+    println!("Building malbox-codegen (release, {codegen_target})...");
 
-    let mut codegen_args = vec!["build", "--release", "-p", "malbox-codegen"];
-    if target == Target::Windows {
-        codegen_args.extend(["--target", rust_target]);
-    }
-
-    run_cmd(Command::new("cargo").args(&codegen_args).current_dir(&root));
+    run_cmd(
+        Command::new("cargo")
+            .args([
+                "build",
+                "--release",
+                "-p",
+                "malbox-codegen",
+                "--target",
+                codegen_target,
+            ])
+            .current_dir(&root),
+    );
 
     // Step 2: Assemble dist/
 
@@ -141,7 +155,7 @@ pub fn run() {
 
     let codegen_src = root
         .join("target")
-        .join(rust_target)
+        .join(codegen_target)
         .join("release")
         .join(target.codegen_bin_name());
 
