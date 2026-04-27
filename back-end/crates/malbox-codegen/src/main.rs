@@ -43,6 +43,10 @@ fn run(cli: Cli) -> Result<(), String> {
     let output = match cli.lang {
         Lang::Cpp => emit_cpp(&resolved),
     };
+    if let Some(parent) = cli.output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+    }
     std::fs::write(&cli.output, output)
         .map_err(|e| format!("failed to write {}: {e}", cli.output.display()))?;
     Ok(())
