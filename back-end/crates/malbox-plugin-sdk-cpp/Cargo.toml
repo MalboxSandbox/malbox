@@ -25,4 +25,4 @@ tempfile = { workspace = true }
 malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }
 
 [build-dependencies]
-cbindgen = "0.28"
+cbindgen = "0.29"
