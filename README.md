@@ -1,4 +1,4 @@
-![malbox banner](assets/banner-1.png)
+![malbox banner](assets/malbox-banner-2.png)
 
 <div align="center">
 
