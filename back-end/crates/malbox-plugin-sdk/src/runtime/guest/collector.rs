@@ -1,6 +1,6 @@
 //! Auto-collection of artifact and external log files after task execution.
 //!
-//! After `Plugin::on_task` returns, the runtime walks the artifact and
+//! After `HostPlugin::on_task` returns, the runtime walks the artifact and
 //! external-log directories and sends any files that were not already
 //! explicitly sent (or marked as collected) by the plugin.
 

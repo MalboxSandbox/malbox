@@ -8,7 +8,7 @@
 
 use crate::context::Context;
 use crate::error::{Result, SdkError};
-use crate::plugin::Plugin;
+use crate::plugin::HostPlugin;
 use crate::types::{PluginMeta, Task};
 
 use malbox_plugin_transport::grpc::proto;
@@ -37,7 +37,7 @@ pub struct HostRuntime<P> {
     shutdown: AtomicBool,
 }
 
-impl<P: Plugin> HostRuntime<P> {
+impl<P: HostPlugin> HostRuntime<P> {
     /// Create a new host plugin runtime.
     pub fn new(plugin: P, meta: PluginMeta) -> Result<Self> {
         info!(plugin = %meta.name, "Initializing host runtime");

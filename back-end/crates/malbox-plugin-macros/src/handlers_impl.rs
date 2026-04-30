@@ -1,5 +1,5 @@
 //! `#[malbox::handlers]` — scans an impl block for tagged methods and generates
-//! a single `impl Plugin for T` block.
+//! a single `impl HostPlugin for T` block.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -128,7 +128,7 @@ fn first_param_type(method: &syn::ImplItemFn) -> Option<syn::Type> {
 /// Scans for methods tagged with `#[on_task]`, `#[on_start]`, `#[on_stop]`,
 /// `#[health_check]`, `#[on_execute_command]`, `#[on_event(...)]` (or their
 /// `#[malbox::...]` equivalents), strips those attributes, and generates a
-/// single `impl Plugin for T` block with only the annotated methods.
+/// single `impl HostPlugin for T` block with only the annotated methods.
 pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
     let mut input: ItemImpl = syn::parse2(item)?;
 
@@ -186,7 +186,7 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
         }
     }
 
-    // Generate the single Plugin trait impl
+    // Generate the single HostPlugin trait impl
     let plugin_impl = generate_plugin_impl(struct_ty, &found);
 
     Ok(quote! {
@@ -196,7 +196,7 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
     })
 }
 
-/// Generate a single `impl Plugin for T` block containing only the methods
+/// Generate a single `impl HostPlugin for T` block containing only the methods
 /// that the user annotated. Unannotated methods fall through to the trait defaults.
 fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenStream {
     let on_task = found.task_method.as_ref().map(|method_name| {
@@ -295,7 +295,7 @@ fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenSt
     .collect();
 
     quote! {
-        impl malbox_plugin_sdk::plugin::Plugin for #struct_ty {
+        impl malbox_plugin_sdk::plugin::HostPlugin for #struct_ty {
             #(#methods)*
         }
     }

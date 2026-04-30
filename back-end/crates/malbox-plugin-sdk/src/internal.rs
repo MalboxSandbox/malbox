@@ -6,12 +6,12 @@ use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Re-export the Plugin trait for macro codegen.
-pub use crate::plugin::Plugin;
+/// Re-export the HostPlugin trait for macro codegen.
+pub use crate::plugin::HostPlugin;
 
 /// Deserialize a config HashMap into a typed struct.
 ///
-/// Used by generated `Plugin` impls when the user's `on_start`
+/// Used by generated `HostPlugin` impls when the user's `on_start`
 /// method takes a typed config parameter.
 pub fn deserialize_config<T: serde::de::DeserializeOwned>(
     raw: HashMap<String, String>,

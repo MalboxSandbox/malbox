@@ -1,4 +1,4 @@
-//! The core Plugin trait that all malbox plugins implement.
+//! The core HostPlugin trait that all malbox host plugins implement.
 
 use crate::context::Context;
 use crate::error::Result;
@@ -6,12 +6,12 @@ use crate::types::{ExecRequest, ExecResult, HealthStatus, Task};
 use malbox_plugin_transport::messages::events::Event;
 use std::collections::HashMap;
 
-/// The trait that all malbox plugins implement.
+/// The trait that all malbox host plugins implement.
 ///
 /// All methods have default implementations, but a useful plugin should
 /// at minimum implement `on_task`. The `#[malbox::handlers]` macro generates
 /// this impl from annotated methods on your plugin struct.
-pub trait Plugin: Send + Sync + 'static {
+pub trait HostPlugin: Send + Sync + 'static {
     /// Process an analysis task.
     ///
     /// Emit results via [`Context::push_result`](crate::context::Context::push_result).
@@ -58,7 +58,7 @@ mod tests {
 
     // MinimalPlugin: empty impl -- verify all defaults work
     struct MinimalPlugin;
-    impl Plugin for MinimalPlugin {}
+    impl HostPlugin for MinimalPlugin {}
 
     #[test]
     fn minimal_plugin_defaults_work() {
@@ -81,7 +81,7 @@ mod tests {
 
     // TaskOnlyPlugin: verify on_task override works
     struct TaskOnlyPlugin;
-    impl Plugin for TaskOnlyPlugin {
+    impl HostPlugin for TaskOnlyPlugin {
         fn on_task(&self, _task: Task, ctx: &Context) -> Result<()> {
             ctx.push_result(PluginResult::bytes("hello", vec![1, 2, 3]))?;
             Ok(())

@@ -1,4 +1,4 @@
-//! The PluginResult type returned by `Plugin::on_task`.
+//! The PluginResult type returned by `HostPlugin::on_task`.
 
 use crate::error::Result;
 use serde::Serialize;

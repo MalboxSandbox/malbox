@@ -1,4 +1,4 @@
-//! Plugin health status, returned by `Plugin::health_check`.
+//! Plugin health status, returned by `HostPlugin::health_check`.
 
 /// Health status returned by optional health check handlers.
 #[derive(Debug, Clone)]

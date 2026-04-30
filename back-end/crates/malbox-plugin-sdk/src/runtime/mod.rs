@@ -1,4 +1,4 @@
-//! Runtime implementations that run a [`Plugin`](crate::plugin::Plugin)
+//! Runtime implementations that run a [`HostPlugin`](crate::plugin::HostPlugin)
 //! against a transport.
 //!
 //! Two runtimes are provided:
@@ -19,7 +19,7 @@ pub mod guest;
 pub mod host;
 
 #[cfg(feature = "guest")]
-pub use guest::{GuestPluginRuntime, GuestRuntimeConfig};
+pub use guest::{GuestLinearRuntime, GuestPluginRuntime, GuestRuntimeConfig};
 
 #[cfg(feature = "host")]
 pub use host::HostRuntime;

@@ -1,6 +1,6 @@
 //! Default command executor for the guest runtime.
 //!
-//! When a plugin's `Plugin::on_execute_command` returns `None`, the bridge
+//! When a plugin's `HostPlugin::on_execute_command` returns `None`, the bridge
 //! falls back to [`default_execute_command`] which spawns the requested
 //! OS command via `tokio::process::Command`.
 //!
@@ -19,7 +19,7 @@ use super::files::resolve_path;
 
 /// Spawn an OS command using `tokio::process::Command`.
 ///
-/// This is the fallback executor used when `Plugin::on_execute_command`
+/// This is the fallback executor used when `HostPlugin::on_execute_command`
 /// returns `None`. The `cwd` is resolved against `base_dir` for safety.
 pub(super) async fn default_execute_command(
     base_dir: &Path,
