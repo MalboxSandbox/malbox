@@ -2,15 +2,21 @@ use malbox_database::PgPool;
 use malbox_database::repositories::images;
 use notify::{Event, EventKind, RecursiveMode, Watcher, recommended_watcher};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 /// Start watching the image store directory for changes.
 /// Updates image availability in the database when files appear/disappear.
-pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool) {
+pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool, token: CancellationToken) {
     let (tx, mut rx) = mpsc::channel::<notify::Result<Event>>(100);
 
-    std::thread::spawn(move || {
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let flag_clone = Arc::clone(&shutdown_flag);
+
+    let thread_handle = std::thread::spawn(move || {
         let rt_tx = tx;
         let mut watcher = match recommended_watcher(move |res| {
             let _ = rt_tx.blocking_send(res);
@@ -29,19 +35,30 @@ pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool) {
 
         debug!(path = %store_path.display(), "Image store watcher started");
 
-        // Keep the watcher alive
-        loop {
-            std::thread::park();
+        while !flag_clone.load(std::sync::atomic::Ordering::Acquire) {
+            std::thread::park_timeout(std::time::Duration::from_secs(1));
         }
+        debug!("Image store watcher thread exiting");
     });
 
     tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                Ok(event) => handle_fs_event(&db, event).await,
-                Err(e) => warn!(error = %e, "Filesystem watch error"),
+        loop {
+            tokio::select! {
+                event = rx.recv() => {
+                    match event {
+                        Some(Ok(event)) => handle_fs_event(&db, event).await,
+                        Some(Err(e)) => warn!(error = %e, "Filesystem watch error"),
+                        None => break,
+                    }
+                }
+                _ = token.cancelled() => {
+                    debug!("Image store consumer received shutdown");
+                    break;
+                }
             }
         }
+        shutdown_flag.store(true, std::sync::atomic::Ordering::Release);
+        thread_handle.thread().unpark();
     });
 }
 

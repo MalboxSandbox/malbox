@@ -16,8 +16,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
 
 use malbox_plugin_transport::ipc::{IpcService, Node};
@@ -47,7 +48,7 @@ pub struct PluginManager {
     /// Held to keep the background health-check task alive for the lifetime of the manager.
     #[allow(dead_code)]
     health_check_handle: JoinHandle<()>,
-    shutdown_tx: watch::Sender<bool>,
+    token: CancellationToken,
 }
 
 impl PluginManager {
@@ -59,6 +60,7 @@ impl PluginManager {
         emitter: Arc<EventEmitter>,
         ipc_node: Arc<Node<IpcService>>,
         health_check_interval: Duration,
+        token: CancellationToken,
     ) -> Result<Self> {
         let snapshot = registry.snapshot();
         let instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>> =
@@ -82,10 +84,11 @@ impl PluginManager {
             }
         }
 
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-
-        let health_check_handle =
-            spawn_health_check_loop(Arc::clone(&instances), health_check_interval, shutdown_rx);
+        let health_check_handle = spawn_health_check_loop(
+            Arc::clone(&instances),
+            health_check_interval,
+            token.child_token(),
+        );
 
         info!(count = instances.len(), "Plugin manager initialized");
 
@@ -95,7 +98,7 @@ impl PluginManager {
             emitter,
             ipc_node,
             health_check_handle,
-            shutdown_tx,
+            token,
         })
     }
 
@@ -333,7 +336,7 @@ impl PluginManager {
         info!("shutting down plugin manager");
 
         // Signal the health check loop to stop.
-        let _ = self.shutdown_tx.send(true);
+        self.token.cancel();
 
         // Stop all running plugin instances.
         for entry in self.instances.iter() {
@@ -379,6 +382,7 @@ async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
     let child = tokio::process::Command::new(&entry.binary_path)
         .env("MALBOX_PLUGIN_ID", entry.id.as_str())
         .kill_on_drop(true)
+        .process_group(0)
         .spawn()
         .map_err(|e| ManagerError::SpawnFailed(entry.id.clone(), e.to_string()))?;
 

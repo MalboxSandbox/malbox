@@ -16,6 +16,7 @@ malbox-plugin-transport = { path = "../malbox-plugin-transport" }
 malbox-scheduler = { path = "../malbox-scheduler" }
 malbox-tracing = { path = "../malbox-tracing" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 serde = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }

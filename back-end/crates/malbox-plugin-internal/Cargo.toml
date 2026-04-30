@@ -15,6 +15,7 @@ malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
 iceoryx2-loggers = { version = "0.8.1", default-features = false, features = ["std", "tracing"] }
 
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 
 dashmap = "6"
 notify = "8.2.0"

@@ -10,9 +10,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dashmap::DashMap;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
@@ -26,18 +27,15 @@ use crate::registry::types::PluginId;
 pub fn spawn_health_check_loop(
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     interval: Duration,
-    mut shutdown_rx: watch::Receiver<bool>,
+    token: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(interval) => {}
-                result = shutdown_rx.changed() => {
-                    // Channel closed or shutdown requested.
-                    if result.is_err() || *shutdown_rx.borrow() {
-                        debug!("health check loop: shutdown signal received, exiting");
-                        break;
-                    }
+                _ = token.cancelled() => {
+                    debug!("health check loop: shutdown signal received, exiting");
+                    break;
                 }
             }
 

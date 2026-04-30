@@ -7,6 +7,7 @@ use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::{Level, info};
 
@@ -36,6 +37,7 @@ pub async fn serve(
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
     plugin_registry: Arc<PluginRegistry>,
+    shutdown_token: CancellationToken,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
         config: conf,
@@ -69,6 +71,7 @@ pub async fn serve(
     info!(address = %address, "HTTP server listening");
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(async move { shutdown_token.cancelled().await })
         .await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
 }

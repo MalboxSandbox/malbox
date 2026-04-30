@@ -10,6 +10,7 @@ use malbox_resources::{MachinePool, resolve_transport};
 use malbox_scheduler::init_scheduler;
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, instrument, warn};
 
 pub mod error;
@@ -19,7 +20,7 @@ mod provisioners;
 pub use error::DaemonError;
 
 #[instrument(skip_all, err)]
-pub async fn run(config: &Config) -> error::Result<()> {
+pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::Result<()> {
     // Validate provider configuration
     {
         let _span = info_span!("init.providers").entered();
@@ -51,7 +52,11 @@ pub async fn run(config: &Config) -> error::Result<()> {
         if let Some(ref images_config) = config.images {
             let store_path = std::path::PathBuf::from(&images_config.store_path);
             if store_path.exists() {
-                malbox_utils::image_store::spawn_image_watcher(store_path, db.clone());
+                malbox_utils::image_store::spawn_image_watcher(
+                    store_path,
+                    db.clone(),
+                    shutdown_token.child_token(),
+                );
             } else {
                 warn!(path = %images_config.store_path, "Image store path does not exist");
             }
@@ -195,6 +200,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
                 emitter,
                 Arc::clone(&ipc_node),
                 std::time::Duration::from_secs(10),
+                shutdown_token.child_token(),
             )
             .await
             .map_err(|e| {
@@ -208,7 +214,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
     let result_store = Arc::new(ResultStore::new(&config.paths.data_dir));
 
     // Initialize scheduler and keep channels alive
-    let (task_tx, _shutdown_tx) = {
+    let task_tx = {
         let _span = info_span!("init.scheduler").entered();
         init_scheduler(
             db.clone(),
@@ -220,6 +226,7 @@ pub async fn run(config: &Config) -> error::Result<()> {
             transport,
             Arc::clone(&sample_store),
             Arc::clone(&result_store),
+            shutdown_token.child_token(),
         )
         .await
         .map_err(|e| DaemonError::Internal(e.to_string()))?
@@ -229,12 +236,31 @@ pub async fn run(config: &Config) -> error::Result<()> {
     // per-request spans come from `tower_http::TraceLayer` inside `serve`).
     http::serve(
         config.clone(),
-        db,
+        db.clone(),
         task_tx,
         sample_store,
         machine_pool,
         registry,
+        shutdown_token.child_token(),
     )
     .await
-    .map_err(|e| DaemonError::Internal(e.to_string()))
+    .map_err(|e| DaemonError::Internal(e.to_string()))?;
+
+    // --- Sequenced teardown ---
+    info!("HTTP server stopped, beginning teardown...");
+
+    let teardown = async {
+        plugin_manager.shutdown().await;
+        db.close().await;
+        info!("Daemon shut down");
+    };
+
+    if tokio::time::timeout(std::time::Duration::from_secs(30), teardown)
+        .await
+        .is_err()
+    {
+        warn!("Graceful shutdown timed out after 30s");
+    }
+
+    Ok(())
 }

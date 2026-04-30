@@ -15,7 +15,8 @@ use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 /// The scheduler orchestrates task ingestion, queuing, and worker management.
@@ -30,6 +31,8 @@ pub struct Scheduler {
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
+    #[allow(dead_code)]
+    token: CancellationToken,
 }
 
 impl Scheduler {
@@ -44,6 +47,7 @@ impl Scheduler {
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
         result_store: Arc<ResultStore>,
+        token: CancellationToken,
     ) -> Self {
         let idle_timeout = std::time::Duration::from_millis(idle_timeout_ms);
         Self {
@@ -51,19 +55,25 @@ impl Scheduler {
             task_store: Arc::new(TaskStore::new(db_pool)),
             machine_pool,
             plugin_manager,
-            worker_pool: Arc::new(WorkerPool::new(max_workers, min_workers, idle_timeout)),
+            worker_pool: Arc::new(WorkerPool::new(
+                max_workers,
+                min_workers,
+                idle_timeout,
+                token.child_token(),
+            )),
             max_workers,
             min_workers,
             transport,
             sample_store,
             result_store,
+            token,
         }
     }
 
     pub async fn run(
         self,
         mut task_rx: mpsc::Receiver<Task>,
-        shutdown_rx: oneshot::Receiver<()>,
+        token: CancellationToken,
     ) -> Result<()> {
         // 1. Reset tasks stranded in transient states from a prior daemon run.
         match self.task_store.recover_orphaned_tasks().await {
@@ -177,7 +187,7 @@ impl Scheduler {
         });
 
         // 8. Wait for shutdown signal.
-        let _ = shutdown_rx.await;
+        token.cancelled().await;
         info!("Scheduler received shutdown signal");
 
         self.worker_pool.shutdown().await;

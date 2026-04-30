@@ -32,6 +32,7 @@ malbox-provisioner-ansible = { path = "../../crates/malbox-provisioner-ansible",
 
 color-eyre = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 clap = { version = "4.5.26", features = ["derive"] }

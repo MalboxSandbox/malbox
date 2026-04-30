@@ -10,7 +10,8 @@ use malbox_plugin_internal::manager::PluginManager;
 use malbox_resources::{MachinePool, ResolvedTransport};
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 pub mod error;
@@ -37,9 +38,9 @@ pub async fn init_scheduler(
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
-) -> Result<(mpsc::Sender<Task>, oneshot::Sender<()>)> {
+    token: CancellationToken,
+) -> Result<mpsc::Sender<Task>> {
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let scheduler = scheduler::Scheduler::new(
         db_pool,
@@ -51,10 +52,11 @@ pub async fn init_scheduler(
         transport,
         sample_store,
         result_store,
+        token.clone(),
     );
 
     tokio::spawn(async move {
-        if let Err(e) = scheduler.run(task_rx, shutdown_rx).await {
+        if let Err(e) = scheduler.run(task_rx, token).await {
             error!(error = %e, "Scheduler exited with error");
         }
     });
@@ -63,5 +65,5 @@ pub async fn init_scheduler(
         max_workers,
         min_workers, idle_timeout_ms, "Scheduler started"
     );
-    Ok((task_tx, shutdown_tx))
+    Ok(task_tx)
 }

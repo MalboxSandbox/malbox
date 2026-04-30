@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 /// Decide whether `ensure_capacity` should spawn another worker.
@@ -27,7 +28,6 @@ fn should_spawn(busy: usize, active: usize, max: usize) -> bool {
 
 /// A managed worker with its shutdown handle and join handle.
 struct ManagedWorker {
-    shutdown_tx: Option<oneshot::Sender<()>>,
     join_handle: JoinHandle<()>,
 }
 
@@ -54,13 +54,19 @@ pub struct WorkerPool {
     busy_count: Arc<AtomicUsize>,
     shutting_down: Arc<AtomicBool>,
     deps: StdMutex<Option<WorkerDeps>>,
+    token: CancellationToken,
 }
 
 impl WorkerPool {
     /// Create a new empty worker pool.
     ///
     /// Shared dependencies are supplied later via `spawn_initial`.
-    pub fn new(max_workers: usize, min_workers: usize, idle_timeout: Duration) -> Self {
+    pub fn new(
+        max_workers: usize,
+        min_workers: usize,
+        idle_timeout: Duration,
+        token: CancellationToken,
+    ) -> Self {
         Self {
             workers: StdMutex::new(Vec::with_capacity(max_workers)),
             max_workers,
@@ -69,6 +75,7 @@ impl WorkerPool {
             busy_count: Arc::new(AtomicUsize::new(0)),
             shutting_down: Arc::new(AtomicBool::new(false)),
             deps: StdMutex::new(None),
+            token,
         }
     }
 
@@ -126,7 +133,7 @@ impl WorkerPool {
     /// Spawn a single worker with the given idle_timeout policy.
     /// The new `ManagedWorker` is pushed onto `self.workers`.
     fn spawn_one(&self, deps: &WorkerDeps, idle_timeout: Option<Duration>) {
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let child_token = self.token.child_token();
 
         let worker = Worker::new(
             Arc::clone(&deps.task_queue),
@@ -148,13 +155,10 @@ impl WorkerPool {
             "Spawning worker"
         );
 
-        let join_handle = tokio::spawn(worker.run(shutdown_rx));
+        let join_handle = tokio::spawn(worker.run(child_token));
 
         let mut workers = self.workers.lock().expect("workers mutex poisoned");
-        workers.push(ManagedWorker {
-            shutdown_tx: Some(shutdown_tx),
-            join_handle,
-        });
+        workers.push(ManagedWorker { join_handle });
     }
 
     /// Spawn an additional worker if all live workers are currently busy
@@ -206,18 +210,14 @@ impl WorkerPool {
 
         self.shutting_down.store(true, Ordering::Release);
 
+        self.token.cancel();
+
         // Take ownership of managed workers so we can await join handles
         // without holding the mutex (tokio awaits can't cross a std mutex).
-        let mut taken: Vec<ManagedWorker> = {
+        let taken: Vec<ManagedWorker> = {
             let mut workers = self.workers.lock().expect("workers mutex poisoned");
             std::mem::take(&mut *workers)
         };
-
-        for managed in &mut taken {
-            if let Some(tx) = managed.shutdown_tx.take() {
-                let _ = tx.send(());
-            }
-        }
 
         for managed in taken {
             if let Err(e) = managed.join_handle.await {

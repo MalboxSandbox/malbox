@@ -37,6 +37,7 @@ use malbox_utils::{ResultFormat, ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -177,27 +178,18 @@ impl Worker {
     /// tasks can check for cancellation at safe points and clean up
     /// (release machines) before returning.
     #[instrument(skip_all, fields(worker_id = %self.id))]
-    pub async fn run(self, shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
+    pub async fn run(self, token: CancellationToken) {
         let notifier = self.task_queue.get_notifier();
         debug!(worker_id = %self.id, "Worker started");
-
-        // Convert oneshot into a watch channel so execute_task can poll
-        // it cooperatively without consuming the receiver.
-        let (shutdown_tx, shutdown) = tokio::sync::watch::channel(false);
-        tokio::spawn(async move {
-            let _ = shutdown_rx.await;
-            let _ = shutdown_tx.send(true);
-        });
 
         loop {
             // Wait for task, shutdown, or idle-timeout.
             {
-                let mut shutdown_rx = shutdown.clone();
                 match self.idle_timeout {
                     None => {
                         tokio::select! {
                             _ = notifier.notified() => {}
-                            _ = shutdown_rx.wait_for(|v| *v) => {
+                            _ = token.cancelled() => {
                                 debug!(worker_id = %self.id, "Worker received shutdown signal");
                                 break;
                             }
@@ -206,7 +198,7 @@ impl Worker {
                     Some(timeout) => {
                         tokio::select! {
                             _ = notifier.notified() => {}
-                            _ = shutdown_rx.wait_for(|v| *v) => {
+                            _ = token.cancelled() => {
                                 debug!(worker_id = %self.id, "Worker received shutdown signal");
                                 break;
                             }
@@ -220,7 +212,7 @@ impl Worker {
             }
 
             // Shutdown may have arrived between the notifier firing and here.
-            if *shutdown.borrow() {
+            if token.is_cancelled() {
                 debug!(worker_id = %self.id, "Worker received shutdown signal");
                 break;
             }
@@ -234,7 +226,7 @@ impl Worker {
             info!(worker_id = %self.id, task_id, "Worker picked up task");
 
             let start = std::time::Instant::now();
-            let result = self.execute_task(task_id, &shutdown).await;
+            let result = self.execute_task(task_id, &token).await;
             let duration = start.elapsed();
 
             match result {
@@ -305,11 +297,7 @@ impl Worker {
     /// an unconditional cleanup block that releases the machine — even if an
     /// intermediate step fails or the task is cancelled.
     #[instrument(skip_all, fields(task_id, worker_id = %self.id), err)]
-    async fn execute_task(
-        &self,
-        task_id: i32,
-        shutdown: &tokio::sync::watch::Receiver<bool>,
-    ) -> Result<TaskOutcome> {
+    async fn execute_task(&self, task_id: i32, token: &CancellationToken) -> Result<TaskOutcome> {
         // --- Initializing ---
         self.task_store
             .update_task_state(task_id, TaskState::Initializing)
@@ -380,7 +368,7 @@ impl Worker {
                 machine_id,
                 analysis_secs,
                 &mut registered_guests,
-                shutdown,
+                token,
             )
             .await;
 
@@ -461,10 +449,10 @@ impl Worker {
         machine_id: i32,
         analysis_secs: u64,
         registered_guests: &mut Vec<malbox_plugin_internal::registry::types::PluginId>,
-        shutdown: &tokio::sync::watch::Receiver<bool>,
+        token: &CancellationToken,
     ) -> Result<TaskOutcome> {
         // Check cancellation before heavy work.
-        if *shutdown.borrow() {
+        if token.is_cancelled() {
             return Ok(TaskOutcome::Cancelled);
         }
 
@@ -502,7 +490,7 @@ impl Worker {
         }
 
         // Check cancellation after VM boot.
-        if *shutdown.borrow() {
+        if token.is_cancelled() {
             return Ok(TaskOutcome::Cancelled);
         }
 
@@ -666,7 +654,7 @@ impl Worker {
         }
 
         // Check cancellation before the long analysis phase.
-        if *shutdown.borrow() {
+        if token.is_cancelled() {
             return Ok(TaskOutcome::Cancelled);
         }
 
@@ -674,7 +662,6 @@ impl Worker {
         // The analysis timeout wraps only this phase. Shutdown cancellation
         // is also checked here via select! so the worker can exit promptly.
         let analysis_timeout = Duration::from_secs(analysis_secs);
-        let mut shutdown_rx = shutdown.clone();
 
         let timed_out = tokio::select! {
             result = tokio::time::timeout(analysis_timeout, async {
@@ -797,7 +784,7 @@ impl Worker {
                     .await;
                 }
             }) => result.is_err(),
-            _ = shutdown_rx.wait_for(|v| *v) => {
+            _ = token.cancelled() => {
                 info!(task_id, "Analysis phase cancelled due to shutdown");
                 return Ok(TaskOutcome::Cancelled);
             }
