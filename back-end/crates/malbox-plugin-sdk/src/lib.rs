@@ -34,14 +34,14 @@
 
 pub mod context;
 pub mod error;
+pub mod guest_plugin;
 pub mod log;
 pub mod plugin;
 pub mod runtime;
 pub mod stash;
 pub mod types;
 
-#[doc(hidden)]
-pub mod execution;
+pub(crate) mod execution;
 
 #[doc(hidden)]
 pub mod internal;
@@ -55,7 +55,8 @@ pub mod testkit;
 pub mod prelude {
     pub use crate::context::Context;
     pub use crate::error::{Result, SdkError};
-    pub use crate::plugin::Plugin;
+    pub use crate::guest_plugin::GuestPlugin;
+    pub use crate::plugin::HostPlugin;
     pub use crate::types::{
         ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecRequest,
         ExecResult, ExecutionContext, ExecutionInfo, GraphEdge, GraphNode, HealthStatus, Indicator,
@@ -78,7 +79,8 @@ pub use malbox_plugin_macros::*;
 // Top-level re-exports
 pub use context::Context;
 pub use error::{Result, SdkError};
-pub use plugin::Plugin;
+pub use guest_plugin::GuestPlugin;
+pub use plugin::HostPlugin;
 pub use types::{
     ExecRequest, ExecResult, ExecutionInfo, HealthStatus, PluginMeta, PluginResult,
     REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION, Task,

@@ -1,14 +1,15 @@
 //! `GuestPluginBridge` — adapts the transport's `GuestPluginHandler` trait
-//! to the SDK's `Plugin` trait.
+//! to the SDK's `HostPlugin` trait.
 //!
 //! This is the central glue between gRPC RPCs and user code. Each RPC
 //! handler delegates to one of:
-//! - The plugin (`Plugin` trait method)
+//! - The plugin (`HostPlugin` trait method)
 //! - A helper module ([`super::files`], [`super::exec`], [`super::stream`])
 
 use crate::context::Context;
+use crate::guest_plugin::GuestPlugin;
 use crate::log::LogBus;
-use crate::plugin::Plugin;
+use crate::plugin::HostPlugin;
 use crate::stash::ResultStash;
 use crate::types::{ExecRequest, ExecutionInfo};
 use malbox_plugin_transport::grpc::proto;
@@ -24,14 +25,14 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 use tonic::Status;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::collector::AutoCollectSection;
 use super::exec::{ExecutionNotifier, default_execute_command, execution_channel};
 use super::files::{pull_file, push_file};
-use super::stream::{execute_task, log_entry_to_proto};
+use super::stream::{execute_task, guest_linear_task, log_entry_to_proto};
 
-/// Bridges incoming gRPC RPCs to the user's `Plugin` trait implementation.
+/// Bridges incoming gRPC RPCs to the user's `HostPlugin` trait implementation.
 pub(super) struct GuestPluginBridge<P: Send + Sync + 'static> {
     pub(super) plugin: Arc<P>,
     pub(super) shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
@@ -49,7 +50,7 @@ pub(super) struct GuestPluginBridge<P: Send + Sync + 'static> {
 }
 
 #[tonic::async_trait]
-impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
+impl<P: HostPlugin> GuestPluginHandler for GuestPluginBridge<P> {
     async fn on_initialize(
         &self,
         _plugin_id: i32,
@@ -321,13 +322,214 @@ impl<P: Plugin> GuestPluginHandler for GuestPluginBridge<P> {
     }
 }
 
+/// Bridge for [`GuestPlugin`] implementations that uses a linear lifecycle
+/// instead of the `on_task` + execution channel dispatch of [`GuestPluginBridge`].
+pub(super) struct GuestLinearBridge<P: Send + Sync + 'static> {
+    pub(super) plugin: Arc<P>,
+    pub(super) shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
+    pub(super) sample_dir: PathBuf,
+    pub(super) artifact_dir: PathBuf,
+    pub(super) external_log_dir: PathBuf,
+    pub(super) log_bus: Arc<LogBus>,
+    pub(super) stash: Arc<ResultStash>,
+    pub(super) auto_collect_artifacts: AutoCollectSection,
+    pub(super) auto_collect_external_logs: AutoCollectSection,
+    pub(super) default_timeout: u64,
+}
+
+#[tonic::async_trait]
+impl<P: GuestPlugin> GuestPluginHandler for GuestLinearBridge<P> {
+    /// No-op for the linear bridge. The guest plugin's `on_start` receives
+    /// task info, which is not available at initialization time.
+    async fn on_initialize(
+        &self,
+        _plugin_id: i32,
+        _config: HashMap<String, String>,
+    ) -> std::result::Result<Vec<String>, String> {
+        Ok(vec![])
+    }
+
+    async fn on_health_check(&self) -> (bool, String) {
+        let plugin = self.plugin.clone();
+        tokio::task::spawn_blocking(move || {
+            let status = plugin.health_check();
+            (status.ready, status.reason)
+        })
+        .await
+        .unwrap_or((false, "health check panicked".to_string()))
+    }
+
+    async fn on_shutdown(&self, _graceful: bool) {
+        // Signal the server to stop. The plugin's on_stop is called inside
+        // the linear task sequence, not here.
+        if let Ok(mut guard) = self.shutdown_tx.lock()
+            && let Some(tx) = guard.take()
+        {
+            let _ = tx.send(());
+        }
+    }
+
+    async fn on_execute_task(
+        &self,
+        task_id: i32,
+        sample_path: String,
+        config: HashMap<String, String>,
+        result_tx: mpsc::Sender<std::result::Result<proto::TaskResult, Status>>,
+    ) {
+        let plugin = self.plugin.clone();
+
+        // Resolve the sample path relative to the sample directory.
+        let full_sample_path = if Path::new(&sample_path).is_relative() && !sample_path.is_empty() {
+            self.sample_dir.join(&sample_path)
+        } else {
+            PathBuf::from(&sample_path)
+        };
+
+        let stash = Arc::clone(&self.stash);
+        let artifact_dir = self.artifact_dir.clone();
+        let external_log_dir = self.external_log_dir.clone();
+        let auto_collect_artifacts = self.auto_collect_artifacts.clone();
+        let auto_collect_external_logs = self.auto_collect_external_logs.clone();
+        let default_timeout = self.default_timeout;
+
+        let _ = tokio::task::spawn_blocking(move || {
+            guest_linear_task(
+                plugin,
+                task_id,
+                full_sample_path,
+                config,
+                result_tx,
+                stash,
+                artifact_dir,
+                external_log_dir,
+                auto_collect_artifacts,
+                auto_collect_external_logs,
+                default_timeout,
+            );
+        })
+        .await;
+    }
+
+    /// No-op for guest plugins -- events are not dispatched to the linear
+    /// lifecycle.
+    async fn on_event(&self, _event: Event) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    async fn on_push_file(&self, dest: &str, data: Vec<u8>) -> std::result::Result<(), String> {
+        push_file(&self.sample_dir, dest, data).await
+    }
+
+    async fn on_pull_file(&self, source: &str) -> std::result::Result<Vec<u8>, String> {
+        pull_file(&self.artifact_dir, source).await
+    }
+
+    /// No-op for the linear bridge -- command execution is handled
+    /// internally by `execute_sample`.
+    async fn on_execute_command(
+        &self,
+        command: &str,
+        _args: &[String],
+        _cwd: Option<&str>,
+        _env: HashMap<String, String>,
+        _timeout_ms: Option<u64>,
+        _background: bool,
+    ) -> std::result::Result<proto::ExecResponse, String> {
+        debug!(
+            command,
+            "on_execute_command called on GuestLinearBridge (no-op)"
+        );
+        Ok(proto::ExecResponse {
+            exit_code: None,
+            stdout: vec![],
+            stderr: vec![],
+            pid: None,
+        })
+    }
+
+    async fn on_stream_logs(&self, include_buffered: bool) -> LogEntryStream {
+        let log_bus = Arc::clone(&self.log_bus);
+
+        let stream = async_stream::stream! {
+            if include_buffered {
+                for entry in log_bus.drain_atomic() {
+                    yield Ok(log_entry_to_proto(entry));
+                }
+            }
+
+            loop {
+                let entries = log_bus.recv_atomic().await;
+                if entries.is_empty() {
+                    break;
+                }
+                for entry in entries {
+                    yield Ok(log_entry_to_proto(entry));
+                }
+            }
+        };
+
+        Box::pin(stream)
+    }
+
+    async fn on_pull_result(
+        &self,
+        handle: String,
+    ) -> std::result::Result<ResultChunkStream, String> {
+        let entry = self
+            .stash
+            .take(&handle)
+            .ok_or_else(|| format!("stash handle not found: {handle}"))?;
+
+        let file = tokio::fs::File::open(&entry.path)
+            .await
+            .map_err(|e| format!("failed to open stashed result: {e}"))?;
+
+        let stash = Arc::clone(&self.stash);
+
+        let stream = async_stream::stream! {
+            use tokio::io::AsyncReadExt;
+            let mut file = file;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut index: u32 = 0;
+            loop {
+                let n = match file.read(&mut buf).await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        yield Err(tonic::Status::internal(format!("read error: {e}")));
+                        stash.cleanup_after_pull(&entry);
+                        return;
+                    }
+                };
+                if n == 0 {
+                    yield Ok(proto::ResultChunk {
+                        data: vec![],
+                        index,
+                        is_last: true,
+                    });
+                    break;
+                }
+                yield Ok(proto::ResultChunk {
+                    data: buf[..n].to_vec(),
+                    index,
+                    is_last: false,
+                });
+                index += 1;
+            }
+
+            stash.cleanup_after_pull(&entry);
+        };
+
+        Ok(Box::pin(stream))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // Minimal plugin impl for testing the bridge.
     struct NoopPlugin;
-    impl Plugin for NoopPlugin {}
+    impl HostPlugin for NoopPlugin {}
 
     fn test_bridge(base_dir: PathBuf) -> GuestPluginBridge<NoopPlugin> {
         let sample_dir = base_dir.join("samples");
