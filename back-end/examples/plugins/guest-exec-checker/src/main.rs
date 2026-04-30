@@ -26,26 +26,21 @@ impl ExecChecker {
     }
 
     #[malbox::on_stop]
-    fn shutdown(&self) -> Result<()> {
-        info!("Exec checker shutting down");
-        Ok(())
-    }
-
-    #[malbox::on_task]
-    fn check(&self, task: Task, ctx: &Context) -> Result<()> {
-        let target = task
+    fn collect(&self, ctx: &Context) -> Result<()> {
+        let target = ctx
+            .task()
             .sample_path()
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        ctx.emit_progress(0.5, "listing running processes")?;
+        ctx.progress(0.5, "listing running processes")?;
 
         let processes = list_processes();
 
         info!(
-            task_id = task.id(),
+            task_id = ctx.task().id(),
             target = target.as_str(),
             process_count = processes.len(),
             "Process listing captured"
@@ -57,7 +52,7 @@ impl ExecChecker {
             processes,
         };
 
-        ctx.push_result(PluginResult::json("exec_status", &status)?)?;
+        ctx.results().push(PluginResult::json("exec_status", &status)?)?;
         Ok(())
     }
 }

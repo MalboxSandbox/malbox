@@ -2,23 +2,17 @@
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 #include <malbox/plugin.hpp>
 #include "malbox_runtime_config.hpp"
 
-class HelloPlugin final : public malbox::Plugin {
+class HelloPlugin final : public malbox::GuestPlugin {
 public:
-    void on_start(const std::unordered_map<std::string, std::string>& config) override {
-        std::printf("[guest-cpp-hello] on_start called with %zu config entries\n",
-                    config.size());
-    }
+    void on_start(const malbox::Context& ctx) override {
+        int32_t task_id = ctx.task().id();
+        std::printf("[guest-cpp-hello] on_start called for task %d\n", task_id);
 
-    void on_task(const malbox::Task& task, const malbox::Context& ctx) override {
-        int32_t task_id = task.id();
-        std::printf("[guest-cpp-hello] on_task called for task %d\n", task_id);
-
-        ctx.emit_progress(0.5, "processing");
+        ctx.progress(0.5, "processing");
 
         // Build a JSON result: {"message": "hello from C++", "task_id": <id>}
         std::string json = R"({"message": "hello from C++", "task_id": )"
@@ -29,10 +23,10 @@ public:
             json.size()
         };
 
-        ctx.push_result(malbox::PluginResult::json("greeting", data));
+        ctx.results().push(malbox::PluginResult::json("greeting", data));
     }
 
-    void on_stop() override {
+    void on_stop(const malbox::Context& /*ctx*/) override {
         std::printf("[guest-cpp-hello] on_stop called\n");
     }
 };
@@ -43,7 +37,6 @@ int main() {
     meta.version     = "0.1.0";
     meta.description = "Example guest plugin written in C++";
     meta.authors     = "Malbox Team";
-    meta.plugin_type = malbox::PluginType::Guest;
     meta.state       = malbox::PluginState::Ephemeral;
     meta.execution   = malbox::ExecutionContext::Exclusive;
 
