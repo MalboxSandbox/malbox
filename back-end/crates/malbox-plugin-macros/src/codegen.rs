@@ -33,7 +33,7 @@ pub fn generate_main(struct_name: &Ident, kind: PluginKind, is_unit_struct: bool
                 // Tracing + LogBus are initialised inside run() so the gRPC
                 // log stream and the tracing layer share the same bus.
                 let plugin = #plugin_init;
-                let runtime = malbox_plugin_sdk::runtime::guest::GuestPluginRuntime
+                let runtime = malbox_plugin_sdk::runtime::guest::GuestRuntime
                     ::with_config(plugin, #struct_name::__MALBOX_RUNTIME);
                 runtime.run_blocking().expect("guest plugin runtime error");
             }

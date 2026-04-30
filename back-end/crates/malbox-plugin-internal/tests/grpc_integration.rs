@@ -1,12 +1,15 @@
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::grpc::proto;
 use malbox_plugin_internal::transport::messages::events::Event;
-use malbox_plugin_internal::transport::plugin::{GrpcServer, GuestPluginHandler, LogEntryStream};
+use malbox_plugin_internal::transport::plugin::{
+    FileChunkStream, GuestPluginService, GuestPluginServiceServer, LogEntryStream,
+    ResultChunkStream, TaskResultStream,
+};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
-use tonic::Status;
+use tonic::{Request, Response, Status};
 
 struct TestHandler {
     /// Simple in-memory stash for pull_result integration tests.
@@ -22,32 +25,61 @@ impl TestHandler {
 }
 
 #[tonic::async_trait]
-impl GuestPluginHandler for TestHandler {
-    async fn on_initialize(
+impl GuestPluginService for TestHandler {
+    type ExecuteTaskStream = TaskResultStream;
+    type PullFileStream = FileChunkStream;
+    type StreamLogsStream = LogEntryStream;
+    type PullResultStream = ResultChunkStream;
+
+    async fn initialize(
         &self,
-        plugin_id: i32,
-        _config: HashMap<String, String>,
-    ) -> Result<Vec<String>, String> {
-        if plugin_id > 0 {
-            Ok(vec!["analyze".to_string(), "report".to_string()])
+        request: Request<proto::InitializeRequest>,
+    ) -> Result<Response<proto::InitializeResponse>, Status> {
+        let req = request.into_inner();
+        if req.plugin_id > 0 {
+            Ok(Response::new(proto::InitializeResponse {
+                success: true,
+                error_message: String::new(),
+                capabilities: vec!["analyze".to_string(), "report".to_string()],
+            }))
         } else {
-            Err("invalid plugin ID".to_string())
+            Ok(Response::new(proto::InitializeResponse {
+                success: false,
+                error_message: "invalid plugin ID".to_string(),
+                capabilities: vec![],
+            }))
         }
     }
 
-    async fn on_health_check(&self) -> (bool, String) {
-        (true, String::new())
+    async fn health_check(
+        &self,
+        _request: Request<proto::HealthCheckRequest>,
+    ) -> Result<Response<proto::HealthCheckResponse>, Status> {
+        Ok(Response::new(proto::HealthCheckResponse {
+            ready: true,
+            reason: String::new(),
+        }))
     }
 
-    async fn on_shutdown(&self, _graceful: bool) {}
-
-    async fn on_execute_task(
+    async fn shutdown(
         &self,
-        task_id: i32,
-        sample_path: String,
-        _config: HashMap<String, String>,
-        result_tx: mpsc::Sender<Result<proto::TaskResult, Status>>,
-    ) {
+        _request: Request<proto::ShutdownRequest>,
+    ) -> Result<Response<proto::ShutdownResponse>, Status> {
+        Ok(Response::new(proto::ShutdownResponse {
+            acknowledged: true,
+        }))
+    }
+
+    async fn execute_task(
+        &self,
+        request: Request<proto::TaskRequest>,
+    ) -> Result<Response<Self::ExecuteTaskStream>, Status> {
+        let req = request.into_inner();
+        let task_id = req.task_id;
+        let sample_path = req.sample_path;
+
+        let (tx, rx) = mpsc::channel(16);
+
         if sample_path == "/large" {
             use prost::Message;
 
@@ -66,86 +98,111 @@ impl GuestPluginHandler for TestHandler {
                 size_bytes: (5 * 1024 * 1024) as u64,
             };
 
-            // Emit a RESULT_REF and then a final marker.
-            let _ = result_tx
-                .send(Ok(proto::TaskResult {
-                    task_id,
-                    result_name: String::new(),
-                    data: ref_msg.encode_to_vec(),
-                    format: proto::ResultFormat::Unspecified.into(),
-                    is_final: false,
-                    kind: proto::ResultKind::ResultRef.into(),
-                }))
-                .await;
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(Ok(proto::TaskResult {
+                        task_id,
+                        result_name: String::new(),
+                        data: ref_msg.encode_to_vec(),
+                        format: proto::ResultFormat::Unspecified.into(),
+                        is_final: false,
+                        kind: proto::ResultKind::ResultRef.into(),
+                    }))
+                    .await;
 
-            let _ = result_tx
-                .send(Ok(proto::TaskResult {
-                    task_id,
-                    result_name: String::new(),
-                    data: vec![],
-                    format: proto::ResultFormat::Unspecified.into(),
-                    is_final: true,
-                    kind: proto::ResultKind::Result.into(),
-                }))
-                .await;
-            return;
+                let _ = tx
+                    .send(Ok(proto::TaskResult {
+                        task_id,
+                        result_name: String::new(),
+                        data: vec![],
+                        format: proto::ResultFormat::Unspecified.into(),
+                        is_final: true,
+                        kind: proto::ResultKind::Result.into(),
+                    }))
+                    .await;
+            });
+        } else {
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(Ok(proto::TaskResult {
+                        task_id,
+                        result_name: "partial".to_string(),
+                        data: b"partial data".to_vec(),
+                        format: proto::ResultFormat::Json.into(),
+                        is_final: false,
+                        kind: proto::ResultKind::Result.into(),
+                    }))
+                    .await;
+
+                let _ = tx
+                    .send(Ok(proto::TaskResult {
+                        task_id,
+                        result_name: "final".to_string(),
+                        data: b"final data".to_vec(),
+                        format: proto::ResultFormat::Bytes.into(),
+                        is_final: true,
+                        kind: proto::ResultKind::Result.into(),
+                    }))
+                    .await;
+                // tx is dropped here, closing the stream
+            });
         }
 
-        // Existing small-result path — stream two inline results.
-        let _ = result_tx
-            .send(Ok(proto::TaskResult {
-                task_id,
-                result_name: "partial".to_string(),
-                data: b"partial data".to_vec(),
-                format: proto::ResultFormat::Json.into(),
-                is_final: false,
-                kind: proto::ResultKind::Result.into(),
-            }))
-            .await;
-
-        let _ = result_tx
-            .send(Ok(proto::TaskResult {
-                task_id,
-                result_name: "final".to_string(),
-                data: b"final data".to_vec(),
-                format: proto::ResultFormat::Bytes.into(),
-                is_final: true,
-                kind: proto::ResultKind::Result.into(),
-            }))
-            .await;
-        // tx is dropped here, closing the stream
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok(Response::new(Box::pin(stream)))
     }
 
-    async fn on_event(&self, _event: Event) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn on_push_file(&self, _dest: &str, _data: Vec<u8>) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn on_pull_file(&self, _source: &str) -> Result<Vec<u8>, String> {
-        Ok(b"test file contents".to_vec())
-    }
-
-    async fn on_execute_command(
+    async fn notify_event(
         &self,
-        command: &str,
-        _args: &[String],
-        _cwd: Option<&str>,
-        _env: HashMap<String, String>,
-        _timeout_ms: Option<u64>,
-        _background: bool,
-    ) -> Result<proto::ExecResponse, String> {
-        Ok(proto::ExecResponse {
+        _request: Request<proto::EventNotification>,
+    ) -> Result<Response<proto::EventAck>, Status> {
+        Ok(Response::new(proto::EventAck {
+            success: true,
+            error_message: String::new(),
+        }))
+    }
+
+    async fn push_file(
+        &self,
+        _request: Request<tonic::Streaming<proto::FileChunk>>,
+    ) -> Result<Response<proto::FileTransferResponse>, Status> {
+        Ok(Response::new(proto::FileTransferResponse {
+            success: true,
+            error_message: String::new(),
+        }))
+    }
+
+    async fn pull_file(
+        &self,
+        _request: Request<proto::PullFileRequest>,
+    ) -> Result<Response<Self::PullFileStream>, Status> {
+        let stream = async_stream::stream! {
+            yield Ok(proto::FileChunk {
+                path: String::new(),
+                data: b"test file contents".to_vec(),
+                is_last: true,
+            });
+        };
+        Ok(Response::new(Box::pin(stream)))
+    }
+
+    async fn execute_command(
+        &self,
+        request: Request<proto::ExecRequest>,
+    ) -> Result<Response<proto::ExecResponse>, Status> {
+        let req = request.into_inner();
+        Ok(Response::new(proto::ExecResponse {
             exit_code: Some(0),
-            stdout: format!("ran: {}", command).into_bytes(),
+            stdout: format!("ran: {}", req.command).into_bytes(),
             stderr: vec![],
             pid: None,
-        })
+        }))
     }
 
-    async fn on_stream_logs(&self, _include_buffered: bool) -> LogEntryStream {
+    async fn stream_logs(
+        &self,
+        _request: Request<proto::LogStreamRequest>,
+    ) -> Result<Response<Self::StreamLogsStream>, Status> {
         let stream = async_stream::stream! {
             for i in 0..10_000u64 {
                 yield Ok(proto::LogEntry {
@@ -157,17 +214,18 @@ impl GuestPluginHandler for TestHandler {
                 });
             }
         };
-        Box::pin(stream)
+        Ok(Response::new(Box::pin(stream)))
     }
 
-    async fn on_pull_result(
+    async fn pull_result(
         &self,
-        handle: String,
-    ) -> Result<malbox_plugin_internal::transport::plugin::ResultChunkStream, String> {
+        request: Request<proto::PullResultRequest>,
+    ) -> Result<Response<Self::PullResultStream>, Status> {
+        let handle = request.into_inner().handle;
         let data = self.stash.lock().unwrap().remove(&handle);
 
         match data {
-            None => Err(format!("unknown handle: {handle}")),
+            None => Err(Status::not_found(format!("unknown handle: {handle}"))),
             Some(bytes) => {
                 let stream = async_stream::stream! {
                     let chunk_size = 64 * 1024;
@@ -185,7 +243,7 @@ impl GuestPluginHandler for TestHandler {
                         offset = end;
                     }
                 };
-                Ok(Box::pin(stream))
+                Ok(Response::new(Box::pin(stream)))
             }
         }
     }
@@ -199,9 +257,13 @@ async fn setup() -> GrpcClient {
     // Drop the listener so the port is free for the server
     drop(listener);
 
-    let server = GrpcServer::new(TestHandler::new());
+    let server = GuestPluginServiceServer::new(TestHandler::new());
     tokio::spawn(async move {
-        server.serve(bound_addr).await.unwrap();
+        tonic::transport::Server::builder()
+            .add_service(server)
+            .serve(bound_addr)
+            .await
+            .unwrap();
     });
 
     // Give the server time to start listening

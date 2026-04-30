@@ -11,7 +11,7 @@ use std::ffi::CString;
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
 use malbox_plugin_sdk::plugin::HostPlugin;
-use malbox_plugin_sdk::types::{ExecRequest, ExecResult, HealthStatus, Task};
+use malbox_plugin_sdk::types::{HealthStatus, Task};
 use malbox_plugin_transport::messages::events::Event;
 
 use crate::error::last_error_string;
@@ -195,37 +195,6 @@ impl HostPlugin for VtablePlugin {
         // SAFETY: c_event is a Copy value; ctx_ptr is valid for the call duration.
         let rc = unsafe { on_event(self.vtable.plugin_ptr, c_event, ctx_ptr) };
         check_rc(rc)
-    }
-
-    fn on_execute_command(&self, request: &ExecRequest) -> Option<ExecResult> {
-        let on_execute_command = self.vtable.on_execute_command?;
-
-        let req_data = crate::ffi_exec::ExecRequestData::from_exec_request(request);
-        let mut result_data = crate::ffi_exec::ExecResultData::default();
-
-        let req_ptr = &req_data as *const crate::ffi_exec::ExecRequestData
-            as *const crate::ffi_types::MalboxExecRequest;
-        let result_ptr = &mut result_data as *mut crate::ffi_exec::ExecResultData
-            as *mut crate::ffi_types::MalboxExecResult;
-
-        let rc = unsafe { on_execute_command(self.vtable.plugin_ptr, req_ptr, result_ptr) };
-
-        match rc {
-            0 => None,
-            1 => {
-                let mut result = ExecResult::new(result_data.exit_code);
-                result.set_stdout(String::from_utf8_lossy(&result_data.stdout).into_owned());
-                result.set_stderr(String::from_utf8_lossy(&result_data.stderr).into_owned());
-                if let Some(pid) = result_data.pid {
-                    result.set_pid(pid);
-                }
-                Some(result)
-            }
-            _ => {
-                // Non-zero, non-one return means error. Logged via last_error.
-                None
-            }
-        }
     }
 }
 

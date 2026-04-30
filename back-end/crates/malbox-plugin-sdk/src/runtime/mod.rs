@@ -19,7 +19,7 @@ pub mod guest;
 pub mod host;
 
 #[cfg(feature = "guest")]
-pub use guest::{GuestLinearRuntime, GuestPluginRuntime, GuestRuntimeConfig};
+pub use guest::{GuestRuntime, GuestRuntimeConfig};
 
 #[cfg(feature = "host")]
 pub use host::HostRuntime;

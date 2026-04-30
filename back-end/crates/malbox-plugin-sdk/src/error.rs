@@ -93,11 +93,11 @@ mod tests {
     #[test]
     fn timeout_variant_formats_correctly() {
         let err = SdkError::Timeout {
-            operation: "wait_for_execution",
+            operation: "some_operation",
             elapsed: Duration::from_secs(5),
         };
         let s = err.to_string();
-        assert!(s.contains("wait_for_execution"));
+        assert!(s.contains("some_operation"));
         assert!(s.contains("timed out"));
     }
 

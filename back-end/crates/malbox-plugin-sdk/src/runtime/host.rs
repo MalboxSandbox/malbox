@@ -79,7 +79,7 @@ impl<P: HostPlugin> HostRuntime<P> {
     /// Run the plugin event loop. Blocks until shutdown.
     #[instrument(skip_all, fields(plugin = %self.meta.name), err)]
     pub fn run(&self) -> Result<()> {
-        let event_ctx = Context::new(&self.emitter, None, None);
+        let event_ctx = Context::new(&self.emitter, None);
 
         // Call on_start
         self.plugin.on_start(HashMap::new())?;
@@ -160,7 +160,7 @@ impl<P: HostPlugin> HostRuntime<P> {
 
         let task = Task::new(task_id, PathBuf::from(&request.sample_path), request.config);
 
-        let task_ctx = Context::new(&self.emitter, Some(tx), None).with_task_id(task_id);
+        let task_ctx = Context::new(&self.emitter, Some(tx)).with_task_id(task_id);
 
         // Use std::thread::scope for safe borrowing of &self references in drain thread
         let task_result = std::thread::scope(|s| {

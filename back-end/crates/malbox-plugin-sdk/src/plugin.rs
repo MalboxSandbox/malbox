@@ -2,7 +2,7 @@
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::types::{ExecRequest, ExecResult, HealthStatus, Task};
+use crate::types::{HealthStatus, Task};
 use malbox_plugin_transport::messages::events::Event;
 use std::collections::HashMap;
 
@@ -42,13 +42,6 @@ pub trait HostPlugin: Send + Sync + 'static {
         let _ = (event, ctx);
         Ok(())
     }
-
-    /// Optionally override command execution on the guest OS.
-    /// Return `Some(result)` to handle it, `None` for runtime default.
-    fn on_execute_command(&self, request: &ExecRequest) -> Option<ExecResult> {
-        let _ = request;
-        None
-    }
 }
 
 #[cfg(test)]
@@ -73,10 +66,6 @@ mod tests {
         // health_check default returns ready
         let health = plugin.health_check();
         assert!(health.ready);
-
-        // on_execute_command default returns None
-        let req = ExecRequest::new("cmd".into(), vec![], None, HashMap::new(), None, false);
-        assert!(plugin.on_execute_command(&req).is_none());
     }
 
     // TaskOnlyPlugin: verify on_task override works
@@ -93,7 +82,7 @@ mod tests {
         let plugin = TaskOnlyPlugin;
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
         let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx), None).with_task_id(1);
+        let ctx = Context::new(&emitter, Some(tx)).with_task_id(1);
         let task = Task::new(1, std::path::PathBuf::from("/tmp/sample"), HashMap::new());
 
         plugin.on_task(task, &ctx).expect("on_task should succeed");
@@ -108,24 +97,10 @@ mod tests {
     fn on_event_default_is_noop() {
         let plugin = MinimalPlugin;
         let emitter = ();
-        let ctx = Context::new(&emitter, None, None);
+        let ctx = Context::new(&emitter, None);
         let event = Event::TaskCreated { task_id: 42 };
 
         let result = plugin.on_event(event, &ctx);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn on_execute_command_default_returns_none() {
-        let plugin = MinimalPlugin;
-        let req = ExecRequest::new(
-            "notepad.exe".into(),
-            vec!["file.txt".into()],
-            Some("C:\\".into()),
-            HashMap::new(),
-            Some(std::time::Duration::from_secs(30)),
-            true,
-        );
-        assert!(plugin.on_execute_command(&req).is_none());
     }
 }

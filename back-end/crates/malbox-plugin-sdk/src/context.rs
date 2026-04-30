@@ -1,9 +1,8 @@
 //! Plugin execution context for communicating with the daemon at runtime.
 
 use crate::error::{Result, SdkError};
-use crate::execution::ExecutionWaiter;
 use crate::stash::{ResultStash, StashFormat};
-use crate::types::{ExecutionInfo, PluginResult};
+use crate::types::PluginResult;
 use malbox_plugin_transport::grpc::proto;
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
@@ -11,7 +10,6 @@ use prost::Message;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::{info, warn};
 
 /// Sender half of the result streaming channel.
@@ -22,10 +20,6 @@ use tracing::{info, warn};
 pub type ResultSender =
     tokio::sync::mpsc::Sender<std::result::Result<proto::TaskResult, tonic::Status>>;
 
-/// Fallback timeout for `wait_for_execution` when neither the task config nor
-/// the caller provides an explicit value.
-const DEFAULT_EXECUTION_TIMEOUT: Duration = Duration::from_secs(120);
-
 /// Runtime context available to plugin handler methods.
 ///
 /// Provides methods for emitting progress updates, events, and warnings
@@ -35,17 +29,10 @@ pub struct Context<'a> {
     /// Optional channel for streaming results back to the daemon.
     /// Present during `on_task` handlers, `None` during lifecycle callbacks.
     result_tx: Option<ResultSender>,
-    /// Optional waiter for execution synchronization.
-    /// Present during `on_task` handlers, `None` during lifecycle callbacks.
-    execution_waiter: Option<ExecutionWaiter>,
     /// Current task ID (needed for result messages). Defaults to 0.
     task_id: i32,
     /// Optional stash for offloading large payloads to disk.
     stash: Option<Arc<ResultStash>>,
-    /// Analysis timeout propagated from the scheduler. When set,
-    /// `wait_for_execution()` uses this instead of the hardcoded fallback
-    /// so plugins automatically respect the user-requested timeout.
-    analysis_timeout: Option<Duration>,
     /// Canonical paths of files that have been explicitly sent via
     /// `push_result(File { .. })` or marked via `mark_collected()`.
     /// Used by artifact auto-collection to avoid sending duplicates.
@@ -53,23 +40,17 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    /// Create a new context wrapping a transport emitter with optional result
-    /// channel and execution waiter.
+    /// Create a new context wrapping a transport emitter with an optional
+    /// result channel.
     ///
     /// Used by the runtime; downstream test code should use
     /// [`Context::test_new`](crate::testkit) under the `testkit` feature.
-    pub(crate) fn new(
-        emitter: &'a dyn TransportEmitter,
-        result_tx: Option<ResultSender>,
-        execution_waiter: Option<ExecutionWaiter>,
-    ) -> Self {
+    pub(crate) fn new(emitter: &'a dyn TransportEmitter, result_tx: Option<ResultSender>) -> Self {
         Self {
             emitter,
             result_tx,
-            execution_waiter,
             task_id: 0,
             stash: None,
-            analysis_timeout: None,
             claimed_paths: std::sync::Mutex::new(HashSet::new()),
         }
     }
@@ -86,16 +67,6 @@ impl<'a> Context<'a> {
     #[must_use = "with_stash consumes self and returns a new Context"]
     pub fn with_stash(mut self, stash: Arc<ResultStash>) -> Self {
         self.stash = Some(stash);
-        self
-    }
-
-    /// Set the analysis timeout propagated from the scheduler. When set,
-    /// `wait_for_execution()` will use this duration instead of the
-    /// hardcoded fallback, so the plugin automatically respects the
-    /// user-requested timeout without parsing config manually.
-    #[must_use = "with_analysis_timeout consumes self and returns a new Context"]
-    pub fn with_analysis_timeout(mut self, timeout: Duration) -> Self {
-        self.analysis_timeout = Some(timeout);
         self
     }
 
@@ -214,29 +185,6 @@ impl<'a> Context<'a> {
         tx.blocking_send(Ok(task_result))
             .map_err(|e| SdkError::Channel(format!("push_result: {e}")))?;
         Ok(())
-    }
-
-    /// Block until sample execution info is available.
-    ///
-    /// Uses the analysis timeout propagated from the scheduler if set,
-    /// otherwise falls back to 120 seconds. Returns an error if no
-    /// execution waiter is configured (i.e. called outside of `on_task`).
-    pub fn wait_for_execution(&self) -> Result<ExecutionInfo> {
-        let timeout = self.analysis_timeout.unwrap_or(DEFAULT_EXECUTION_TIMEOUT);
-        self.wait_for_execution_timeout(timeout)
-    }
-
-    /// Block until sample execution info is available, with a custom timeout.
-    ///
-    /// Returns an error if no execution waiter is configured or if the
-    /// timeout expires before execution starts.
-    pub fn wait_for_execution_timeout(&self, timeout: Duration) -> Result<ExecutionInfo> {
-        match self.execution_waiter {
-            Some(ref waiter) => waiter.wait(timeout),
-            None => Err(SdkError::InvalidContext(
-                "wait_for_execution called outside on_task",
-            )),
-        }
     }
 
     /// Mark a file as already handled, preventing artifact auto-collection
@@ -359,40 +307,9 @@ mod tests {
     }
 
     #[test]
-    fn wait_for_execution_without_waiter_errors() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
-        let result = ctx.wait_for_execution();
-        assert!(matches!(
-            result,
-            Err(SdkError::InvalidContext(
-                "wait_for_execution called outside on_task"
-            ))
-        ));
-    }
-
-    #[test]
-    fn wait_for_execution_with_waiter_works() {
-        use crate::execution;
-        use crate::types::ExecutionInfo;
-
-        let emitter = ();
-        let (notifier, waiter) = execution::execution_channel();
-        let ctx = Context::new(&emitter, None, Some(waiter));
-
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            notifier.notify(ExecutionInfo::new(Some(100), "sample.exe".into(), vec![]));
-        });
-
-        let info = ctx.wait_for_execution().unwrap();
-        assert_eq!(info.pid(), Some(100));
-    }
-
-    #[test]
     fn push_result_outside_on_task_returns_invalid_context() {
         let emitter = ();
-        let ctx = Context::new(&emitter, None, None);
+        let ctx = Context::new(&emitter, None);
         let result = ctx.push_result(crate::types::PluginResult::bytes("x", vec![1, 2]));
         assert!(matches!(
             result,
@@ -406,7 +323,7 @@ mod tests {
     fn push_result_inside_on_task_sends_to_channel() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
         let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx), None).with_task_id(42);
+        let ctx = Context::new(&emitter, Some(tx)).with_task_id(42);
 
         ctx.push_result(crate::types::PluginResult::bytes("r1", vec![1, 2, 3]))
             .expect("push should succeed");
@@ -438,7 +355,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
         let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx), None)
+        let ctx = Context::new(&emitter, Some(tx))
             .with_task_id(7)
             .with_stash(Arc::clone(&stash));
 
@@ -480,7 +397,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
         let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx), None)
+        let ctx = Context::new(&emitter, Some(tx))
             .with_task_id(8)
             .with_stash(Arc::clone(&stash));
 
@@ -515,7 +432,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
         let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx), None)
+        let ctx = Context::new(&emitter, Some(tx))
             .with_task_id(9)
             .with_stash(Arc::clone(&stash));
 

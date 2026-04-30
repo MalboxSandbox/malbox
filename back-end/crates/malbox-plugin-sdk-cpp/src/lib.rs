@@ -43,7 +43,6 @@ pub mod error;
 pub mod ffi_callbacks;
 pub mod ffi_context;
 pub mod ffi_events;
-pub mod ffi_exec;
 mod ffi_guest_callbacks;
 pub mod ffi_log;
 pub mod ffi_result;

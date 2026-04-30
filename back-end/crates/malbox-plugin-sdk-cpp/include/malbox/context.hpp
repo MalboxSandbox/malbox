@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 #include <vector>
 #include "malbox_plugin.h"
@@ -94,43 +93,6 @@ public:
         detail::check_rc(malbox_context_flush_results(
             ptr_, names.data(), datas.data(), data_lens.data(),
             formats.data(), names.size()));
-    }
-
-    /// Block until sample execution begins. Returns execution metadata.
-    ExecutionInfo wait_for_execution() const {
-        uint32_t pid = 0;
-        const char* cmd = nullptr;
-        const char* const* args = nullptr;
-        size_t args_count = 0;
-        detail::check_rc(malbox_context_wait_for_execution(
-            ptr_, &pid, &cmd, &args, &args_count));
-        ExecutionInfo info;
-        info.pid = pid;
-        info.command = cmd ? std::string(cmd) : std::string();
-        info.args.reserve(args_count);
-        for (size_t i = 0; i < args_count; ++i) {
-            info.args.emplace_back(args[i] ? args[i] : "");
-        }
-        return info;
-    }
-
-    /// Block with custom timeout (milliseconds).
-    ExecutionInfo wait_for_execution(std::chrono::milliseconds timeout) const {
-        uint32_t pid = 0;
-        const char* cmd = nullptr;
-        const char* const* args = nullptr;
-        size_t args_count = 0;
-        detail::check_rc(malbox_context_wait_for_execution_timeout(
-            ptr_, static_cast<uint64_t>(timeout.count()),
-            &pid, &cmd, &args, &args_count));
-        ExecutionInfo info;
-        info.pid = pid;
-        info.command = cmd ? std::string(cmd) : std::string();
-        info.args.reserve(args_count);
-        for (size_t i = 0; i < args_count; ++i) {
-            info.args.emplace_back(args[i] ? args[i] : "");
-        }
-        return info;
     }
 
 private:

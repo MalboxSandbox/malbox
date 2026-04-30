@@ -11,7 +11,6 @@ struct FoundHandlers {
     start_method: Option<StartMethod>,
     stop_method: Option<syn::Ident>,
     health_check_method: Option<syn::Ident>,
-    execute_command_method: Option<syn::Ident>,
     event_handlers: Vec<FoundEventHandler>,
 }
 
@@ -126,7 +125,7 @@ fn first_param_type(method: &syn::ImplItemFn) -> Option<syn::Type> {
 /// Expand `#[malbox::handlers]` on an impl block.
 ///
 /// Scans for methods tagged with `#[on_task]`, `#[on_start]`, `#[on_stop]`,
-/// `#[health_check]`, `#[on_execute_command]`, `#[on_event(...)]` (or their
+/// `#[health_check]`, `#[on_event(...)]` (or their
 /// `#[malbox::...]` equivalents), strips those attributes, and generates a
 /// single `impl HostPlugin for T` block with only the annotated methods.
 pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
@@ -139,7 +138,6 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
         start_method: None,
         stop_method: None,
         health_check_method: None,
-        execute_command_method: None,
         event_handlers: Vec::new(),
     };
 
@@ -164,9 +162,6 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
                 } else if is_handler_attr(attr, "health_check") {
                     to_strip.push(i);
                     found.health_check_method = Some(method.sig.ident.clone());
-                } else if is_handler_attr(attr, "on_execute_command") {
-                    to_strip.push(i);
-                    found.execute_command_method = Some(method.sig.ident.clone());
                 } else if is_handler_attr(attr, "on_event") {
                     to_strip.push(i);
                     let args: EventAttrArgs = attr.parse_args()?;
@@ -255,30 +250,6 @@ fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenSt
         }
     });
 
-    let on_execute_command = found.execute_command_method.as_ref().map(|method_name| {
-        quote! {
-            fn on_execute_command(
-                &self,
-                request: &malbox_plugin_sdk::types::ExecRequest,
-            ) -> Option<malbox_plugin_sdk::types::ExecResult> {
-                match self.#method_name(
-                    request.command(),
-                    request.args(),
-                    request.cwd(),
-                    request.env(),
-                    request.timeout(),
-                    request.background(),
-                ) {
-                    Ok(result) => Some(result),
-                    Err(e) => {
-                        tracing::error!("execute_command error: {}", e);
-                        None
-                    }
-                }
-            }
-        }
-    });
-
     let on_event = generate_on_event(&found.event_handlers);
 
     // Collect all generated methods — only those that were annotated
@@ -287,7 +258,6 @@ fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenSt
         on_start.as_ref(),
         on_stop.as_ref(),
         health_check.as_ref(),
-        on_execute_command.as_ref(),
         on_event.as_ref(),
     ]
     .into_iter()

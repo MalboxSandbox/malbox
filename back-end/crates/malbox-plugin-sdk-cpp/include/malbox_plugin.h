@@ -133,22 +133,6 @@ typedef uint8_t MalboxPluginType;
 typedef struct MalboxContext MalboxContext;
 
 /**
- * Opaque handle representing an execute command request.
- *
- * C/C++ code accesses fields via the `malbox_exec_request_*` accessor
- * functions; it must never dereference the pointer directly.
- */
-typedef struct MalboxExecRequest MalboxExecRequest;
-
-/**
- * Opaque handle representing an execute command result (filled by plugin).
- *
- * C/C++ code fills fields via the `malbox_exec_result_*` setter
- * functions; it must never dereference the pointer directly.
- */
-typedef struct MalboxExecResult MalboxExecResult;
-
-/**
  * Opaque handle representing a `ResultBuilder` (defined in `ffi_result`).
  *
  * C/C++ code must only interact with a `MalboxResultBuilder` through the
@@ -258,15 +242,6 @@ typedef struct MalboxPluginVtable {
      * Arguments: `plugin_ptr`, flat event (tag + id), context handle.
      */
     int32_t (*on_event)(void*, struct MalboxEvent, const struct MalboxContext*);
-    /**
-     * Called when the daemon requests command execution on the guest.
-     *
-     * Arguments: `plugin_ptr`, request handle (access via `malbox_exec_request_*`
-     * accessor functions), result handle (fill via `malbox_exec_result_*` setter
-     * functions).
-     * Returns 0 to use runtime default, 1 if plugin handled it, -1 on error.
-     */
-    int32_t (*on_execute_command)(void*, const struct MalboxExecRequest*, struct MalboxExecResult*);
 } MalboxPluginVtable;
 
 /**
@@ -474,179 +449,6 @@ int32_t malbox_context_flush_results(const struct MalboxContext *ctx,
                                      uintptr_t count);
 
 /**
- * Block until sample execution begins. Returns execution metadata.
- *
- * On success, writes PID to `*out_pid` (or 0 if no PID), command to `*out_command`
- * (pointer valid until next FFI call on this thread), args array to `*out_args`
- * with count in `*out_args_count`, and returns 0.
- * Returns -1 on timeout or if not in an on_task context.
- *
- * `out_args` and `out_args_count` may be null if the caller does not need
- * the argument list.
- *
- * # Safety
- * `ctx` must be valid. `out_pid` and `out_command` must be valid writable pointers.
- * `out_args` and `out_args_count`, if non-null, must be valid writable pointers.
- */
-int32_t malbox_context_wait_for_execution(const struct MalboxContext *ctx,
-                                          uint32_t *out_pid,
-                                          const char **out_command,
-                                          const char *const **out_args,
-                                          uintptr_t *out_args_count);
-
-/**
- * Block until sample execution begins, with a custom timeout in milliseconds.
- *
- * Same as `malbox_context_wait_for_execution` but with explicit timeout.
- *
- * # Safety
- * Same as `malbox_context_wait_for_execution`.
- */
-int32_t malbox_context_wait_for_execution_timeout(const struct MalboxContext *ctx,
-                                                  uint64_t timeout_ms,
-                                                  uint32_t *out_pid,
-                                                  const char **out_command,
-                                                  const char *const **out_args,
-                                                  uintptr_t *out_args_count);
-
-/**
- * Get the command string from an exec request.
- *
- * Returns a pointer to a null-terminated C string. The pointer is valid
- * for the duration of the `on_execute_command` callback. Returns null if
- * `req` is null.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-const char *malbox_exec_request_get_command(const struct MalboxExecRequest *req);
-
-/**
- * Get the number of arguments in the exec request.
- *
- * Returns 0 if `req` is null.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-uintptr_t malbox_exec_request_get_args_count(const struct MalboxExecRequest *req);
-
-/**
- * Get a single argument by index from the exec request.
- *
- * Returns null if `req` is null or `index` is out of range.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-const char *malbox_exec_request_get_arg(const struct MalboxExecRequest *req, uintptr_t index);
-
-/**
- * Get the working directory from the exec request.
- *
- * Returns null if `req` is null or no cwd was specified.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-const char *malbox_exec_request_get_cwd(const struct MalboxExecRequest *req);
-
-/**
- * Get the number of environment variable entries in the exec request.
- *
- * Returns 0 if `req` is null.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-uintptr_t malbox_exec_request_get_env_count(const struct MalboxExecRequest *req);
-
-/**
- * Get an environment variable key/value pair by index.
- *
- * On success, writes the key and value pointers to `out_key` and `out_value`
- * and returns 0. Returns -1 if `req` is null or `index` is out of range.
- *
- * # Safety
- * - `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- * - `out_key` and `out_value` must be valid writable pointers.
- */
-int32_t malbox_exec_request_get_env_entry(const struct MalboxExecRequest *req,
-                                          uintptr_t index,
-                                          const char **out_key,
-                                          const char **out_value);
-
-/**
- * Get the timeout in milliseconds from the exec request.
- *
- * Returns -1 if no timeout was specified, or if `req` is null.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-int64_t malbox_exec_request_get_timeout_ms(const struct MalboxExecRequest *req);
-
-/**
- * Check whether the request is for a background execution.
- *
- * Returns false if `req` is null.
- *
- * # Safety
- * `req` must be a valid `*const ExecRequestData` cast to `*const MalboxExecRequest`.
- */
-bool malbox_exec_request_is_background(const struct MalboxExecRequest *req);
-
-/**
- * Set the exit code on an exec result.
- *
- * Returns 0 on success, -1 if `result` is null.
- *
- * # Safety
- * `result` must be a valid `*mut ExecResultData` cast to `*mut MalboxExecResult`.
- */
-int32_t malbox_exec_result_set_exit_code(struct MalboxExecResult *result, int32_t code);
-
-/**
- * Set the stdout data on an exec result.
- *
- * `data` points to `len` bytes. Pass null with len 0 for empty stdout.
- *
- * Returns 0 on success, -1 if `result` is null.
- *
- * # Safety
- * - `result` must be a valid `*mut ExecResultData` cast to `*mut MalboxExecResult`.
- * - If `len > 0`, `data` must point to at least `len` readable bytes.
- */
-int32_t malbox_exec_result_set_stdout(struct MalboxExecResult *result,
-                                      const uint8_t *data,
-                                      uintptr_t len);
-
-/**
- * Set the stderr data on an exec result.
- *
- * `data` points to `len` bytes. Pass null with len 0 for empty stderr.
- *
- * Returns 0 on success, -1 if `result` is null.
- *
- * # Safety
- * - `result` must be a valid `*mut ExecResultData` cast to `*mut MalboxExecResult`.
- * - If `len > 0`, `data` must point to at least `len` readable bytes.
- */
-int32_t malbox_exec_result_set_stderr(struct MalboxExecResult *result,
-                                      const uint8_t *data,
-                                      uintptr_t len);
-
-/**
- * Set the PID on an exec result.
- *
- * Returns 0 on success, -1 if `result` is null.
- *
- * # Safety
- * `result` must be a valid `*mut ExecResultData` cast to `*mut MalboxExecResult`.
- */
-int32_t malbox_exec_result_set_pid(struct MalboxExecResult *result, uint32_t pid);
-
-/**
  * Emit a log entry at the given numeric level (0=Trace .. 4=Error).
  *
  * Unknown level values are clamped to `Error`.
@@ -808,29 +610,6 @@ int32_t malbox_run_host_plugin(struct MalboxPluginVtable vtable, struct MalboxPl
 int32_t malbox_run_guest_plugin(struct MalboxGuestPluginVtable vtable,
                                 struct MalboxPluginMeta meta,
                                 struct MalboxGuestRuntimeConfig config);
-
-/**
- * Start a gRPC-based guest runtime for a **host-plugin** vtable.
- *
- * This is identical to [`malbox_run_guest_plugin`] except that it accepts a
- * [`MalboxPluginVtable`] (the `HostPlugin` vtable used by host plugins) and
- * wraps it in a [`GuestPluginRuntime`] instead of a [`GuestLinearRuntime`].
- * Use this when a plugin implements the full `HostPlugin` interface but needs
- * to run inside the guest VM over gRPC.
- *
- * Returns `0` on clean shutdown, `-1` on any error (the error message is
- * available via [`malbox_last_error`](crate::error::malbox_last_error)).
- *
- * # Safety
- *
- * - `vtable.plugin_ptr` and all non-null function pointers in `vtable` must
- *   remain valid for the lifetime of the process.
- * - All non-null string pointer fields in `meta` and `config` must point to
- *   valid null-terminated C strings for the duration of this call.
- */
-int32_t malbox_run_guest_host_plugin(struct MalboxPluginVtable vtable,
-                                     struct MalboxPluginMeta meta,
-                                     struct MalboxGuestRuntimeConfig config);
 
 /**
  * Return the numeric task ID.

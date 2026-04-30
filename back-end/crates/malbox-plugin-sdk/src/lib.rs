@@ -41,8 +41,6 @@ pub mod runtime;
 pub mod stash;
 pub mod types;
 
-pub(crate) mod execution;
-
 #[doc(hidden)]
 pub mod internal;
 
@@ -58,11 +56,10 @@ pub mod prelude {
     pub use crate::guest_plugin::GuestPlugin;
     pub use crate::plugin::HostPlugin;
     pub use crate::types::{
-        ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecRequest,
-        ExecResult, ExecutionContext, ExecutionInfo, GraphEdge, GraphNode, HealthStatus, Indicator,
-        KvPair, PluginInfo, PluginMeta, PluginResult, PluginState, PluginType, REPORT_RESULT_NAME,
-        Report, ReportBuilder, SCHEMA_VERSION, Section, SectionBuilder, Task, TimelineEvent,
-        TreeNode, Ttp, Verdict,
+        ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecutionContext,
+        GraphEdge, GraphNode, HealthStatus, Indicator, KvPair, PluginInfo, PluginMeta,
+        PluginResult, PluginState, PluginType, REPORT_RESULT_NAME, Report, ReportBuilder,
+        SCHEMA_VERSION, Section, SectionBuilder, Task, TimelineEvent, TreeNode, Ttp, Verdict,
     };
 
     // Re-export common dependencies so plugin authors don't need them in Cargo.toml
@@ -82,8 +79,8 @@ pub use error::{Result, SdkError};
 pub use guest_plugin::GuestPlugin;
 pub use plugin::HostPlugin;
 pub use types::{
-    ExecRequest, ExecResult, ExecutionInfo, HealthStatus, PluginMeta, PluginResult,
-    REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION, Task,
+    HealthStatus, PluginMeta, PluginResult, REPORT_RESULT_NAME, Report, ReportBuilder,
+    SCHEMA_VERSION, Task,
 };
 
 #[cfg(test)]

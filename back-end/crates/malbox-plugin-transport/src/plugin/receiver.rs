@@ -32,8 +32,7 @@ impl TransportReceiver for GrpcReceiver {
 
     fn wait_blocking(&self) -> Result<Event> {
         Err(TransportError::Grpc(
-            "GrpcReceiver does not support polling; use the reactive GuestPluginHandler model"
-                .into(),
+            "GrpcReceiver does not support polling; use the GuestPluginService model".into(),
         ))
     }
 

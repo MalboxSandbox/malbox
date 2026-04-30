@@ -149,23 +149,6 @@ inline int32_t trampoline_on_event(
     }
 }
 
-/// Trampoline for Plugin::on_execute_command.
-inline int32_t trampoline_on_execute_command(
-    void* plugin_ptr,
-    const MalboxExecRequest* request,
-    MalboxExecResult* result)
-{
-    try {
-        auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
-        return plugin->on_execute_command(request, result);
-    } catch (const std::exception& e) {
-        (void)e;
-        return -1;
-    } catch (...) {
-        return -1;
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Vtable builder helper
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +163,6 @@ inline MalboxPluginVtable build_vtable(HostPlugin* plugin_ptr) {
     vtable.on_stop            = &trampoline_on_stop;
     vtable.health_check       = &trampoline_health_check;
     vtable.on_event           = &trampoline_on_event;
-    vtable.on_execute_command = &trampoline_on_execute_command;
     return vtable;
 }
 
@@ -325,51 +307,6 @@ inline void run_guest_plugin(
     c_config.auto_collect_external_logs = to_c_ac(config.auto_collect_external_logs);
 
     detail::check_rc(malbox_run_guest_plugin(vtable, c_meta, c_config));
-}
-
-/// Start the gRPC-based guest runtime for a HostPlugin.
-///
-/// This is like run_guest_plugin but accepts a HostPlugin instead of a
-/// GuestPlugin.  Use this when a plugin implements the full HostPlugin
-/// interface (on_task, on_event, etc.) but needs to run inside the guest
-/// VM over gRPC.
-///
-/// This function blocks until the runtime shuts down. Call it from main().
-/// Throws malbox::Error on failure.
-inline void run_guest_host_plugin(
-    std::unique_ptr<HostPlugin> plugin,
-    const PluginMeta&           meta,
-    const RuntimeConfig&        config)
-{
-    MalboxPluginVtable vtable = detail::build_vtable(plugin.get());
-    MalboxPluginMeta   c_meta = detail::build_c_meta(meta);
-
-    auto to_c_ac = [](const AutoCollectConfig& ac) -> MalboxAutoCollectConfig {
-        MalboxAutoCollectConfig c{};
-        c.enabled       = ac.enabled;
-        c.include       = ac.include;
-        c.include_count = ac.include_count;
-        c.exclude       = ac.exclude;
-        c.exclude_count = ac.exclude_count;
-        c.max_file_size = ac.max_file_size;
-        return c;
-    };
-
-    MalboxGuestRuntimeConfig c_config{};
-    c_config.port                       = config.port;
-    c_config.sample_dir                 = config.sample_dir;
-    c_config.artifact_dir               = config.artifact_dir;
-    c_config.stash_dir                  = config.stash_dir;
-    c_config.log_dir                    = config.log_dir;
-    c_config.external_log_dir           = config.external_log_dir;
-    c_config.stash_threshold_bytes      = config.stash_threshold_bytes;
-    c_config.stash_ttl_secs             = config.stash_ttl_secs;
-    c_config.log_filter                 = config.log_filter;
-    c_config.analysis_timeout           = config.analysis_timeout;
-    c_config.auto_collect_artifacts     = to_c_ac(config.auto_collect_artifacts);
-    c_config.auto_collect_external_logs = to_c_ac(config.auto_collect_external_logs);
-
-    detail::check_rc(malbox_run_guest_host_plugin(vtable, c_meta, c_config));
 }
 
 /// Run a plugin through a synthetic test lifecycle without starting any transport.

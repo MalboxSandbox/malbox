@@ -25,27 +25,12 @@ pub enum MalboxTask {}
 /// directly.
 pub enum MalboxContext {}
 
-/// Opaque handle representing execution info returned by wait_for_execution.
-pub enum MalboxExecutionInfo {}
-
 /// Opaque handle representing a `ResultBuilder` (defined in `ffi_result`).
 ///
 /// C/C++ code must only interact with a `MalboxResultBuilder` through the
 /// `malbox_result_builder_*` functions; it must never dereference the pointer
 /// directly.
 pub enum MalboxResultBuilder {}
-
-/// Opaque handle representing an execute command request.
-///
-/// C/C++ code accesses fields via the `malbox_exec_request_*` accessor
-/// functions; it must never dereference the pointer directly.
-pub enum MalboxExecRequest {}
-
-/// Opaque handle representing an execute command result (filled by plugin).
-///
-/// C/C++ code fills fields via the `malbox_exec_result_*` setter
-/// functions; it must never dereference the pointer directly.
-pub enum MalboxExecResult {}
 
 /// Function-pointer table filled in by a C++ plugin and passed to a runtime
 /// entry point ([`malbox_run_host_plugin`](crate::ffi_runtime::malbox_run_host_plugin) or
@@ -106,19 +91,6 @@ pub struct MalboxPluginVtable {
     pub on_event: Option<
         unsafe extern "C" fn(*mut std::ffi::c_void, MalboxEvent, *const MalboxContext) -> i32,
     >,
-    /// Called when the daemon requests command execution on the guest.
-    ///
-    /// Arguments: `plugin_ptr`, request handle (access via `malbox_exec_request_*`
-    /// accessor functions), result handle (fill via `malbox_exec_result_*` setter
-    /// functions).
-    /// Returns 0 to use runtime default, 1 if plugin handled it, -1 on error.
-    pub on_execute_command: Option<
-        unsafe extern "C" fn(
-            *mut std::ffi::c_void,    // plugin_ptr
-            *const MalboxExecRequest, // request handle
-            *mut MalboxExecResult,    // result handle
-        ) -> i32,
-    >,
 }
 
 impl Default for MalboxPluginVtable {
@@ -131,7 +103,6 @@ impl Default for MalboxPluginVtable {
             on_stop: None,
             health_check: None,
             on_event: None,
-            on_execute_command: None,
         }
     }
 }
@@ -174,6 +145,5 @@ mod tests {
         assert!(vtable.plugin_ptr.is_null());
         assert!(vtable.on_task.is_none());
         assert!(vtable.on_event.is_none());
-        assert!(vtable.on_execute_command.is_none());
     }
 }

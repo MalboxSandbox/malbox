@@ -4,14 +4,12 @@
 //! results, health, and command execution. Each type has its own file
 //! and tests.
 
-mod exec;
 mod health;
 mod meta;
 pub mod report;
 mod result;
 mod task;
 
-pub use exec::{ExecRequest, ExecResult, ExecutionInfo};
 pub use health::HealthStatus;
 pub use meta::{ExecutionContext, PluginMeta, PluginState, PluginType};
 pub use report::{

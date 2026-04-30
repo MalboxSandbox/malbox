@@ -24,6 +24,7 @@ tokio = { workspace = true }
 tonic = { version = "0.14" }
 prost = "0.14"
 async-stream = "0.3"
+tokio-stream = { workspace = true }
 uuid = { workspace = true }
 globset = "0.4"
 

@@ -108,9 +108,3 @@ pub fn on_event(_attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn health_check(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
-
-/// Marks a method as the execute-command handler (used inside `#[malbox::handlers]`).
-#[proc_macro_attribute]
-pub fn on_execute_command(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
-}

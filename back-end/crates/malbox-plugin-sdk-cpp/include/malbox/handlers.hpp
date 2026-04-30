@@ -70,20 +70,6 @@ public:
         (void)ctx;
     }
 
-    // -----------------------------------------------------------------------
-    // Optional command execution override
-    // -----------------------------------------------------------------------
-
-    /// Override to customize how commands are executed on the guest OS.
-    ///
-    /// Return 0 to let the runtime use its default executor.
-    /// Return 1 if you handled the execution (result must be filled in).
-    /// Return -1 on error.
-    virtual int32_t on_execute_command(const MalboxExecRequest* request,
-                                       MalboxExecResult* result) {
-        (void)request; (void)result;
-        return 0; // use runtime default
-    }
 };
 
 } // namespace malbox

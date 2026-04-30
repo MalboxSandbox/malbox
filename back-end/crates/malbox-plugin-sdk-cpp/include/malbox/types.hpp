@@ -74,11 +74,4 @@ struct HealthStatus {
     }
 };
 
-/// Information about an executed command, returned by wait_for_execution().
-struct ExecutionInfo {
-    uint32_t pid;                    ///< PID of the spawned process (0 if unknown)
-    std::string command;             ///< The command that was executed
-    std::vector<std::string> args;   ///< The arguments passed to the command
-};
-
 } // namespace malbox
