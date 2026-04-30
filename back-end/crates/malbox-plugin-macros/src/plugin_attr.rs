@@ -138,6 +138,7 @@ fn generate_runtime_const(
     let stash_threshold = resolved.stash_threshold_bytes;
     let stash_ttl = resolved.stash_ttl_secs;
     let log_filter = resolved.log_filter.clone();
+    let analysis_timeout = resolved.analysis_timeout;
 
     let ac_art = &resolved.auto_collect_artifacts;
     let ac_art_enabled = ac_art.enabled;
@@ -167,6 +168,7 @@ fn generate_runtime_const(
                 stash_threshold_bytes: #stash_threshold,
                 stash_ttl_secs: #stash_ttl,
                 log_filter: #log_filter,
+                analysis_timeout: #analysis_timeout,
                 auto_collect_artifacts: malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
                     enabled: #ac_art_enabled,
                     include: &[#(#ac_art_include),*],

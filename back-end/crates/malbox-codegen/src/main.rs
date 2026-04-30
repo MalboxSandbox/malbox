@@ -82,6 +82,7 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
          \x20   .stash_threshold_bytes  = {threshold},\n\
          \x20   .stash_ttl_secs         = {ttl},\n\
          \x20   .log_filter             = {log_filter:?},\n\
+         \x20   .analysis_timeout       = {analysis_timeout},\n\
          \x20   .auto_collect_artifacts = {{\n\
          \x20       .enabled       = {ac_art_enabled},\n\
          \x20       .include       = ac_art_include,\n\
@@ -109,6 +110,7 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
         threshold = r.stash_threshold_bytes,
         ttl = r.stash_ttl_secs,
         log_filter = r.log_filter,
+        analysis_timeout = r.analysis_timeout,
         ac_art_enabled = r.auto_collect_artifacts.enabled,
         ac_art_include_count = r.auto_collect_artifacts.include.len(),
         ac_art_exclude_count = r.auto_collect_artifacts.exclude.len(),

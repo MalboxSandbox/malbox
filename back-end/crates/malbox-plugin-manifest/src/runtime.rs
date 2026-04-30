@@ -84,6 +84,8 @@ pub struct RuntimeConfig {
     pub log_filter: Option<String>,
     #[serde(default)]
     pub auto_collect: AutoCollectConfig,
+    #[serde(default)]
+    pub analysis_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +109,7 @@ pub struct ResolvedRuntimeConfig {
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: String,
+    pub analysis_timeout: u64,
     pub auto_collect_artifacts: ResolvedAutoCollectSection,
     pub auto_collect_external_logs: ResolvedAutoCollectSection,
 }
@@ -141,6 +144,7 @@ impl ResolvedRuntimeConfig {
             stash_threshold_bytes: raw.stash.threshold_bytes.unwrap_or(1_048_576),
             stash_ttl_secs: raw.stash.ttl_secs.unwrap_or(120),
             log_filter: raw.log_filter.clone().unwrap_or_else(|| "info".into()),
+            analysis_timeout: raw.analysis_timeout.unwrap_or(300),
             auto_collect_artifacts: resolve_auto_collect_section(&raw.auto_collect.artifacts, true),
             auto_collect_external_logs: resolve_auto_collect_section(
                 &raw.auto_collect.external_logs,
@@ -194,6 +198,11 @@ impl ResolvedRuntimeConfig {
         if self.stash_ttl_secs < 1 {
             return Err(ManifestError::Invalid(
                 "runtime.stash.ttl_secs must be >= 1".into(),
+            ));
+        }
+        if self.analysis_timeout < 1 {
+            return Err(ManifestError::Invalid(
+                "runtime.analysis_timeout must be >= 1".into(),
             ));
         }
         tracing_subscriber::EnvFilter::try_new(&self.log_filter).map_err(|e| {

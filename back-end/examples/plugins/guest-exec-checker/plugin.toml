@@ -8,9 +8,27 @@ type = "guest"
 [runtime]
 state = "ephemeral"
 execution = "exclusive"
+# Port 50051 is reserved by guest-windows-agent - use 50052 to avoid conflict
+port = 50052
+log_filter = "info"
+analysis_timeout = 300
+
+[runtime.paths]
+sample_dir       = "C:\\ProgramData"
+artifact_dir     = "C:\\ProgramData\\ExecChecker\\Artifacts"
+stash_dir        = "C:\\ProgramData\\ExecChecker\\_stash"
+log_dir          = "C:\\ProgramData\\ExecChecker\\_logs"
+external_log_dir = "C:\\ProgramData\\ExecChecker\\Logs"
+
+[runtime.stash]
+threshold_bytes = 1048576
+ttl_secs = 120
 
 [results.exec_status]
 description = "Sample execution status: whether the process was found running"
 user_visible = true
 display_name = "Execution Status"
 render = "json"
+
+[events]
+subscribe = ["TaskCreated", "TaskStarting"]

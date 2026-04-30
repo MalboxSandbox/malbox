@@ -181,6 +181,7 @@ fn resolve_respects_explicit_fields() {
         },
         log_filter: Some("debug".into()),
         auto_collect: Default::default(),
+        analysis_timeout: None,
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert_eq!(r.port, 50100);
@@ -254,6 +255,7 @@ fn validate_accepts_windows_paths_for_guest_plugin() {
         },
         log_filter: Some("info".into()),
         auto_collect: Default::default(),
+        analysis_timeout: None,
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     assert!(r.validate(PluginTypeConfig::Guest).is_ok());

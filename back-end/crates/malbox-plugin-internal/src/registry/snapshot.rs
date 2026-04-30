@@ -114,6 +114,7 @@ mod tests {
                     execution,
                     port: None,
                     log_filter: None,
+                    analysis_timeout: None,
                     paths: PathsConfig::default(),
                     stash: StashConfig::default(),
                     auto_collect: Default::default(),
