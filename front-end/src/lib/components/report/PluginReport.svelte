@@ -14,6 +14,20 @@
 	const displayName = $derived(
 		report?.plugin.display_name ?? report?.plugin.id ?? view.plugin_name
 	);
+
+	const artifactNames = $derived(new Set(view.artifacts.map((a) => a.result_name)));
+
+	function isArtifactSection(s: { title: string; blocks?: { type: string }[] }): boolean {
+		if (s.blocks && s.blocks.length === 1) {
+			const t = s.blocks[0].type;
+			if (t === 'download' || t === 'json') return true;
+		}
+		return artifactNames.has(s.title);
+	}
+
+	const contentSections = $derived(
+		report?.sections?.filter((s) => !view.synthesized || !isArtifactSection(s)) ?? []
+	);
 </script>
 
 <div class="space-y-6">
@@ -82,8 +96,8 @@
 		<div class="rounded-2xl bg-[var(--color-bg-secondary)] p-8 text-sm text-[var(--color-text-secondary)]">
 			This plugin did not produce a readable report.
 		</div>
-	{:else if report.sections && report.sections.length > 0}
-		{#each report.sections as s (s.id)}
+	{:else if contentSections.length > 0}
+		{#each contentSections as s (s.id)}
 			<Section section={s} artifacts={view.artifacts} />
 		{/each}
 	{/if}

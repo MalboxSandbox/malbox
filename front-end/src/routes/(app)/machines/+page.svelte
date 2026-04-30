@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
 	import type { PageData } from './$types';
 
 	interface Props {
@@ -34,7 +35,7 @@
 				>
 					<div class="text-[var(--color-text-secondary)]">{m.id != null ? `#${m.id}` : '—'}</div>
 					<div class="text-[var(--color-text-primary)]">{m.name}</div>
-					<div class="text-[var(--color-text-primary)]">{m.platform}</div>
+					<div class="text-[var(--color-text-primary)]"><PlatformLabel platform={m.platform} /></div>
 					<div class="text-[var(--color-text-primary)]">{m.status}</div>
 					<div class="text-[var(--color-text-secondary)]">{m.ip ?? '—'}</div>
 				</a>

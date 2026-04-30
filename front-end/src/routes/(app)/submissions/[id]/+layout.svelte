@@ -34,18 +34,9 @@
 </script>
 
 <div class="mx-auto max-w-7xl space-y-6">
-	<div class="flex items-baseline gap-3 text-sm">
-		<a
-			href="/submissions"
-			class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-			title="All submissions"
-		>
-			←
-		</a>
+	<div class="text-sm">
 		<span class="text-[var(--color-text-secondary)]">Submission :</span>
-		<span class="font-mono text-[var(--color-text-primary)] break-all">
-			{data.report.task.target}
-		</span>
+		<span class="text-[var(--color-text-primary)]">{data.report.task.target}</span>
 	</div>
 
 	{#if pollingError}

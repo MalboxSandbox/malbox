@@ -4,6 +4,7 @@
 	import PluginTile from './PluginTile.svelte';
 	import Iocs from './blocks/Iocs.svelte';
 	import Ttps from './blocks/Ttps.svelte';
+	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
 	import type { TaskReport, Classification } from '$lib/api/types';
 
 	interface Props {
@@ -57,6 +58,16 @@
 		return `${secs}s`;
 	});
 
+	let copiedHash = $state<string | null>(null);
+
+	async function copyHash(value: string) {
+		await navigator.clipboard.writeText(value);
+		copiedHash = value;
+		setTimeout(() => {
+			copiedHash = null;
+		}, 1500);
+	}
+
 	function scoreLabel(c: Classification | undefined): string {
 		switch (c) {
 			case 'clean':
@@ -70,11 +81,12 @@
 		}
 	}
 
+	const hasScore = $derived(data.aggregate.score != null);
+
 	const scoreText = $derived.by(() => {
 		const label = scoreLabel(data.aggregate.verdict);
-		const score = data.aggregate.score;
-		if (score === undefined) return label;
-		return `${label}, with a score of ${score}/100`;
+		if (!hasScore) return label;
+		return `${label}, with a score of ${data.aggregate.score}/100`;
 	});
 </script>
 
@@ -103,21 +115,23 @@
 	<div class="grid gap-6 md:grid-cols-3">
 		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8 md:col-span-2">
 			<h2 class="text-sm font-medium text-[var(--color-text-secondary)]">File information</h2>
-			<dl class="grid grid-cols-[max-content_1fr] items-start gap-x-6 gap-y-3 text-sm">
-				{#if data.aggregate.verdict || data.aggregate.score !== undefined}
-					<dt class="pt-1 text-[var(--color-text-secondary)]">Score</dt>
-					<dd class="space-y-2 text-[var(--color-text-primary)]">
+			<dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-6 gap-y-3 text-sm">
+				<dt class="text-[var(--color-text-secondary)]">Score</dt>
+				<dd class="space-y-2 text-[var(--color-text-primary)]">
+					{#if hasScore}
 						<div>{scoreText}</div>
-						{#if data.aggregate.score !== undefined}
+						<div class="max-w-48">
 							<ScoreBar
-								score={data.aggregate.score}
+								score={data.aggregate.score!}
 								classification={data.aggregate.verdict}
 							/>
-						{/if}
-					</dd>
-				{/if}
+						</div>
+					{:else}
+						<span class="text-[var(--color-text-secondary)]">Not available</span>
+					{/if}
+				</dd>
 				<dt class="text-[var(--color-text-secondary)]">Target</dt>
-				<dd class="break-all font-mono text-xs text-[var(--color-text-primary)]">
+				<dd class="break-all text-[var(--color-text-primary)]">
 					{data.task.target}
 				</dd>
 				{#if sample}
@@ -126,15 +140,48 @@
 					<dt class="text-[var(--color-text-secondary)]">Type</dt>
 					<dd class="text-[var(--color-text-primary)]">{sample.file_type}</dd>
 				{/if}
-				<dt class="text-[var(--color-text-secondary)]">Platform</dt>
-				<dd class="text-[var(--color-text-primary)]">{data.task.platform}</dd>
-				<dt class="text-[var(--color-text-secondary)]">Priority</dt>
-				<dd class="text-[var(--color-text-primary)]">{data.task.priority}</dd>
-				<dt class="text-[var(--color-text-secondary)]">Timeout</dt>
-				<dd class="text-[var(--color-text-primary)]">{data.task.timeout}s</dd>
 				{#each hashes as h (h.kind)}
 					<dt class="text-[var(--color-text-secondary)]">{h.kind}</dt>
-					<dd class="break-all font-mono text-xs text-[var(--color-text-primary)]">{h.value}</dd>
+					<dd class="flex min-w-0 items-center gap-2 text-[var(--color-text-primary)]">
+						<span class="truncate" title={h.value}>{h.value}</span>
+						<button
+							type="button"
+							class="relative shrink-0 transition-colors
+								{copiedHash === h.value
+								? 'text-[var(--color-accent)]'
+								: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
+							onclick={() => copyHash(h.value)}
+							title="Copy to clipboard"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="size-4 transition-all duration-200
+									{copiedHash === h.value ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}"
+							>
+								<path
+									d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"
+								/>
+								<path
+									d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"
+								/>
+							</svg>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								class="absolute inset-0 size-4 transition-all duration-200
+									{copiedHash === h.value ? 'scale-100 opacity-100' : 'scale-0 opacity-0'}"
+							>
+								<path
+									fill-rule="evenodd"
+									d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+						</button>
+					</dd>
 				{/each}
 				{#if data.task.tags && data.task.tags.length > 0}
 					<dt class="text-[var(--color-text-secondary)]">Tags</dt>
@@ -155,6 +202,12 @@
 			<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
 				<h2 class="text-sm font-medium text-[var(--color-text-secondary)]">Execution</h2>
 				<dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
+					<dt class="text-[var(--color-text-secondary)]">Platform</dt>
+					<dd class="text-[var(--color-text-primary)]"><PlatformLabel platform={data.task.platform} /></dd>
+					<dt class="text-[var(--color-text-secondary)]">Priority</dt>
+					<dd class="text-[var(--color-text-primary)]">{data.task.priority}</dd>
+					<dt class="text-[var(--color-text-secondary)]">Timeout</dt>
+					<dd class="text-[var(--color-text-primary)]">{data.task.timeout}s</dd>
 					<dt class="text-[var(--color-text-secondary)]">Created</dt>
 					<dd class="text-[var(--color-text-primary)]">{created.date} {created.time}</dd>
 					{#if completed}

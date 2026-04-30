@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { IconDef } from '$lib/icons';
+
 	let {
 		path,
 		viewBox = '0 0 18 18',
@@ -8,7 +10,7 @@
 		strokeWidth = 0,
 		...restProps
 	}: {
-		path: string | readonly string[];
+		path: IconDef;
 		viewBox?: string;
 		class?: string;
 		fill?: string;
@@ -17,11 +19,21 @@
 		[key: string]: any;
 	} = $props();
 
-	const paths = $derived(Array.isArray(path) ? path : [path]);
+	const isConfig = $derived(
+		typeof path === 'object' && !Array.isArray(path) && 'd' in (path as object)
+	);
+	const config = $derived(isConfig ? (path as { d: string | readonly string[]; viewBox?: string; fillRule?: string }) : null);
+	const resolvedViewBox = $derived(config?.viewBox ?? viewBox);
+	const fillRule = $derived(config?.fillRule as 'evenodd' | 'nonzero' | undefined);
+	const paths = $derived(
+		config
+			? Array.isArray(config.d) ? config.d : [config.d]
+			: Array.isArray(path) ? (path as readonly string[]) : [path as string]
+	);
 </script>
 
 <svg
-	{viewBox}
+	viewBox={resolvedViewBox}
 	{fill}
 	{stroke}
 	stroke-width={strokeWidth}
@@ -30,6 +42,10 @@
 	{...restProps}
 >
 	{#each paths as p}
-		<path d={p} />
+		{#if fillRule}
+			<path d={p} fill-rule={fillRule} clip-rule={fillRule} />
+		{:else}
+			<path d={p} />
+		{/if}
 	{/each}
 </svg>

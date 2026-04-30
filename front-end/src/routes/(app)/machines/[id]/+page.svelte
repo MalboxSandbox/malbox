@@ -3,6 +3,7 @@
 	import { deleteSnapshot, provisionMachine } from '$lib/api/machines';
 	import { toasts } from '$lib/stores/toasts.svelte';
 	import { isApiError } from '$lib/api/errors';
+	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
 	import type { PageData } from './$types';
 
 	interface Props {
@@ -74,7 +75,7 @@
 			</div>
 			<div>
 				<dt class="text-[var(--color-text-secondary)]">Platform</dt>
-				<dd class="text-[var(--color-text-primary)]">{data.machine.platform}</dd>
+				<dd class="text-[var(--color-text-primary)]"><PlatformLabel platform={data.machine.platform} /></dd>
 			</div>
 			<div>
 				<dt class="text-[var(--color-text-secondary)]">Arch</dt>

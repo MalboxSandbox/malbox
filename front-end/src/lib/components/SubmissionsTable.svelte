@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Task } from '$lib/api/types';
 	import { splitDateTime, taskStatusLabel, isTerminalStatus } from '$lib/api/format';
+	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
 
 	interface Props {
 		tasks: Task[];
@@ -11,8 +12,9 @@
 	function statusClasses(status: Task['status']): string {
 		if (status === 'completed') return 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]';
 		if (status === 'failed') return 'bg-red-500/20 text-red-300';
-		if (status === 'cancelled') return 'bg-yellow-500/20 text-yellow-200';
-		return 'bg-[var(--color-text-secondary)]/20 text-[var(--color-text-secondary)]';
+		if (status === 'cancelled')
+			return 'bg-[var(--color-text-secondary)]/20 text-[var(--color-text-secondary)]';
+		return 'bg-amber-500/20 text-amber-200';
 	}
 </script>
 
@@ -57,7 +59,7 @@
 					</span>
 				</div>
 
-				<div class="text-sm text-[var(--color-text-primary)]">{task.platform}</div>
+				<div class="text-sm text-[var(--color-text-primary)]"><PlatformLabel platform={task.platform} /></div>
 
 				<div class="flex flex-wrap items-center gap-1">
 					{#if task.tags && task.tags.length > 0}
