@@ -125,7 +125,17 @@ async fn consume_stream_no_file(
 fn forward_to_tracing(plugin_id: &PluginId, entry: &proto::LogEntry) {
     let level = proto::LogLevel::try_from(entry.level).unwrap_or(proto::LogLevel::Info);
     let target = &entry.target;
-    let message = &entry.message;
+
+    let message = if entry.fields.is_empty() {
+        entry.message.clone()
+    } else {
+        let fields: Vec<String> = entry
+            .fields
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        format!("{} {{{}}}", entry.message, fields.join(", "))
+    };
 
     match level {
         proto::LogLevel::Trace => {
