@@ -232,8 +232,10 @@ fn synthesize(plugin_name: &str, artifacts: &[TaskResult]) -> serde_json::Value 
 }
 
 fn aggregate_across(plugins: &[PluginReportView]) -> AggregateView {
-    let mut out = AggregateView::default();
-    out.plugin_count = plugins.len() as u32;
+    let mut out = AggregateView {
+        plugin_count: plugins.len() as u32,
+        ..Default::default()
+    };
 
     let mut worst: Option<Classification> = None;
     let mut max_score: Option<u8> = None;

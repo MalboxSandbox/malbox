@@ -80,13 +80,12 @@ pub(crate) fn auto_collect(
             continue;
         }
 
-        if let Some(claimed) = claimed_paths {
-            if let Ok(canonical) = std::fs::canonicalize(&file_path) {
-                if claimed.contains(&canonical) {
-                    debug!(path = %rel_str, "skipping already-claimed artifact");
-                    continue;
-                }
-            }
+        if let Some(claimed) = claimed_paths
+            && let Ok(canonical) = std::fs::canonicalize(&file_path)
+            && claimed.contains(&canonical)
+        {
+            debug!(path = %rel_str, "skipping already-claimed artifact");
+            continue;
         }
 
         let size = match std::fs::metadata(&file_path) {

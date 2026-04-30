@@ -749,13 +749,15 @@ impl Worker {
                                                 Ok(rel_path) => {
                                                     if let Err(e) = task_results::insert_task_result(
                                                         self.task_store.pool(),
-                                                        task_id,
-                                                        plugin_name,
-                                                        &output.result_name,
-                                                        db_format,
-                                                        db_role,
-                                                        output.data.len() as i64,
-                                                        &rel_path,
+                                                        &task_results::InsertTaskResult {
+                                                            task_id,
+                                                            plugin_name,
+                                                            result_name: &output.result_name,
+                                                            format: db_format,
+                                                            role: db_role,
+                                                            size_bytes: output.data.len() as i64,
+                                                            file_path: &rel_path,
+                                                        },
                                                     )
                                                     .await
                                                     {

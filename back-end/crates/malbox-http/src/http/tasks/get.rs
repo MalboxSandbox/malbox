@@ -84,10 +84,10 @@ impl From<Task> for TaskResponse {
 pub(super) async fn build_task_response(pool: &PgPool, task: Task) -> TaskResponse {
     let sample_id = task.sample_id;
     let mut response = TaskResponse::from(task);
-    if let Some(sid) = sample_id {
-        if let Ok(Some(sample)) = fetch_sample_by_id(pool, sid).await {
-            response.sample = Some(SampleInfo::from(sample));
-        }
+    if let Some(sid) = sample_id
+        && let Ok(Some(sample)) = fetch_sample_by_id(pool, sid).await
+    {
+        response.sample = Some(SampleInfo::from(sample));
     }
     response
 }

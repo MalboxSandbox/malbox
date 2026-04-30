@@ -39,23 +39,21 @@ pub fn default_launch(sample_path: &Path) -> bool {
                 "default_launch: sample launched successfully"
             );
 
-            std::thread::spawn(move || {
-                match child.wait() {
-                    Ok(status) => {
-                        tracing::info!(
-                            pid,
-                            exit_code = status.code(),
-                            success = status.success(),
-                            "default_launch: sample process exited"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            pid,
-                            error = %e,
-                            "default_launch: failed to wait on sample process"
-                        );
-                    }
+            std::thread::spawn(move || match child.wait() {
+                Ok(status) => {
+                    tracing::info!(
+                        pid,
+                        exit_code = status.code(),
+                        success = status.success(),
+                        "default_launch: sample process exited"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        pid,
+                        error = %e,
+                        "default_launch: failed to wait on sample process"
+                    );
                 }
             });
 

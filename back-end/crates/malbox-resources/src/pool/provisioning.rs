@@ -448,30 +448,29 @@ impl MachinePool {
 
         // Clean up stale provider snapshots that aren't tracked in the DB
         // (e.g. from a previous DB-only delete) before doing any work.
-        if let Some(ref snap_name) = step.snapshot {
-            if let Some(snapshot_cap) = self.provider.snapshot() {
-                if let Ok(provider_snaps) = snapshot_cap.list_snapshots(runtime_vm).await {
-                    let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
-                        .await
-                        .unwrap_or_default();
+        if let Some(ref snap_name) = step.snapshot
+            && let Some(snapshot_cap) = self.provider.snapshot()
+            && let Ok(provider_snaps) = snapshot_cap.list_snapshots(runtime_vm).await
+        {
+            let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
+                .await
+                .unwrap_or_default();
 
-                    if let Some(stale) = provider_snaps.iter().find(|ps| {
-                        ps.name == *snap_name
-                            && !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0)
-                    }) {
-                        warn!(
-                            machine_id,
-                            snapshot = snap_name,
-                            "Stale provider snapshot found (not in DB), deleting before provisioning"
-                        );
-                        snapshot_cap.delete_snapshot(&stale.id).await.map_err(|e| {
-                            ResourceError::Provider(format!(
-                                "Failed to delete stale provider snapshot '{}': {}",
-                                snap_name, e
-                            ))
-                        })?;
-                    }
-                }
+            if let Some(stale) = provider_snaps.iter().find(|ps| {
+                ps.name == *snap_name
+                    && !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0)
+            }) {
+                warn!(
+                    machine_id,
+                    snapshot = snap_name,
+                    "Stale provider snapshot found (not in DB), deleting before provisioning"
+                );
+                snapshot_cap.delete_snapshot(&stale.id).await.map_err(|e| {
+                    ResourceError::Provider(format!(
+                        "Failed to delete stale provider snapshot '{}': {}",
+                        snap_name, e
+                    ))
+                })?;
             }
         }
 

@@ -34,16 +34,20 @@ pub struct TaskResult {
     pub created_on: OffsetDateTime,
 }
 
+pub struct InsertTaskResult<'a> {
+    pub task_id: i32,
+    pub plugin_name: &'a str,
+    pub result_name: &'a str,
+    pub format: ResultFormat,
+    pub role: ResultRole,
+    pub size_bytes: i64,
+    pub file_path: &'a str,
+}
+
 /// Insert a new task result row.
 pub async fn insert_task_result(
     pool: &PgPool,
-    task_id: i32,
-    plugin_name: &str,
-    result_name: &str,
-    format: ResultFormat,
-    role: ResultRole,
-    size_bytes: i64,
-    file_path: &str,
+    params: &InsertTaskResult<'_>,
 ) -> Result<TaskResult> {
     query_as!(
         TaskResult,
@@ -55,20 +59,20 @@ pub async fn insert_task_result(
                   role   AS "role: ResultRole",
                   size_bytes, file_path, created_on
         "#,
-        task_id,
-        plugin_name,
-        result_name,
-        format as ResultFormat,
-        role as ResultRole,
-        size_bytes,
-        file_path,
+        params.task_id,
+        params.plugin_name,
+        params.result_name,
+        params.format as ResultFormat,
+        params.role as ResultRole,
+        params.size_bytes,
+        params.file_path,
     )
     .fetch_one(pool)
     .await
     .map_err(|e| {
         TaskResultError::InsertFailed {
-            task_id,
-            message: format!("{}:{}", plugin_name, result_name),
+            task_id: params.task_id,
+            message: format!("{}:{}", params.plugin_name, params.result_name),
             source: e,
         }
         .into()
