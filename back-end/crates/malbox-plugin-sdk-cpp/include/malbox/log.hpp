@@ -3,6 +3,7 @@
 /// @file log.hpp
 /// @brief Structured logging for Malbox plugins.
 
+#include <cstdint>
 #include <string>
 
 extern "C" {

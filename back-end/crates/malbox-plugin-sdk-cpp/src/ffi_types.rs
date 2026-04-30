@@ -18,6 +18,6 @@ pub use structs::{
     MalboxAutoCollectConfig, MalboxGuestRuntimeConfig, MalboxHealthStatus, MalboxPluginMeta,
 };
 pub use vtable::{
-    MALBOX_ABI_VERSION, MalboxContext, MalboxExecRequest, MalboxExecResult, MalboxPluginVtable,
-    MalboxResultBuilder, MalboxTask,
+    MALBOX_ABI_VERSION, MalboxContext, MalboxExecRequest, MalboxExecResult,
+    MalboxGuestPluginVtable, MalboxPluginVtable, MalboxResultBuilder, MalboxTask,
 };

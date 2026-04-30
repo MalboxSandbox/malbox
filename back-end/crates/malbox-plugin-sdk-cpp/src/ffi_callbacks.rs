@@ -1,7 +1,7 @@
-//! VtablePlugin adapter -- bridges the C vtable to the Rust `Plugin` trait.
+//! VtablePlugin adapter -- bridges the C vtable to the Rust `HostPlugin` trait.
 //!
 //! `VtablePlugin` holds a `MalboxPluginVtable` and implements the unified
-//! `Plugin` trait from `malbox_plugin_sdk::plugin`.  Each trait method
+//! `HostPlugin` trait from `malbox_plugin_sdk::plugin`.  Each trait method
 //! marshals arguments into C-compatible types, invokes the corresponding
 //! function pointer, and converts the return code back into a Rust `Result`.
 
@@ -10,7 +10,7 @@ use std::ffi::CString;
 
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
-use malbox_plugin_sdk::plugin::Plugin;
+use malbox_plugin_sdk::plugin::HostPlugin;
 use malbox_plugin_sdk::types::{ExecRequest, ExecResult, HealthStatus, Task};
 use malbox_plugin_transport::messages::events::Event;
 
@@ -20,7 +20,7 @@ use crate::ffi_result::ResultBuilder;
 use crate::ffi_types::{MalboxContext, MalboxHealthStatus, MalboxTask};
 
 /// Rust plugin adapter that wraps a C [`MalboxPluginVtable`](crate::ffi_types::MalboxPluginVtable)
-/// and implements the `Plugin` trait.
+/// and implements the `HostPlugin` trait.
 ///
 /// Each trait method marshals its arguments into the C-compatible types
 /// defined in [`crate::ffi_types`] and [`crate::ffi_events`], invokes the
@@ -38,7 +38,7 @@ impl VtablePlugin {
     }
 }
 
-// SAFETY: The C++ Plugin object and vtable function pointers are required to be
+// SAFETY: The C++ HostPlugin object and vtable function pointers are required to be
 // thread-safe per the SDK contract (documented in the spec).
 unsafe impl Send for VtablePlugin {}
 unsafe impl Sync for VtablePlugin {}
@@ -64,7 +64,7 @@ fn check_rc(rc: i32) -> Result<()> {
     }
 }
 
-impl Plugin for VtablePlugin {
+impl HostPlugin for VtablePlugin {
     fn on_task(&self, task: Task, ctx: &Context) -> Result<()> {
         let on_task = match self.vtable.on_task {
             Some(f) => f,

@@ -69,6 +69,7 @@ pub struct MalboxGuestRuntimeConfig {
     pub stash_threshold_bytes: usize,
     pub stash_ttl_secs: u64,
     pub log_filter: *const c_char,
+    pub analysis_timeout: u64,
     pub auto_collect_artifacts: MalboxAutoCollectConfig,
     pub auto_collect_external_logs: MalboxAutoCollectConfig,
 }

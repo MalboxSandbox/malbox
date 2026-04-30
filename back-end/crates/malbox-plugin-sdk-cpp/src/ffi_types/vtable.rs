@@ -10,7 +10,7 @@ use crate::ffi_events::MalboxEvent;
 /// vtables whose `abi_version` field does not equal this constant.  Increment
 /// this value whenever the vtable layout or calling convention changes in a
 /// backward-incompatible way.
-pub const MALBOX_ABI_VERSION: u32 = 4;
+pub const MALBOX_ABI_VERSION: u32 = 5;
 
 /// Opaque handle representing a [`malbox_plugin_sdk::types::Task`].
 ///
@@ -132,6 +132,33 @@ impl Default for MalboxPluginVtable {
             health_check: None,
             on_event: None,
             on_execute_command: None,
+        }
+    }
+}
+
+/// Function-pointer table for a C++ guest plugin.
+#[repr(C)]
+pub struct MalboxGuestPluginVtable {
+    pub abi_version: u32,
+    pub plugin_ptr: *mut std::ffi::c_void,
+    pub on_start: Option<
+        unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxTask, *const MalboxContext) -> i32,
+    >,
+    pub on_stop: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxContext) -> i32>,
+    pub execute_sample: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const c_char) -> i32>,
+    pub health_check:
+        Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut MalboxHealthStatus) -> i32>,
+}
+
+impl Default for MalboxGuestPluginVtable {
+    fn default() -> Self {
+        Self {
+            abi_version: 0,
+            plugin_ptr: std::ptr::null_mut(),
+            on_start: None,
+            on_stop: None,
+            execute_sample: None,
+            health_check: None,
         }
     }
 }

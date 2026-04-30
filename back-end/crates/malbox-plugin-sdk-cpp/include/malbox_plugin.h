@@ -19,7 +19,7 @@
  * this value whenever the vtable layout or calling convention changes in a
  * backward-incompatible way.
  */
-#define MALBOX_ABI_VERSION 4
+#define MALBOX_ABI_VERSION 5
 
 /**
  * Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
@@ -308,6 +308,18 @@ typedef struct MalboxPluginMeta {
 } MalboxPluginMeta;
 
 /**
+ * Function-pointer table for a C++ guest plugin.
+ */
+typedef struct MalboxGuestPluginVtable {
+    uint32_t abi_version;
+    void *plugin_ptr;
+    int32_t (*on_start)(void*, const struct MalboxTask*, const struct MalboxContext*);
+    int32_t (*on_stop)(void*, const struct MalboxContext*);
+    int32_t (*execute_sample)(void*, const char*);
+    int32_t (*health_check)(void*, struct MalboxHealthStatus*);
+} MalboxGuestPluginVtable;
+
+/**
  * Auto-collection configuration for a single directory.
  */
 typedef struct MalboxAutoCollectConfig {
@@ -336,6 +348,7 @@ typedef struct MalboxGuestRuntimeConfig {
     uintptr_t stash_threshold_bytes;
     uint64_t stash_ttl_secs;
     const char *log_filter;
+    uint64_t analysis_timeout;
     struct MalboxAutoCollectConfig auto_collect_artifacts;
     struct MalboxAutoCollectConfig auto_collect_external_logs;
 } MalboxGuestRuntimeConfig;
@@ -792,9 +805,32 @@ int32_t malbox_run_host_plugin(struct MalboxPluginVtable vtable, struct MalboxPl
  * - All non-null string pointer fields in `meta` and `config` must point to
  *   valid null-terminated C strings for the duration of this call.
  */
-int32_t malbox_run_guest_plugin(struct MalboxPluginVtable vtable,
+int32_t malbox_run_guest_plugin(struct MalboxGuestPluginVtable vtable,
                                 struct MalboxPluginMeta meta,
                                 struct MalboxGuestRuntimeConfig config);
+
+/**
+ * Start a gRPC-based guest runtime for a **host-plugin** vtable.
+ *
+ * This is identical to [`malbox_run_guest_plugin`] except that it accepts a
+ * [`MalboxPluginVtable`] (the `HostPlugin` vtable used by host plugins) and
+ * wraps it in a [`GuestPluginRuntime`] instead of a [`GuestLinearRuntime`].
+ * Use this when a plugin implements the full `HostPlugin` interface but needs
+ * to run inside the guest VM over gRPC.
+ *
+ * Returns `0` on clean shutdown, `-1` on any error (the error message is
+ * available via [`malbox_last_error`](crate::error::malbox_last_error)).
+ *
+ * # Safety
+ *
+ * - `vtable.plugin_ptr` and all non-null function pointers in `vtable` must
+ *   remain valid for the lifetime of the process.
+ * - All non-null string pointer fields in `meta` and `config` must point to
+ *   valid null-terminated C strings for the duration of this call.
+ */
+int32_t malbox_run_guest_host_plugin(struct MalboxPluginVtable vtable,
+                                     struct MalboxPluginMeta meta,
+                                     struct MalboxGuestRuntimeConfig config);
 
 /**
  * Return the numeric task ID.

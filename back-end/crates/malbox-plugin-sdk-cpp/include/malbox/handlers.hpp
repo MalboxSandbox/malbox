@@ -21,9 +21,9 @@ namespace malbox {
 /// ExecutionContext::Parallel is chosen). Plugin authors should still protect
 /// any shared mutable state with appropriate synchronisation primitives when
 /// using the parallel context.
-class Plugin {
+class HostPlugin {
 public:
-    virtual ~Plugin() = default;
+    virtual ~HostPlugin() = default;
 
     // -----------------------------------------------------------------------
     // Task processing

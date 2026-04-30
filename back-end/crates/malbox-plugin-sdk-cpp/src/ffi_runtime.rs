@@ -11,17 +11,26 @@
 use std::ffi::{CStr, c_char};
 
 #[cfg(feature = "guest")]
+use malbox_plugin_sdk::runtime::guest::GuestLinearRuntime;
+#[cfg(feature = "guest")]
 use malbox_plugin_sdk::runtime::guest::GuestPluginRuntime;
 #[cfg(feature = "host")]
 use malbox_plugin_sdk::runtime::host::HostRuntime;
 use malbox_plugin_sdk::types::{ExecutionContext, PluginMeta, PluginState, PluginType};
 
 use crate::error::set_last_error;
+#[cfg(any(feature = "host", feature = "guest"))]
 use crate::ffi_callbacks::VtablePlugin;
+#[cfg(feature = "guest")]
+use crate::ffi_guest_callbacks::GuestVtablePlugin;
+#[cfg(feature = "guest")]
+use crate::ffi_types::MalboxGuestPluginVtable;
 use crate::ffi_types::MalboxGuestRuntimeConfig;
+#[cfg(any(feature = "host", feature = "guest"))]
+use crate::ffi_types::MalboxPluginVtable;
 use crate::ffi_types::{
     MALBOX_ABI_VERSION, MalboxExecutionContext, MalboxPluginMeta, MalboxPluginState,
-    MalboxPluginType, MalboxPluginVtable,
+    MalboxPluginType,
 };
 
 /// Convert a `*const c_char` to a `&'static str` by copying the bytes and
@@ -182,6 +191,188 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
 #[cfg(feature = "guest")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_run_guest_plugin(
+    vtable: MalboxGuestPluginVtable,
+    meta: MalboxPluginMeta,
+    config: MalboxGuestRuntimeConfig,
+) -> i32 {
+    if vtable.abi_version != MALBOX_ABI_VERSION {
+        set_last_error(&format!(
+            "ABI version mismatch: expected {MALBOX_ABI_VERSION}, got {}",
+            vtable.abi_version
+        ));
+        return -1;
+    }
+
+    let plugin_meta = match unsafe { convert_meta(meta) } {
+        Ok(m) => m,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    // Null-check all non-nullable path fields and log_filter.
+    for (ptr, name) in [
+        (config.sample_dir, "sample_dir"),
+        (config.artifact_dir, "artifact_dir"),
+        (config.stash_dir, "stash_dir"),
+        (config.log_dir, "log_dir"),
+        (config.external_log_dir, "external_log_dir"),
+        (config.log_filter, "log_filter"),
+    ] {
+        if ptr.is_null() {
+            set_last_error(&format!("config.{name} is null"));
+            return -1;
+        }
+    }
+
+    // Convert each C string to a leaked `&'static str`.
+    let sample_dir = match unsafe { leak_cstr_to_static(config.sample_dir, "sample_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let artifact_dir = match unsafe { leak_cstr_to_static(config.artifact_dir, "artifact_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let stash_dir = match unsafe { leak_cstr_to_static(config.stash_dir, "stash_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let log_dir = match unsafe { leak_cstr_to_static(config.log_dir, "log_dir") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+    let external_log_dir =
+        match unsafe { leak_cstr_to_static(config.external_log_dir, "external_log_dir") } {
+            Ok(s) => s,
+            Err(()) => return -1,
+        };
+    let log_filter = match unsafe { leak_cstr_to_static(config.log_filter, "log_filter") } {
+        Ok(s) => s,
+        Err(()) => return -1,
+    };
+
+    let convert_auto_collect = |ac: &crate::ffi_types::structs::MalboxAutoCollectConfig|
+        -> malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig
+    {
+        let include: &'static [&'static str] = if ac.include.is_null() || ac.include_count == 0 {
+            &[]
+        } else {
+            let slice = unsafe { std::slice::from_raw_parts(ac.include, ac.include_count) };
+            let leaked: Vec<&'static str> = slice
+                .iter()
+                .filter_map(|&p| {
+                    if p.is_null() {
+                        None
+                    } else {
+                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
+                    }
+                })
+                .collect();
+            Box::leak(leaked.into_boxed_slice())
+        };
+        let exclude: &'static [&'static str] = if ac.exclude.is_null() || ac.exclude_count == 0 {
+            &[]
+        } else {
+            let slice = unsafe { std::slice::from_raw_parts(ac.exclude, ac.exclude_count) };
+            let leaked: Vec<&'static str> = slice
+                .iter()
+                .filter_map(|&p| {
+                    if p.is_null() {
+                        None
+                    } else {
+                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
+                    }
+                })
+                .collect();
+            Box::leak(leaked.into_boxed_slice())
+        };
+        malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
+            enabled: ac.enabled,
+            include,
+            exclude,
+            max_file_size: ac.max_file_size,
+        }
+    };
+
+    let auto_collect_artifacts = convert_auto_collect(&config.auto_collect_artifacts);
+    let auto_collect_external_logs = convert_auto_collect(&config.auto_collect_external_logs);
+
+    let plugin = GuestVtablePlugin::new(vtable);
+
+    let log_dir_path = std::path::PathBuf::from(log_dir);
+    let _ = std::fs::create_dir_all(&log_dir_path);
+    malbox_plugin_sdk::runtime::guest::sweep_log_overflow_orphans(&log_dir_path);
+    let overflow_path = log_dir_path.join(format!("run-{}.overflow.jsonl", std::process::id()));
+
+    let log_bus = std::sync::Arc::new(malbox_plugin_sdk::log::LogBus::with_overflow(
+        1024,
+        overflow_path,
+    ));
+    malbox_plugin_sdk::internal::init_tracing(log_filter, Some(std::sync::Arc::clone(&log_bus)));
+    crate::ffi_log::set_global_log_bus(std::sync::Arc::clone(&log_bus));
+
+    let rt_config = malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig {
+        listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            config.port,
+        )),
+        sample_dir,
+        artifact_dir,
+        stash_dir,
+        log_dir,
+        external_log_dir,
+        stash_threshold_bytes: config.stash_threshold_bytes,
+        stash_ttl_secs: config.stash_ttl_secs,
+        log_filter,
+        analysis_timeout: config.analysis_timeout,
+        auto_collect_artifacts,
+        auto_collect_external_logs,
+    };
+
+    // `plugin_meta` comes from C++ but we no longer pass it to `with_config`
+    // (the SDK's `with_config` takes only plugin + config). Keep it alive to
+    // ensure its `&'static str` strings aren't dropped mid-run.
+    let _meta_keepalive = plugin_meta;
+
+    let runtime = GuestLinearRuntime::with_config(plugin, rt_config).with_log_bus(log_bus);
+
+    match runtime.run_blocking() {
+        Ok(()) => 0,
+        Err(e) => {
+            let mut msg = format!("guest runtime error: {e}");
+            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+            while let Some(cause) = source {
+                msg.push_str(&format!("\n  caused by: {cause}"));
+                source = std::error::Error::source(cause);
+            }
+            set_last_error(&msg);
+            -1
+        }
+    }
+}
+
+/// Start a gRPC-based guest runtime for a **host-plugin** vtable.
+///
+/// This is identical to [`malbox_run_guest_plugin`] except that it accepts a
+/// [`MalboxPluginVtable`] (the `HostPlugin` vtable used by host plugins) and
+/// wraps it in a [`GuestPluginRuntime`] instead of a [`GuestLinearRuntime`].
+/// Use this when a plugin implements the full `HostPlugin` interface but needs
+/// to run inside the guest VM over gRPC.
+///
+/// Returns `0` on clean shutdown, `-1` on any error (the error message is
+/// available via [`malbox_last_error`](crate::error::malbox_last_error)).
+///
+/// # Safety
+///
+/// - `vtable.plugin_ptr` and all non-null function pointers in `vtable` must
+///   remain valid for the lifetime of the process.
+/// - All non-null string pointer fields in `meta` and `config` must point to
+///   valid null-terminated C strings for the duration of this call.
+#[cfg(feature = "guest")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn malbox_run_guest_host_plugin(
     vtable: MalboxPluginVtable,
     meta: MalboxPluginMeta,
     config: MalboxGuestRuntimeConfig,
@@ -317,6 +508,7 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         stash_threshold_bytes: config.stash_threshold_bytes,
         stash_ttl_secs: config.stash_ttl_secs,
         log_filter,
+        analysis_timeout: config.analysis_timeout,
         auto_collect_artifacts,
         auto_collect_external_logs,
     };
@@ -331,7 +523,13 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
     match runtime.run_blocking() {
         Ok(()) => 0,
         Err(e) => {
-            set_last_error(&format!("guest runtime error: {e}"));
+            let mut msg = format!("guest runtime error: {e}");
+            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+            while let Some(cause) = source {
+                msg.push_str(&format!("\n  caused by: {cause}"));
+                source = std::error::Error::source(cause);
+            }
+            set_last_error(&msg);
             -1
         }
     }
@@ -396,9 +594,9 @@ mod tests {
             state: MalboxPluginState::Ephemeral,
             execution: MalboxExecutionContext::Parallel,
         };
-        let vtable = MalboxPluginVtable {
+        let vtable = MalboxGuestPluginVtable {
             abi_version: 0, // wrong version
-            ..MalboxPluginVtable::default()
+            ..MalboxGuestPluginVtable::default()
         };
 
         let filter = std::ffi::CString::new("info").unwrap();
@@ -425,6 +623,7 @@ mod tests {
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
+            analysis_timeout: 300,
             auto_collect_artifacts: disabled_ac,
             auto_collect_external_logs: disabled_ac,
         };
@@ -449,9 +648,9 @@ mod tests {
             state: MalboxPluginState::Ephemeral,
             execution: MalboxExecutionContext::Parallel,
         };
-        let vtable = MalboxPluginVtable {
+        let vtable = MalboxGuestPluginVtable {
             abi_version: MALBOX_ABI_VERSION,
-            ..MalboxPluginVtable::default()
+            ..MalboxGuestPluginVtable::default()
         };
         let filter = std::ffi::CString::new("info").unwrap();
         let artifact_dir = std::ffi::CString::new("/tmp/malbox/artifacts").unwrap();
@@ -476,6 +675,7 @@ mod tests {
             stash_threshold_bytes: 1_048_576,
             stash_ttl_secs: 120,
             log_filter: filter.as_ptr(),
+            analysis_timeout: 300,
             auto_collect_artifacts: disabled_ac,
             auto_collect_external_logs: disabled_ac,
         };

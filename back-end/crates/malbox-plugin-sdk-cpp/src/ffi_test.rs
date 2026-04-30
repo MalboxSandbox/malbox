@@ -10,7 +10,7 @@ use std::ffi::{CStr, c_char};
 use std::path::PathBuf;
 
 use malbox_plugin_sdk::context::Context;
-use malbox_plugin_sdk::plugin::Plugin;
+use malbox_plugin_sdk::plugin::HostPlugin;
 use malbox_plugin_sdk::types::Task;
 use malbox_plugin_transport::messages::events::Event;
 

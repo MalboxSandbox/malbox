@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 #include <malbox/error.hpp>
 #include <malbox/types.hpp>
 #include <malbox/events.hpp>
+#include <malbox/guest_plugin.hpp>
 #include <malbox/handlers.hpp>
 #include <malbox/result.hpp>
 #include <malbox/task.hpp>
@@ -39,6 +41,7 @@ struct RuntimeConfig {
     std::size_t   stash_threshold_bytes;
     std::uint64_t stash_ttl_secs;
     const char*   log_filter;
+    std::uint64_t analysis_timeout = 300;
     AutoCollectConfig auto_collect_artifacts;
     AutoCollectConfig auto_collect_external_logs;
 };
@@ -60,7 +63,7 @@ inline int32_t trampoline_on_task(
     const MalboxContext*        ctx_ptr,
     MalboxResultBuilder*        /*builder*/)
 {
-    auto* plugin = static_cast<Plugin*>(plugin_ptr);
+    auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
     try {
         Task    task{task_ptr};
         Context ctx{ctx_ptr};
@@ -83,7 +86,7 @@ inline int32_t trampoline_on_start(
     const char* const* values,
     uintptr_t          count)
 {
-    auto* plugin = static_cast<Plugin*>(plugin_ptr);
+    auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
     try {
         std::unordered_map<std::string, std::string> cfg;
         cfg.reserve(count);
@@ -99,7 +102,7 @@ inline int32_t trampoline_on_start(
 
 /// Trampoline for Plugin::on_stop.
 inline int32_t trampoline_on_stop(void* plugin_ptr) {
-    auto* plugin = static_cast<Plugin*>(plugin_ptr);
+    auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
     try {
         plugin->on_stop();
         return 0;
@@ -114,7 +117,7 @@ inline int32_t trampoline_health_check(
     MalboxHealthStatus*  out_status)
 {
     static thread_local std::string tl_reason;
-    auto* plugin = static_cast<Plugin*>(plugin_ptr);
+    auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
     try {
         HealthStatus hs = plugin->health_check();
         tl_reason        = hs.reason;
@@ -135,7 +138,7 @@ inline int32_t trampoline_on_event(
     MalboxEvent          c_event,
     const MalboxContext* ctx_ptr)
 {
-    auto* plugin = static_cast<Plugin*>(plugin_ptr);
+    auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
     try {
         Event   event{c_event};
         Context ctx{ctx_ptr};
@@ -153,7 +156,7 @@ inline int32_t trampoline_on_execute_command(
     MalboxExecResult* result)
 {
     try {
-        auto* plugin = static_cast<Plugin*>(plugin_ptr);
+        auto* plugin = static_cast<HostPlugin*>(plugin_ptr);
         return plugin->on_execute_command(request, result);
     } catch (const std::exception& e) {
         (void)e;
@@ -168,7 +171,7 @@ inline int32_t trampoline_on_execute_command(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a MalboxPluginVtable from a raw Plugin pointer.
-inline MalboxPluginVtable build_vtable(Plugin* plugin_ptr) {
+inline MalboxPluginVtable build_vtable(HostPlugin* plugin_ptr) {
     MalboxPluginVtable vtable{};
     vtable.abi_version        = MALBOX_ABI_VERSION;
     vtable.plugin_ptr         = plugin_ptr;
@@ -194,6 +197,80 @@ inline MalboxPluginMeta build_c_meta(const PluginMeta& meta) {
     return c;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Guest plugin trampolines
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline int32_t trampoline_guest_on_start(
+    void* plugin_ptr,
+    const MalboxTask* task_ptr,
+    const MalboxContext* ctx_ptr)
+{
+    auto* plugin = static_cast<GuestPlugin*>(plugin_ptr);
+    try {
+        Task task{task_ptr};
+        Context ctx{ctx_ptr};
+        plugin->on_start(task, ctx);
+        return 0;
+    } catch (...) { return -1; }
+}
+
+inline int32_t trampoline_guest_on_stop(
+    void* plugin_ptr,
+    const MalboxContext* ctx_ptr)
+{
+    auto* plugin = static_cast<GuestPlugin*>(plugin_ptr);
+    try {
+        Context ctx{ctx_ptr};
+        plugin->on_stop(ctx);
+        return 0;
+    } catch (...) { return -1; }
+}
+
+inline int32_t trampoline_guest_execute_sample(
+    void* plugin_ptr,
+    const char* sample_path_utf8)
+{
+    auto* plugin = static_cast<GuestPlugin*>(plugin_ptr);
+    try {
+        const auto* begin = reinterpret_cast<const char8_t*>(sample_path_utf8);
+        const auto len = std::char_traits<char>::length(sample_path_utf8);
+        std::filesystem::path p{begin, begin + len};
+        return plugin->execute_sample(p);
+    } catch (...) { return -1; }
+}
+
+inline int32_t trampoline_guest_health_check(
+    void*                plugin_ptr,
+    MalboxHealthStatus*  out_status)
+{
+    static thread_local std::string tl_reason;
+    auto* plugin = static_cast<GuestPlugin*>(plugin_ptr);
+    try {
+        HealthStatus hs = plugin->health_check();
+        tl_reason        = hs.reason;
+        out_status->ready  = hs.ready;
+        out_status->reason = tl_reason.c_str();
+        return 0;
+    } catch (...) {
+        out_status->ready  = false;
+        tl_reason          = "health_check threw an exception";
+        out_status->reason = tl_reason.c_str();
+        return -1;
+    }
+}
+
+inline MalboxGuestPluginVtable build_guest_vtable(GuestPlugin* plugin_ptr) {
+    MalboxGuestPluginVtable vtable{};
+    vtable.abi_version    = MALBOX_ABI_VERSION;
+    vtable.plugin_ptr     = plugin_ptr;
+    vtable.on_start       = &trampoline_guest_on_start;
+    vtable.on_stop        = &trampoline_guest_on_stop;
+    vtable.execute_sample = &trampoline_guest_execute_sample;
+    vtable.health_check   = &trampoline_guest_health_check;
+    return vtable;
+}
+
 } // namespace detail
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +281,7 @@ inline MalboxPluginMeta build_c_meta(const PluginMeta& meta) {
 ///
 /// This function blocks until the runtime shuts down. Call it from main().
 /// Throws malbox::Error on failure.
-inline void run_host_plugin(std::unique_ptr<Plugin> plugin, const PluginMeta& meta) {
+inline void run_host_plugin(std::unique_ptr<HostPlugin> plugin, const PluginMeta& meta) {
     MalboxPluginVtable vtable = detail::build_vtable(plugin.get());
     MalboxPluginMeta   c_meta = detail::build_c_meta(meta);
     detail::check_rc(malbox_run_host_plugin(vtable, c_meta));
@@ -215,9 +292,54 @@ inline void run_host_plugin(std::unique_ptr<Plugin> plugin, const PluginMeta& me
 /// This function blocks until the runtime shuts down. Call it from main().
 /// Throws malbox::Error on failure.
 inline void run_guest_plugin(
-    std::unique_ptr<Plugin>  plugin,
-    const PluginMeta&        meta,
-    const RuntimeConfig&     config)
+    std::unique_ptr<GuestPlugin> plugin,
+    const PluginMeta&            meta,
+    const RuntimeConfig&         config)
+{
+    MalboxGuestPluginVtable vtable = detail::build_guest_vtable(plugin.get());
+    MalboxPluginMeta        c_meta = detail::build_c_meta(meta);
+
+    auto to_c_ac = [](const AutoCollectConfig& ac) -> MalboxAutoCollectConfig {
+        MalboxAutoCollectConfig c{};
+        c.enabled       = ac.enabled;
+        c.include       = ac.include;
+        c.include_count = ac.include_count;
+        c.exclude       = ac.exclude;
+        c.exclude_count = ac.exclude_count;
+        c.max_file_size = ac.max_file_size;
+        return c;
+    };
+
+    MalboxGuestRuntimeConfig c_config{};
+    c_config.port                       = config.port;
+    c_config.sample_dir                 = config.sample_dir;
+    c_config.artifact_dir               = config.artifact_dir;
+    c_config.stash_dir                  = config.stash_dir;
+    c_config.log_dir                    = config.log_dir;
+    c_config.external_log_dir           = config.external_log_dir;
+    c_config.stash_threshold_bytes      = config.stash_threshold_bytes;
+    c_config.stash_ttl_secs             = config.stash_ttl_secs;
+    c_config.log_filter                 = config.log_filter;
+    c_config.analysis_timeout           = config.analysis_timeout;
+    c_config.auto_collect_artifacts     = to_c_ac(config.auto_collect_artifacts);
+    c_config.auto_collect_external_logs = to_c_ac(config.auto_collect_external_logs);
+
+    detail::check_rc(malbox_run_guest_plugin(vtable, c_meta, c_config));
+}
+
+/// Start the gRPC-based guest runtime for a HostPlugin.
+///
+/// This is like run_guest_plugin but accepts a HostPlugin instead of a
+/// GuestPlugin.  Use this when a plugin implements the full HostPlugin
+/// interface (on_task, on_event, etc.) but needs to run inside the guest
+/// VM over gRPC.
+///
+/// This function blocks until the runtime shuts down. Call it from main().
+/// Throws malbox::Error on failure.
+inline void run_guest_host_plugin(
+    std::unique_ptr<HostPlugin> plugin,
+    const PluginMeta&           meta,
+    const RuntimeConfig&        config)
 {
     MalboxPluginVtable vtable = detail::build_vtable(plugin.get());
     MalboxPluginMeta   c_meta = detail::build_c_meta(meta);
@@ -243,10 +365,11 @@ inline void run_guest_plugin(
     c_config.stash_threshold_bytes      = config.stash_threshold_bytes;
     c_config.stash_ttl_secs             = config.stash_ttl_secs;
     c_config.log_filter                 = config.log_filter;
+    c_config.analysis_timeout           = config.analysis_timeout;
     c_config.auto_collect_artifacts     = to_c_ac(config.auto_collect_artifacts);
     c_config.auto_collect_external_logs = to_c_ac(config.auto_collect_external_logs);
 
-    detail::check_rc(malbox_run_guest_plugin(vtable, c_meta, c_config));
+    detail::check_rc(malbox_run_guest_host_plugin(vtable, c_meta, c_config));
 }
 
 /// Run a plugin through a synthetic test lifecycle without starting any transport.
@@ -254,8 +377,8 @@ inline void run_guest_plugin(
 /// Useful in plugin unit tests.
 /// Throws malbox::Error on failure.
 inline void test_run_plugin(
-    std::unique_ptr<Plugin>  plugin,
-    int32_t                  task_id,
+    std::unique_ptr<HostPlugin>  plugin,
+    int32_t                      task_id,
     const char*              sample_path,
     const std::unordered_map<std::string, std::string>& config = {})
 {
