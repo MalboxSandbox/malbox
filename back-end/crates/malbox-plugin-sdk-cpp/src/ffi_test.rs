@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use malbox_plugin_sdk::context::Context;
-use malbox_plugin_sdk::plugin::HostPlugin;
-use malbox_plugin_sdk::types::Task;
+use malbox_plugin_sdk::plugin::{HostPlugin, Plugin};
 use malbox_plugin_transport::messages::events::Event;
 
 use crate::error::set_last_error;
@@ -23,7 +23,7 @@ use crate::ffi_types::{MALBOX_ABI_VERSION, MalboxPluginVtable};
 /// All pointer fields must remain valid for the duration of the call.
 #[repr(C)]
 pub struct MalboxTestConfig {
-    /// Numeric task identifier used to construct the test `Task`.
+    /// Numeric task identifier used to construct the test `Context`.
     pub task_id: i32,
     /// Null-terminated path to the sample file (may be a non-existent path for
     /// tests that do not call `task.sample_bytes()`).
@@ -36,14 +36,18 @@ pub struct MalboxTestConfig {
     pub config_count: usize,
 }
 
+fn noop_emitter() -> Arc<dyn malbox_plugin_transport::traits::TransportEmitter + Send + Sync> {
+    Arc::new(())
+}
+
 /// Run a plugin through a synthetic lifecycle without starting any transport.
 ///
 /// Intended for unit-testing C++ plugin code.  The call sequence is:
 ///
 /// 1. `on_start(config)`
-/// 2. `on_task(task, ctx)`
+/// 2. `on_task(ctx)`
 /// 3. `health_check()`
-/// 4. `on_event(ConfigReloaded, ctx)`
+/// 4. `on_event(ConfigReloaded)`
 /// 5. `on_stop()`
 ///
 /// Returns `0` if every step succeeds, `-1` on the first error (the error
@@ -98,8 +102,7 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
 
     // Create plugin adapter and no-op context
     let plugin = VtablePlugin::new(vtable);
-    let emitter = ();
-    let ctx = Context::test_new(&emitter);
+    let _ctx = Context::test_new(noop_emitter());
 
     // Step 1: on_start
     if let Err(e) = plugin.on_start(config_map.clone()) {
@@ -107,13 +110,17 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
         return -1;
     }
 
-    // Step 2: on_task -- needs a result channel so push_result works.
-    // Mirrors the real guest runtime, which wires a ResultSender for on_task
-    // and provides a tx-less context for lifecycle callbacks.
+    // Step 2: on_task -- needs a result channel so push works.
+    // Mirrors the real guest runtime, which wires a ResultSender for on_task.
     let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
-    let ctx_task = Context::test_new_with_tx(&emitter, tx);
-    let task = Task::test_new(config.task_id, sample_path, config_map);
-    let on_task_result = plugin.on_task(task, &ctx_task);
+    let ctx_task = Context::test_new_full(
+        config.task_id,
+        sample_path,
+        config_map,
+        noop_emitter(),
+        Some(tx),
+    );
+    let on_task_result = plugin.on_task(&ctx_task);
     drop(ctx_task);
     while rx.try_recv().is_ok() {}
     if let Err(e) = on_task_result {
@@ -125,7 +132,7 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
     let _status = plugin.health_check();
 
     // Step 4: on_event(ConfigReloaded)
-    if let Err(e) = plugin.on_event(Event::ConfigReloaded, &ctx) {
+    if let Err(e) = plugin.on_event(Event::ConfigReloaded) {
         set_last_error(&format!("on_event failed: {e}"));
         return -1;
     }
@@ -135,6 +142,9 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
         set_last_error(&format!("on_stop failed: {e}"));
         return -1;
     }
+
+    // Clean up temporaries from task accessor functions
+    crate::ffi_task::clear_temp_storage();
 
     0
 }
@@ -188,7 +198,7 @@ unsafe fn build_config_map(config: &MalboxTestConfig) -> Result<HashMap<String, 
 mod tests {
     use super::*;
     use crate::ffi_events::MalboxEvent;
-    use crate::ffi_types::{MalboxContext, MalboxPluginVtable, MalboxResultBuilder, MalboxTask};
+    use crate::ffi_types::{MalboxContext, MalboxPluginVtable, MalboxResultBuilder};
     use std::ffi::CString;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -228,7 +238,6 @@ mod tests {
 
     unsafe extern "C" fn mock_on_task(
         _plugin: *mut std::ffi::c_void,
-        _task: *const MalboxTask,
         _ctx: *const MalboxContext,
         _builder: *mut MalboxResultBuilder,
     ) -> i32 {
@@ -250,11 +259,7 @@ mod tests {
         0
     }
 
-    unsafe extern "C" fn mock_on_event(
-        _plugin: *mut std::ffi::c_void,
-        event: MalboxEvent,
-        _ctx: *const MalboxContext,
-    ) -> i32 {
+    unsafe extern "C" fn mock_on_event(_plugin: *mut std::ffi::c_void, event: MalboxEvent) -> i32 {
         CALL_EVENT.fetch_add(1, Ordering::SeqCst);
         // Verify we receive the expected event variant (ConfigReloaded = 11).
         assert_eq!(event.tag, crate::ffi_events::MalboxEventTag::ConfigReloaded);

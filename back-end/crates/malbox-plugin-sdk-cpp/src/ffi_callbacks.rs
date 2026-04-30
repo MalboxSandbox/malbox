@@ -10,14 +10,14 @@ use std::ffi::CString;
 
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
-use malbox_plugin_sdk::plugin::HostPlugin;
-use malbox_plugin_sdk::types::{HealthStatus, Task};
+use malbox_plugin_sdk::plugin::{HostPlugin, Plugin};
+use malbox_plugin_sdk::types::HealthStatus;
 use malbox_plugin_transport::messages::events::Event;
 
 use crate::error::last_error_string;
 use crate::ffi_events::rust_event_to_c;
 use crate::ffi_result::ResultBuilder;
-use crate::ffi_types::{MalboxContext, MalboxHealthStatus, MalboxTask};
+use crate::ffi_types::{MalboxContext, MalboxHealthStatus};
 
 /// Rust plugin adapter that wraps a C [`MalboxPluginVtable`](crate::ffi_types::MalboxPluginVtable)
 /// and implements the `HostPlugin` trait.
@@ -64,33 +64,64 @@ fn check_rc(rc: i32) -> Result<()> {
     }
 }
 
+impl Plugin for VtablePlugin {
+    fn health_check(&self) -> HealthStatus {
+        let health_check = match self.vtable.health_check {
+            Some(f) => f,
+            None => return HealthStatus::ready(),
+        };
+
+        let mut status = MalboxHealthStatus {
+            ready: false,
+            reason: std::ptr::null(),
+        };
+
+        // SAFETY: plugin_ptr is valid; &mut status is valid for the call duration.
+        let rc = unsafe { health_check(self.vtable.plugin_ptr, &mut status) };
+
+        if rc != 0 {
+            return HealthStatus::ready();
+        }
+
+        let reason = if status.reason.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(status.reason) }
+                .to_str()
+                .unwrap_or("")
+                .to_owned()
+        };
+
+        if status.ready {
+            HealthStatus::ready()
+        } else {
+            HealthStatus::not_ready(reason)
+        }
+    }
+}
+
 impl HostPlugin for VtablePlugin {
-    fn on_task(&self, task: Task, ctx: &Context) -> Result<()> {
+    fn on_task(&self, ctx: &Context) -> Result<()> {
         let on_task = match self.vtable.on_task {
             Some(f) => f,
             None => return Ok(()),
         };
 
         let mut builder = ResultBuilder::new();
-        let task_ptr = (&task as *const Task) as *const MalboxTask;
-        let ctx_ptr = (ctx as *const Context<'_>) as *const MalboxContext;
+        let ctx_ptr = (ctx as *const Context) as *const MalboxContext;
         let builder_ptr =
             (&mut builder as *mut ResultBuilder) as *mut crate::ffi_types::MalboxResultBuilder;
 
-        // SAFETY: task_ptr is valid for the duration of this call;
-        // ctx_ptr was created from &Context in this frame;
+        // SAFETY: ctx_ptr was created from &Context in this frame;
         // builder_ptr is valid for the duration of this call.
-        let rc = unsafe { on_task(self.vtable.plugin_ptr, task_ptr, ctx_ptr, builder_ptr) };
-
-        // Release any thread-local temporaries created by task accessor functions.
-        crate::ffi_task::clear_temp_storage();
+        let rc = unsafe { on_task(self.vtable.plugin_ptr, ctx_ptr, builder_ptr) };
 
         check_rc(rc)?;
 
         // Forward the accumulated results to the Rust runtime via the new
         // push-only API. The C++ surface (ResultBuilder) is unchanged.
         for result in builder.take() {
-            ctx.push_result(result)?;
+            ctx.results().push(result)?;
         }
 
         Ok(())
@@ -149,51 +180,16 @@ impl HostPlugin for VtablePlugin {
         check_rc(rc)
     }
 
-    fn health_check(&self) -> HealthStatus {
-        let health_check = match self.vtable.health_check {
-            Some(f) => f,
-            None => return HealthStatus::ready(),
-        };
-
-        let mut status = MalboxHealthStatus {
-            ready: false,
-            reason: std::ptr::null(),
-        };
-
-        // SAFETY: plugin_ptr is valid; &mut status is valid for the call duration.
-        let rc = unsafe { health_check(self.vtable.plugin_ptr, &mut status) };
-
-        if rc != 0 {
-            return HealthStatus::ready();
-        }
-
-        let reason = if status.reason.is_null() {
-            String::new()
-        } else {
-            unsafe { std::ffi::CStr::from_ptr(status.reason) }
-                .to_str()
-                .unwrap_or("")
-                .to_owned()
-        };
-
-        if status.ready {
-            HealthStatus::ready()
-        } else {
-            HealthStatus::not_ready(reason)
-        }
-    }
-
-    fn on_event(&self, event: Event, ctx: &Context) -> Result<()> {
+    fn on_event(&self, event: Event) -> Result<()> {
         let on_event = match self.vtable.on_event {
             Some(f) => f,
             None => return Ok(()),
         };
 
         let c_event = rust_event_to_c(&event);
-        let ctx_ptr = (ctx as *const Context<'_>) as *const MalboxContext;
 
-        // SAFETY: c_event is a Copy value; ctx_ptr is valid for the call duration.
-        let rc = unsafe { on_event(self.vtable.plugin_ptr, c_event, ctx_ptr) };
+        // SAFETY: c_event is a Copy value.
+        let rc = unsafe { on_event(self.vtable.plugin_ptr, c_event) };
         check_rc(rc)
     }
 }
@@ -201,12 +197,17 @@ impl HostPlugin for VtablePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffi_types::{MalboxContext, MalboxPluginVtable, MalboxResultBuilder, MalboxTask};
+    use crate::ffi_types::{MalboxContext, MalboxPluginVtable, MalboxResultBuilder};
     use std::ffi::CString;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     fn noop_vtable() -> MalboxPluginVtable {
         MalboxPluginVtable::default()
+    }
+
+    fn noop_emitter() -> Arc<dyn malbox_plugin_transport::traits::TransportEmitter + Send + Sync> {
+        Arc::new(())
     }
 
     // -- on_event tests --
@@ -214,9 +215,7 @@ mod tests {
     #[test]
     fn event_none_is_noop() {
         let plugin = VtablePlugin::new(noop_vtable());
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
-        assert!(plugin.on_event(Event::DaemonShutdown, &ctx).is_ok());
+        assert!(plugin.on_event(Event::DaemonShutdown).is_ok());
     }
 
     // -- on_task tests --
@@ -225,7 +224,6 @@ mod tests {
 
     unsafe extern "C" fn mock_on_task(
         _plugin: *mut std::ffi::c_void,
-        _task: *const MalboxTask,
         _ctx: *const MalboxContext,
         builder: *mut MalboxResultBuilder,
     ) -> i32 {
@@ -243,10 +241,6 @@ mod tests {
         0
     }
 
-    fn make_task() -> Task {
-        Task::test_new(42, std::path::PathBuf::from("/dev/null"), HashMap::new())
-    }
-
     #[test]
     fn on_task_dispatches_via_push_result() {
         ON_TASK_CALLED.store(false, Ordering::SeqCst);
@@ -257,13 +251,17 @@ mod tests {
         };
         let plugin = VtablePlugin::new(vtable);
 
-        // Use a real mpsc channel so we can observe what push_result sent.
+        // Use a real mpsc channel so we can observe what push sends.
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-        let emitter = ();
-        let ctx = Context::test_new_with_tx(&emitter, tx).with_task_id(1);
+        let ctx = Context::test_new_full(
+            1,
+            std::path::PathBuf::new(),
+            HashMap::new(),
+            noop_emitter(),
+            Some(tx),
+        );
 
-        let task = make_task();
-        plugin.on_task(task, &ctx).expect("on_task should succeed");
+        plugin.on_task(&ctx).expect("on_task should succeed");
 
         assert!(ON_TASK_CALLED.load(Ordering::SeqCst));
         let received = rx.try_recv().expect("one result expected");
@@ -274,11 +272,9 @@ mod tests {
     #[test]
     fn on_task_none_is_noop() {
         let plugin = VtablePlugin::new(noop_vtable());
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
-        let task = make_task();
-        plugin.on_task(task, &ctx).expect("on_task should succeed");
-        // No assertion on results — a noop vtable should not push anything.
+        let ctx = Context::test_new(noop_emitter());
+        plugin.on_task(&ctx).expect("on_task should succeed");
+        // No assertion on results -- a noop vtable should not push anything.
     }
 
     // -- on_start tests --

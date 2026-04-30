@@ -4,22 +4,33 @@
 
 int main() {
     // Enum size checks
-    static_assert(sizeof(malbox::PluginType) == 1);
     static_assert(sizeof(malbox::PluginState) == 1);
     static_assert(sizeof(malbox::ExecutionContext) == 1);
     static_assert(sizeof(malbox::EventTag) == sizeof(int32_t));
+    static_assert(sizeof(malbox::LaunchResult) == sizeof(int32_t));
 
-    // PluginMeta construction
+    // PluginMeta construction (std::string fields)
     malbox::PluginMeta meta{
         .name = "test-plugin",
         .version = "1.0.0",
         .description = "A test plugin",
         .authors = "Test",
-        .plugin_type = malbox::PluginType::Guest,
         .state = malbox::PluginState::Ephemeral,
         .execution = malbox::ExecutionContext::Parallel,
     };
-    assert(meta.name != nullptr);
+    assert(!meta.name.empty());
+    assert(meta.version == "1.0.0");
+
+    // LaunchResult values
+    static_assert(static_cast<int32_t>(malbox::LaunchResult::UseDefault) == 0);
+    static_assert(static_cast<int32_t>(malbox::LaunchResult::Launched)   == 1);
+
+    // ErrorKind values
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::Unknown)        == -1);
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::InvalidContext) == -2);
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::ChannelClosed)  == -3);
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::Io)             == -4);
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::Transport)      == -5);
 
     // HealthStatus
     auto ok = malbox::HealthStatus::ok();

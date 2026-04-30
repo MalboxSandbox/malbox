@@ -1,23 +1,31 @@
-//! The core HostPlugin trait that all malbox host plugins implement.
+//! The core Plugin and HostPlugin traits that all malbox plugins implement.
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::types::{HealthStatus, Task};
+use crate::types::HealthStatus;
 use malbox_plugin_transport::messages::events::Event;
 use std::collections::HashMap;
+
+/// Base trait for all Malbox plugins.
+pub trait Plugin: Send + Sync + 'static {
+    /// Return the plugin's current health status.
+    fn health_check(&self) -> HealthStatus {
+        HealthStatus::ready()
+    }
+}
 
 /// The trait that all malbox host plugins implement.
 ///
 /// All methods have default implementations, but a useful plugin should
 /// at minimum implement `on_task`. The `#[malbox::handlers]` macro generates
 /// this impl from annotated methods on your plugin struct.
-pub trait HostPlugin: Send + Sync + 'static {
+pub trait HostPlugin: Plugin {
     /// Process an analysis task.
     ///
-    /// Emit results via [`Context::push_result`](crate::context::Context::push_result).
+    /// Emit results via [`Context::results().push()`](crate::context::ResultSink::push).
     /// The runtime sends a final marker automatically once this method returns.
-    fn on_task(&self, task: Task, ctx: &Context) -> Result<()> {
-        let _ = (task, ctx);
+    fn on_task(&self, ctx: &Context) -> Result<()> {
+        let _ = ctx;
         Ok(())
     }
 
@@ -32,14 +40,9 @@ pub trait HostPlugin: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Return the plugin's current health status.
-    fn health_check(&self) -> HealthStatus {
-        HealthStatus::ready()
-    }
-
     /// Handle a system event.
-    fn on_event(&self, event: Event, ctx: &Context) -> Result<()> {
-        let _ = (event, ctx);
+    fn on_event(&self, event: Event) -> Result<()> {
+        let _ = event;
         Ok(())
     }
 }
@@ -48,9 +51,12 @@ pub trait HostPlugin: Send + Sync + 'static {
 mod tests {
     use super::*;
     use crate::types::PluginResult;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     // MinimalPlugin: empty impl -- verify all defaults work
     struct MinimalPlugin;
+    impl Plugin for MinimalPlugin {}
     impl HostPlugin for MinimalPlugin {}
 
     #[test]
@@ -70,22 +76,33 @@ mod tests {
 
     // TaskOnlyPlugin: verify on_task override works
     struct TaskOnlyPlugin;
+    impl Plugin for TaskOnlyPlugin {}
     impl HostPlugin for TaskOnlyPlugin {
-        fn on_task(&self, _task: Task, ctx: &Context) -> Result<()> {
-            ctx.push_result(PluginResult::bytes("hello", vec![1, 2, 3]))?;
+        fn on_task(&self, ctx: &Context) -> Result<()> {
+            ctx.results()
+                .push(PluginResult::bytes("hello", vec![1, 2, 3]))?;
             Ok(())
         }
+    }
+
+    fn noop_emitter() -> Arc<dyn malbox_plugin_transport::traits::TransportEmitter + Send + Sync> {
+        Arc::new(())
     }
 
     #[test]
     fn task_only_plugin_override_works() {
         let plugin = TaskOnlyPlugin;
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-        let emitter = ();
-        let ctx = Context::new(&emitter, Some(tx)).with_task_id(1);
-        let task = Task::new(1, std::path::PathBuf::from("/tmp/sample"), HashMap::new());
+        let ctx = Context::new(
+            1,
+            std::path::PathBuf::new(),
+            HashMap::new(),
+            noop_emitter(),
+            Some(tx),
+            None,
+        );
 
-        plugin.on_task(task, &ctx).expect("on_task should succeed");
+        plugin.on_task(&ctx).expect("on_task should succeed");
 
         let received = rx.try_recv().expect("one result expected");
         let task_result = received.expect("should be Ok");
@@ -96,11 +113,9 @@ mod tests {
     #[test]
     fn on_event_default_is_noop() {
         let plugin = MinimalPlugin;
-        let emitter = ();
-        let ctx = Context::new(&emitter, None);
         let event = Event::TaskCreated { task_id: 42 };
 
-        let result = plugin.on_event(event, &ctx);
+        let result = plugin.on_event(event);
         assert!(result.is_ok());
     }
 }

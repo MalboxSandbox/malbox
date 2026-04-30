@@ -1,4 +1,4 @@
-//! Host plugin runtime — IPC-based event loop.
+//! Host plugin runtime -- IPC-based event loop.
 //!
 //! Host plugins run on the same machine as the daemon and communicate via
 //! iceoryx2 shared-memory IPC. The runtime polls the receiver for incoming
@@ -9,7 +9,7 @@
 use crate::context::Context;
 use crate::error::{Result, SdkError};
 use crate::plugin::HostPlugin;
-use crate::types::{PluginMeta, Task};
+use crate::types::PluginMeta;
 
 use malbox_plugin_transport::grpc::proto;
 use malbox_plugin_transport::ipc::{
@@ -21,6 +21,7 @@ use malbox_plugin_transport::traits::{TransportEmitter, TransportReceiver};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -31,7 +32,7 @@ pub struct HostRuntime<P> {
     plugin: P,
     meta: PluginMeta,
     receiver: EventReceiver,
-    emitter: EventEmitter,
+    emitter: Arc<EventEmitter>,
     task_request_rx: TaskRequestReceiver,
     task_result_tx: TaskResultPublisher,
     shutdown: AtomicBool,
@@ -49,8 +50,10 @@ impl<P: HostPlugin> HostRuntime<P> {
         let receiver = EventReceiver::new(&node, daemon_channel::EVENTS, daemon_channel::PAYLOADS)
             .map_err(|e| SdkError::Init(format!("Failed to create event receiver: {}", e)))?;
 
-        let emitter = EventEmitter::new(&node, plugin_channel::EVENTS, plugin_channel::PAYLOADS)
-            .map_err(|e| SdkError::Init(format!("Failed to create event emitter: {}", e)))?;
+        let emitter = Arc::new(
+            EventEmitter::new(&node, plugin_channel::EVENTS, plugin_channel::PAYLOADS)
+                .map_err(|e| SdkError::Init(format!("Failed to create event emitter: {}", e)))?,
+        );
 
         let plugin_id = std::env::var("MALBOX_PLUGIN_ID")
             .map_err(|_| SdkError::Init("MALBOX_PLUGIN_ID environment variable not set".into()))?;
@@ -79,13 +82,13 @@ impl<P: HostPlugin> HostRuntime<P> {
     /// Run the plugin event loop. Blocks until shutdown.
     #[instrument(skip_all, fields(plugin = %self.meta.name), err)]
     pub fn run(&self) -> Result<()> {
-        let event_ctx = Context::new(&self.emitter, None);
-
         // Call on_start
         self.plugin.on_start(HashMap::new())?;
 
         // Emit PluginStarted
-        event_ctx.emit_event(Event::PluginStarted { plugin_id: 0 })?;
+        self.emitter
+            .emit(Event::PluginStarted { plugin_id: 0 })
+            .map_err(SdkError::Transport)?;
         info!(plugin = %self.meta.name, "Plugin started, entering event loop");
 
         // Event loop
@@ -122,7 +125,7 @@ impl<P: HostPlugin> HostRuntime<P> {
                         }
                     }
 
-                    if let Err(e) = self.plugin.on_event(event, &event_ctx) {
+                    if let Err(e) = self.plugin.on_event(event) {
                         error!(plugin = %self.meta.name, error = %e, "Handler error");
                     }
                 }
@@ -139,7 +142,7 @@ impl<P: HostPlugin> HostRuntime<P> {
         }
 
         // Emit PluginStopped
-        let _ = event_ctx.emit_event(Event::PluginStopped { plugin_id: 0 });
+        let _ = self.emitter.emit(Event::PluginStopped { plugin_id: 0 });
 
         info!(plugin = %self.meta.name, "Plugin runtime exited");
         Ok(())
@@ -158,9 +161,16 @@ impl<P: HostPlugin> HostRuntime<P> {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(64);
 
-        let task = Task::new(task_id, PathBuf::from(&request.sample_path), request.config);
+        let emitter: Arc<dyn TransportEmitter + Send + Sync> = Arc::clone(&self.emitter) as _;
 
-        let task_ctx = Context::new(&self.emitter, Some(tx)).with_task_id(task_id);
+        let task_ctx = Context::new(
+            task_id,
+            PathBuf::from(&request.sample_path),
+            request.config,
+            emitter,
+            Some(tx),
+            None,
+        );
 
         // Use std::thread::scope for safe borrowing of &self references in drain thread
         let task_result = std::thread::scope(|s| {
@@ -170,7 +180,7 @@ impl<P: HostPlugin> HostRuntime<P> {
                 drain_results(&mut rx, result_tx);
             });
 
-            self.plugin.on_task(task, &task_ctx)
+            self.plugin.on_task(&task_ctx)
         });
 
         // Drop context to close the mpsc sender (drain thread will finish)

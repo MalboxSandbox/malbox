@@ -14,7 +14,7 @@ use std::ffi::{CStr, c_char};
 use malbox_plugin_sdk::runtime::guest::GuestRuntime;
 #[cfg(feature = "host")]
 use malbox_plugin_sdk::runtime::host::HostRuntime;
-use malbox_plugin_sdk::types::{ExecutionContext, PluginMeta, PluginState, PluginType};
+use malbox_plugin_sdk::types::{ExecutionContext, PluginMeta, PluginState};
 
 use crate::error::set_last_error;
 #[cfg(feature = "host")]
@@ -29,7 +29,6 @@ use crate::ffi_types::MalboxGuestRuntimeConfig;
 use crate::ffi_types::MalboxPluginVtable;
 use crate::ffi_types::{
     MALBOX_ABI_VERSION, MalboxExecutionContext, MalboxPluginMeta, MalboxPluginState,
-    MalboxPluginType,
 };
 
 /// Convert a `*const c_char` to a `&'static str` by copying the bytes and
@@ -73,19 +72,14 @@ unsafe fn leak_cstr_to_static(ptr: *const c_char, field: &str) -> Result<&'stati
 /// All non-null pointer fields in `meta` must point to valid, null-terminated
 /// C strings for the duration of this call.
 unsafe fn convert_meta(meta: MalboxPluginMeta) -> Result<PluginMeta, String> {
-    let name = unsafe { static_str_from_ptr(meta.name, "name") }?;
-    let version = unsafe { static_str_from_ptr(meta.version, "version") }?;
-    let authors = unsafe { static_str_from_ptr(meta.authors, "authors") }?;
+    let name = unsafe { static_str_from_ptr(meta.name, "name") }?.to_string();
+    let version = unsafe { static_str_from_ptr(meta.version, "version") }?.to_string();
+    let authors = unsafe { static_str_from_ptr(meta.authors, "authors") }?.to_string();
 
     let description = if meta.description.is_null() {
-        None
+        String::new()
     } else {
-        Some(unsafe { static_str_from_ptr(meta.description, "description") }?)
-    };
-
-    let plugin_type = match meta.plugin_type {
-        MalboxPluginType::Host => PluginType::Host,
-        MalboxPluginType::Guest => PluginType::Guest,
+        unsafe { static_str_from_ptr(meta.description, "description") }?.to_string()
     };
 
     let state = match meta.state {
@@ -106,7 +100,6 @@ unsafe fn convert_meta(meta: MalboxPluginMeta) -> Result<PluginMeta, String> {
         version,
         description,
         authors,
-        plugin_type,
         state,
         execution,
     })
@@ -377,7 +370,7 @@ mod tests {
             version: version.as_ptr(),
             description: desc.as_ptr(),
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Host,
+
             state: MalboxPluginState::Persistent,
             execution: MalboxExecutionContext::Sequential,
         };
@@ -407,7 +400,7 @@ mod tests {
             version: version.as_ptr(),
             description: desc.as_ptr(),
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Guest,
+
             state: MalboxPluginState::Ephemeral,
             execution: MalboxExecutionContext::Parallel,
         };
@@ -461,7 +454,7 @@ mod tests {
             version: version.as_ptr(),
             description: desc.as_ptr(),
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Guest,
+
             state: MalboxPluginState::Ephemeral,
             execution: MalboxExecutionContext::Parallel,
         };
@@ -515,7 +508,7 @@ mod tests {
             version: version.as_ptr(),
             description: std::ptr::null(), // nullable — ok
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Host,
+
             state: MalboxPluginState::Persistent,
             execution: MalboxExecutionContext::Sequential,
         };
@@ -545,7 +538,7 @@ mod tests {
             version: std::ptr::null(), // null!
             description: std::ptr::null(),
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Host,
+
             state: MalboxPluginState::Persistent,
             execution: MalboxExecutionContext::Sequential,
         };
@@ -572,7 +565,7 @@ mod tests {
             version: version.as_ptr(),
             description: std::ptr::null(),
             authors: std::ptr::null(), // null!
-            plugin_type: MalboxPluginType::Host,
+
             state: MalboxPluginState::Persistent,
             execution: MalboxExecutionContext::Sequential,
         };
@@ -592,7 +585,7 @@ mod tests {
     // convert_meta: null description is allowed
 
     #[test]
-    fn convert_meta_null_description_maps_to_none() {
+    fn convert_meta_null_description_maps_to_empty() {
         let name = CString::new("plugin").unwrap();
         let version = CString::new("1.0.0").unwrap();
         let authors = CString::new("Author").unwrap();
@@ -601,7 +594,7 @@ mod tests {
             version: version.as_ptr(),
             description: std::ptr::null(), // optional
             authors: authors.as_ptr(),
-            plugin_type: MalboxPluginType::Host,
+
             state: MalboxPluginState::Scoped,
             execution: MalboxExecutionContext::Unrestricted,
         };
@@ -609,7 +602,7 @@ mod tests {
         let result = unsafe { convert_meta(meta) };
         assert!(result.is_ok());
         let plugin_meta = result.unwrap();
-        assert!(plugin_meta.description.is_none());
+        assert!(plugin_meta.description.is_empty());
         assert_eq!(plugin_meta.name, "plugin");
     }
 }

@@ -16,17 +16,14 @@ public:
         assert(config.at("key") == "value");
     }
 
-    void on_task(
-        const malbox::Task& task,
-        const malbox::Context& ctx
-    ) override {
+    void on_task(const malbox::Context& ctx) override {
         task_count++;
-        assert(task.id() == 42);
-        ctx.emit_progress(0.5, "halfway");
+        assert(ctx.task().id() == 42);
+        ctx.progress(0.5, "halfway");
         std::string json = R"({"status": "ok"})";
         auto data = std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(json.data()), json.size());
-        ctx.push_result(malbox::PluginResult::json("result", data));
+        ctx.results().push(malbox::PluginResult::json("result", data));
     }
 
     void on_stop() override {

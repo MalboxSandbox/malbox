@@ -19,7 +19,7 @@
  * this value whenever the vtable layout or calling convention changes in a
  * backward-incompatible way.
  */
-#define MALBOX_ABI_VERSION 5
+#define MALBOX_ABI_VERSION 6
 
 /**
  * Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
@@ -103,27 +103,6 @@ typedef uint8_t MalboxPluginState;
 #endif // __cplusplus
 
 /**
- * Whether a plugin runs on the host machine or inside the analysis guest VM.
- */
-enum MalboxPluginType
-#ifdef __cplusplus
-  : uint8_t
-#endif // __cplusplus
- {
-    /**
-     * The plugin runs on the host machine alongside the daemon.
-     */
-    MALBOX_PLUGIN_TYPE_HOST = 0,
-    /**
-     * The plugin runs inside the analysis guest VM.
-     */
-    MALBOX_PLUGIN_TYPE_GUEST = 1,
-};
-#ifndef __cplusplus
-typedef uint8_t MalboxPluginType;
-#endif // __cplusplus
-
-/**
  * Opaque handle representing a [`malbox_plugin_sdk::context::Context`].
  *
  * C/C++ code must only access a `MalboxContext` through the
@@ -140,14 +119,6 @@ typedef struct MalboxContext MalboxContext;
  * directly.
  */
 typedef struct MalboxResultBuilder MalboxResultBuilder;
-
-/**
- * Opaque handle representing a [`malbox_plugin_sdk::types::Task`].
- *
- * C/C++ code must only access a `MalboxTask` through the `malbox_task_*`
- * accessor functions; it must never dereference the pointer directly.
- */
-typedef struct MalboxTask MalboxTask;
 
 /**
  * A C-ABI representation of a system-wide event.
@@ -211,12 +182,9 @@ typedef struct MalboxPluginVtable {
     /**
      * Called when the daemon dispatches a task to this plugin.
      *
-     * Arguments: `plugin_ptr`, task handle, context handle, result builder.
+     * Arguments: `plugin_ptr`, context handle (contains task info), result builder.
      */
-    int32_t (*on_task)(void*,
-                       const struct MalboxTask*,
-                       const struct MalboxContext*,
-                       struct MalboxResultBuilder*);
+    int32_t (*on_task)(void*, const struct MalboxContext*, struct MalboxResultBuilder*);
     /**
      * Called once when the plugin is started with its configuration.
      *
@@ -239,9 +207,9 @@ typedef struct MalboxPluginVtable {
     /**
      * Called when a system event occurs.
      *
-     * Arguments: `plugin_ptr`, flat event (tag + id), context handle.
+     * Arguments: `plugin_ptr`, flat event (tag + id).
      */
-    int32_t (*on_event)(void*, struct MalboxEvent, const struct MalboxContext*);
+    int32_t (*on_event)(void*, struct MalboxEvent);
 } MalboxPluginVtable;
 
 /**
@@ -269,10 +237,6 @@ typedef struct MalboxPluginMeta {
      */
     const char *authors;
     /**
-     * Whether this is a host or guest plugin.
-     */
-    MalboxPluginType plugin_type;
-    /**
      * Lifetime policy for the plugin instance.
      */
     MalboxPluginState state;
@@ -288,7 +252,7 @@ typedef struct MalboxPluginMeta {
 typedef struct MalboxGuestPluginVtable {
     uint32_t abi_version;
     void *plugin_ptr;
-    int32_t (*on_start)(void*, const struct MalboxTask*, const struct MalboxContext*);
+    int32_t (*on_start)(void*, const struct MalboxContext*);
     int32_t (*on_stop)(void*, const struct MalboxContext*);
     int32_t (*execute_sample)(void*, const char*);
     int32_t (*health_check)(void*, struct MalboxHealthStatus*);
@@ -335,7 +299,7 @@ typedef struct MalboxGuestRuntimeConfig {
  */
 typedef struct MalboxTestConfig {
     /**
-     * Numeric task identifier used to construct the test `Task`.
+     * Numeric task identifier used to construct the test `Context`.
      */
     int32_t task_id;
     /**
@@ -379,6 +343,27 @@ extern "C" {
  * that the caller may write to.
  */
 int32_t malbox_last_error(const char **out_message);
+
+/**
+ * Clone a Context, incrementing its internal Arc refcount.
+ *
+ * Returns a heap-allocated `Context` that the caller owns. The caller must
+ * eventually pass it to [`malbox_context_drop`] to release it.
+ *
+ * # Safety
+ * `ctx` must be a valid `*const Context` cast to `*const MalboxContext`.
+ */
+struct MalboxContext *malbox_context_clone(const struct MalboxContext *ctx);
+
+/**
+ * Drop a heap-allocated Context previously returned by [`malbox_context_clone`].
+ *
+ * # Safety
+ * `ctx` must have been returned by `malbox_context_clone` (i.e., a
+ * heap-allocated `Box<Context>`). Passing a runtime-owned pointer
+ * (the one passed to callbacks) is undefined behavior.
+ */
+void malbox_context_drop(struct MalboxContext *ctx);
 
 /**
  * Report execution progress (0.0-1.0) with an optional status message.
@@ -614,29 +599,29 @@ int32_t malbox_run_guest_plugin(struct MalboxGuestPluginVtable vtable,
 /**
  * Return the numeric task ID.
  *
- * Returns `-1` and sets the last error if `task` is null.
+ * Returns `-1` and sets the last error if `ctx` is null.
  *
  * # Safety
  *
- * `task` must be a valid `*const Task` cast to `*const MalboxTask`, as
+ * `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
  * provided by the runtime to plugin callbacks.
  */
-int32_t malbox_task_get_id(const struct MalboxTask *task);
+int32_t malbox_task_get_id(const struct MalboxContext *ctx);
 
 /**
  * Return a pointer to a null-terminated string containing the sample path.
  *
  * The pointer is valid until `clear_temp_storage` is called (which the
  * runtime does automatically after each plugin callback returns).
- * Returns null and sets the last error if `task` is null or the path is not
+ * Returns null and sets the last error if `ctx` is null or the path is not
  * valid UTF-8.
  *
  * # Safety
  *
- * `task` must be a valid `*const Task` cast to `*const MalboxTask`, as
+ * `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
  * provided by the runtime to plugin callbacks.
  */
-const char *malbox_task_get_sample_path(const struct MalboxTask *task);
+const char *malbox_task_get_sample_path(const struct MalboxContext *ctx);
 
 /**
  * Read the sample file into memory and return a pointer and length.
@@ -649,23 +634,23 @@ const char *malbox_task_get_sample_path(const struct MalboxTask *task);
  *
  * # Safety
  *
- * - `task` must be a valid `*const Task` cast to `*const MalboxTask`.
+ * - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`.
  * - `out_ptr` and `out_len` must both be valid, non-null, writable pointers.
  */
-int32_t malbox_task_get_sample_bytes(const struct MalboxTask *task,
+int32_t malbox_task_get_sample_bytes(const struct MalboxContext *ctx,
                                      const uint8_t **out_ptr,
                                      uintptr_t *out_len);
 
 /**
  * Return the number of configuration entries for the task.
  *
- * Returns `0` and sets the last error if `task` is null.
+ * Returns `0` and sets the last error if `ctx` is null.
  *
  * # Safety
  *
- * `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+ * `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
  */
-uintptr_t malbox_task_get_config_count(const struct MalboxTask *task);
+uintptr_t malbox_task_get_config_count(const struct MalboxContext *ctx);
 
 /**
  * Fill `*out_key` and `*out_value` with the key/value strings at position
@@ -674,14 +659,14 @@ uintptr_t malbox_task_get_config_count(const struct MalboxTask *task);
  * Iteration order is unspecified but stable within one callback invocation.
  * Both pointers are valid until `clear_temp_storage` is called.
  *
- * Returns `0` on success, `-1` if `task` is null or `index` is out of range.
+ * Returns `0` on success, `-1` if `ctx` is null or `index` is out of range.
  *
  * # Safety
  *
- * - `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+ * - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
  * - `out_key` and `out_value` must both be valid, non-null, writable pointers.
  */
-int32_t malbox_task_get_config_entry(const struct MalboxTask *task,
+int32_t malbox_task_get_config_entry(const struct MalboxContext *ctx,
                                      uintptr_t index,
                                      const char **out_key,
                                      const char **out_value);
@@ -691,15 +676,15 @@ int32_t malbox_task_get_config_entry(const struct MalboxTask *task,
  *
  * Returns a pointer to a null-terminated string (valid until
  * `clear_temp_storage` is called) or null if the key is not present.
- * The last error is set only on a null `task` or `key` pointer, not on a
+ * The last error is set only on a null `ctx` or `key` pointer, not on a
  * missing key.
  *
  * # Safety
  *
- * - `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+ * - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
  * - `key`, if non-null, must point to a valid null-terminated C string.
  */
-const char *malbox_task_get_config_value(const struct MalboxTask *task, const char *key);
+const char *malbox_task_get_config_value(const struct MalboxContext *ctx, const char *key);
 
 /**
  * Run a plugin through a synthetic lifecycle without starting any transport.
@@ -707,9 +692,9 @@ const char *malbox_task_get_config_value(const struct MalboxTask *task, const ch
  * Intended for unit-testing C++ plugin code.  The call sequence is:
  *
  * 1. `on_start(config)`
- * 2. `on_task(task, ctx)`
+ * 2. `on_task(ctx)`
  * 3. `health_check()`
- * 4. `on_event(ConfigReloaded, ctx)`
+ * 4. `on_event(ConfigReloaded)`
  * 5. `on_stop()`
  *
  * Returns `0` if every step succeeds, `-1` on the first error (the error

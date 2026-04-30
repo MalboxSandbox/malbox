@@ -2,7 +2,7 @@
 //!
 //! This module is gated behind the `testkit` feature (or the built-in `cfg(test)`
 //! flag for in-crate use). It exposes construction APIs that are otherwise
-//! `pub(crate)` so that downstream test code can build `Task` and `Context`
+//! `pub(crate)` so that downstream test code can build `Context`
 //! values directly.
 //!
 //! **Do not depend on this module in production code.**
@@ -10,30 +10,33 @@
 #![cfg(any(test, feature = "testkit"))]
 
 use crate::context::Context;
-use crate::types::Task;
 use malbox_plugin_transport::traits::TransportEmitter;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-impl Task {
-    /// Construct a `Task` for testing. Available under `cfg(test)` or the
-    /// `testkit` feature.
-    pub fn test_new(id: i32, sample_path: PathBuf, config: HashMap<String, String>) -> Self {
-        Self::new(id, sample_path, config)
-    }
-}
-
-impl<'a> Context<'a> {
+impl Context {
     /// Construct a `Context` for testing with no result channel.
-    pub fn test_new(emitter: &'a dyn TransportEmitter) -> Context<'a> {
-        Context::new(emitter, None)
+    pub fn test_new(emitter: Arc<dyn TransportEmitter + Send + Sync>) -> Context {
+        Context::new(0, PathBuf::new(), HashMap::new(), emitter, None, None)
     }
 
     /// Construct a `Context` for testing with an mpsc result sender.
     pub fn test_new_with_tx(
-        emitter: &'a dyn TransportEmitter,
+        emitter: Arc<dyn TransportEmitter + Send + Sync>,
         tx: crate::context::ResultSender,
-    ) -> Context<'a> {
-        Context::new(emitter, Some(tx))
+    ) -> Context {
+        Context::new(0, PathBuf::new(), HashMap::new(), emitter, Some(tx), None)
+    }
+
+    /// Construct a `Context` for testing with full control over all fields.
+    pub fn test_new_full(
+        task_id: i32,
+        sample_path: PathBuf,
+        config: HashMap<String, String>,
+        emitter: Arc<dyn TransportEmitter + Send + Sync>,
+        result_tx: Option<crate::context::ResultSender>,
+    ) -> Context {
+        Context::new(task_id, sample_path, config, emitter, result_tx, None)
     }
 }

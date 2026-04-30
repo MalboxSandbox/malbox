@@ -1,14 +1,15 @@
-//! FFI accessor functions for `Task`.
+//! FFI accessor functions for task info via Context.
 //!
-//! The `MalboxTask*` pointer is actually a `*const Task` cast through the
-//! opaque `MalboxTask` enum.  All string-returning functions store their
-//! `CString` (or raw byte buffer) in a thread-local so the pointer remains
-//! valid until `clear_temp_storage()` is called by the runtime after each
+//! The `MalboxContext*` pointer is a `*const Context` cast through the
+//! opaque `MalboxContext` enum. Task information is accessed via
+//! `ctx.task()`. All string-returning functions store their `CString`
+//! (or raw byte buffer) in a thread-local so the pointer remains valid
+//! until `clear_temp_storage()` is called by the runtime after each
 //! plugin callback returns.
 
 use crate::error::{clear_last_error, result_to_rc, set_last_error};
-use crate::ffi_types::MalboxTask;
-use malbox_plugin_sdk::types::Task;
+use crate::ffi_types::MalboxContext;
+use malbox_plugin_sdk::context::Context;
 use std::cell::RefCell;
 use std::ffi::{CString, c_char};
 
@@ -39,34 +40,34 @@ fn store_string(s: CString) -> *const c_char {
     })
 }
 
-/// Cast an opaque `MalboxTask*` back to a Rust `Task` reference.
+/// Cast an opaque `MalboxContext*` back to a Rust `Context` reference.
 ///
 /// # Safety
-/// The caller must guarantee that `ptr` is a valid `*const Task`.
-unsafe fn task_from_ptr<'a>(ptr: *const MalboxTask) -> Option<&'a Task> {
+/// The caller must guarantee that `ptr` is a valid `*const Context`.
+unsafe fn ctx_from_ptr<'a>(ptr: *const MalboxContext) -> Option<&'a Context> {
     if ptr.is_null() {
-        set_last_error("null task pointer");
+        set_last_error("null context pointer");
         return None;
     }
-    // SAFETY: MalboxTask is an opaque stand-in for Task; the runtime always
-    // passes the original *const Task cast to *const MalboxTask.
-    Some(unsafe { &*(ptr as *const Task) })
+    // SAFETY: MalboxContext is an opaque stand-in for Context; the runtime always
+    // passes the original *const Context cast to *const MalboxContext.
+    Some(unsafe { &*(ptr as *const Context) })
 }
 
 /// Return the numeric task ID.
 ///
-/// Returns `-1` and sets the last error if `task` is null.
+/// Returns `-1` and sets the last error if `ctx` is null.
 ///
 /// # Safety
 ///
-/// `task` must be a valid `*const Task` cast to `*const MalboxTask`, as
+/// `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
 /// provided by the runtime to plugin callbacks.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn malbox_task_get_id(task: *const MalboxTask) -> i32 {
-    match unsafe { task_from_ptr(task) } {
-        Some(t) => {
+pub unsafe extern "C" fn malbox_task_get_id(ctx: *const MalboxContext) -> i32 {
+    match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => {
             clear_last_error();
-            t.id()
+            c.task().id()
         }
         None => -1,
     }
@@ -76,21 +77,22 @@ pub unsafe extern "C" fn malbox_task_get_id(task: *const MalboxTask) -> i32 {
 ///
 /// The pointer is valid until `clear_temp_storage` is called (which the
 /// runtime does automatically after each plugin callback returns).
-/// Returns null and sets the last error if `task` is null or the path is not
+/// Returns null and sets the last error if `ctx` is null or the path is not
 /// valid UTF-8.
 ///
 /// # Safety
 ///
-/// `task` must be a valid `*const Task` cast to `*const MalboxTask`, as
+/// `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
 /// provided by the runtime to plugin callbacks.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn malbox_task_get_sample_path(task: *const MalboxTask) -> *const c_char {
-    let t = match unsafe { task_from_ptr(task) } {
-        Some(t) => t,
+pub unsafe extern "C" fn malbox_task_get_sample_path(ctx: *const MalboxContext) -> *const c_char {
+    let c = match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => c,
         None => return std::ptr::null(),
     };
 
-    let path_str = match t.sample_path().to_str() {
+    let task_info = c.task();
+    let path_str = match task_info.sample_path().to_str() {
         Some(s) => s,
         None => {
             set_last_error("sample path is not valid UTF-8");
@@ -120,11 +122,11 @@ pub unsafe extern "C" fn malbox_task_get_sample_path(task: *const MalboxTask) ->
 ///
 /// # Safety
 ///
-/// - `task` must be a valid `*const Task` cast to `*const MalboxTask`.
+/// - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`.
 /// - `out_ptr` and `out_len` must both be valid, non-null, writable pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_sample_bytes(
-    task: *const MalboxTask,
+    ctx: *const MalboxContext,
     out_ptr: *mut *const u8,
     out_len: *mut usize,
 ) -> i32 {
@@ -133,12 +135,12 @@ pub unsafe extern "C" fn malbox_task_get_sample_bytes(
         return -1;
     }
 
-    let t = match unsafe { task_from_ptr(task) } {
-        Some(t) => t,
+    let c = match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => c,
         None => return -1,
     };
 
-    let (rc, bytes_opt) = result_to_rc(t.sample_bytes());
+    let (rc, bytes_opt) = result_to_rc(c.task().sample_bytes());
     if rc != 0 {
         return -1;
     }
@@ -161,17 +163,17 @@ pub unsafe extern "C" fn malbox_task_get_sample_bytes(
 
 /// Return the number of configuration entries for the task.
 ///
-/// Returns `0` and sets the last error if `task` is null.
+/// Returns `0` and sets the last error if `ctx` is null.
 ///
 /// # Safety
 ///
-/// `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+/// `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn malbox_task_get_config_count(task: *const MalboxTask) -> usize {
-    match unsafe { task_from_ptr(task) } {
-        Some(t) => {
+pub unsafe extern "C" fn malbox_task_get_config_count(ctx: *const MalboxContext) -> usize {
+    match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => {
             clear_last_error();
-            t.config().len()
+            c.task().config().len()
         }
         None => 0,
     }
@@ -183,15 +185,15 @@ pub unsafe extern "C" fn malbox_task_get_config_count(task: *const MalboxTask) -
 /// Iteration order is unspecified but stable within one callback invocation.
 /// Both pointers are valid until `clear_temp_storage` is called.
 ///
-/// Returns `0` on success, `-1` if `task` is null or `index` is out of range.
+/// Returns `0` on success, `-1` if `ctx` is null or `index` is out of range.
 ///
 /// # Safety
 ///
-/// - `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+/// - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
 /// - `out_key` and `out_value` must both be valid, non-null, writable pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_config_entry(
-    task: *const MalboxTask,
+    ctx: *const MalboxContext,
     index: usize,
     out_key: *mut *const c_char,
     out_value: *mut *const c_char,
@@ -201,16 +203,18 @@ pub unsafe extern "C" fn malbox_task_get_config_entry(
         return -1;
     }
 
-    let t = match unsafe { task_from_ptr(task) } {
-        Some(t) => t,
+    let c = match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => c,
         None => return -1,
     };
 
-    let Some((k, v)) = t.config().iter().nth(index) else {
+    let task_info = c.task();
+    let config = task_info.config();
+    let Some((k, v)) = config.iter().nth(index) else {
         set_last_error(&format!(
             "config index {} out of range (len = {})",
             index,
-            t.config().len()
+            config.len()
         ));
         return -1;
     };
@@ -248,20 +252,20 @@ pub unsafe extern "C" fn malbox_task_get_config_entry(
 ///
 /// Returns a pointer to a null-terminated string (valid until
 /// `clear_temp_storage` is called) or null if the key is not present.
-/// The last error is set only on a null `task` or `key` pointer, not on a
+/// The last error is set only on a null `ctx` or `key` pointer, not on a
 /// missing key.
 ///
 /// # Safety
 ///
-/// - `task` must be a valid `*const Task` cast to `*const MalboxTask`, or null.
+/// - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
 /// - `key`, if non-null, must point to a valid null-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_config_value(
-    task: *const MalboxTask,
+    ctx: *const MalboxContext,
     key: *const c_char,
 ) -> *const c_char {
-    let t = match unsafe { task_from_ptr(task) } {
-        Some(t) => t,
+    let c = match unsafe { ctx_from_ptr(ctx) } {
+        Some(c) => c,
         None => return std::ptr::null(),
     };
 
@@ -278,12 +282,12 @@ pub unsafe extern "C" fn malbox_task_get_config_value(
         }
     };
 
-    match t.config().get(key_str) {
+    match c.task().config_value(key_str) {
         None => {
             clear_last_error();
             std::ptr::null()
         }
-        Some(val) => match CString::new(val.as_str()) {
+        Some(val) => match CString::new(val) {
             Ok(cs) => {
                 clear_last_error();
                 store_string(cs)
@@ -299,22 +303,33 @@ pub unsafe extern "C" fn malbox_task_get_config_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use malbox_plugin_sdk::types::Task;
+    use malbox_plugin_sdk::context::Context;
     use std::collections::HashMap;
     use std::ffi::CStr;
+    use std::sync::Arc;
 
-    fn make_task(id: i32, config: HashMap<String, String>, sample_path: &str) -> Task {
-        Task::test_new(id, std::path::PathBuf::from(sample_path), config)
+    fn noop_emitter() -> Arc<dyn malbox_plugin_transport::traits::TransportEmitter + Send + Sync> {
+        Arc::new(())
     }
 
-    fn task_ptr(task: &Task) -> *const MalboxTask {
-        (task as *const Task) as *const MalboxTask
+    fn make_ctx(id: i32, config: HashMap<String, String>, sample_path: &str) -> Context {
+        Context::test_new_full(
+            id,
+            std::path::PathBuf::from(sample_path),
+            config,
+            noop_emitter(),
+            None,
+        )
+    }
+
+    fn ctx_ptr(ctx: &Context) -> *const MalboxContext {
+        (ctx as *const Context) as *const MalboxContext
     }
 
     #[test]
     fn test_get_id() {
-        let task = make_task(42, HashMap::new(), "/tmp/sample.bin");
-        let rc = unsafe { malbox_task_get_id(task_ptr(&task)) };
+        let ctx = make_ctx(42, HashMap::new(), "/tmp/sample.bin");
+        let rc = unsafe { malbox_task_get_id(ctx_ptr(&ctx)) };
         assert_eq!(rc, 42);
     }
 
@@ -326,8 +341,8 @@ mod tests {
 
     #[test]
     fn test_get_sample_path() {
-        let task = make_task(1, HashMap::new(), "/tmp/my_sample.exe");
-        let ptr = unsafe { malbox_task_get_sample_path(task_ptr(&task)) };
+        let ctx = make_ctx(1, HashMap::new(), "/tmp/my_sample.exe");
+        let ptr = unsafe { malbox_task_get_sample_path(ctx_ptr(&ctx)) };
         assert!(!ptr.is_null());
         let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
         assert_eq!(s, "/tmp/my_sample.exe");
@@ -335,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_sample_path_null_task() {
+    fn test_get_sample_path_null_ctx() {
         let ptr = unsafe { malbox_task_get_sample_path(std::ptr::null()) };
         assert!(ptr.is_null());
     }
@@ -346,11 +361,10 @@ mod tests {
         let path = dir.path().join("sample.bin");
         std::fs::write(&path, b"HELLO").unwrap();
 
-        let task = make_task(1, HashMap::new(), path.to_str().unwrap());
+        let ctx = make_ctx(1, HashMap::new(), path.to_str().unwrap());
         let mut out_ptr: *const u8 = std::ptr::null();
         let mut out_len: usize = 0;
-        let rc =
-            unsafe { malbox_task_get_sample_bytes(task_ptr(&task), &mut out_ptr, &mut out_len) };
+        let rc = unsafe { malbox_task_get_sample_bytes(ctx_ptr(&ctx), &mut out_ptr, &mut out_len) };
         assert_eq!(rc, 0);
         assert!(!out_ptr.is_null());
         assert_eq!(out_len, 5);
@@ -361,11 +375,10 @@ mod tests {
 
     #[test]
     fn test_get_sample_bytes_missing_file() {
-        let task = make_task(1, HashMap::new(), "/nonexistent/file.bin");
+        let ctx = make_ctx(1, HashMap::new(), "/nonexistent/file.bin");
         let mut out_ptr: *const u8 = std::ptr::null();
         let mut out_len: usize = 0;
-        let rc =
-            unsafe { malbox_task_get_sample_bytes(task_ptr(&task), &mut out_ptr, &mut out_len) };
+        let rc = unsafe { malbox_task_get_sample_bytes(ctx_ptr(&ctx), &mut out_ptr, &mut out_len) };
         assert_eq!(rc, -1);
     }
 
@@ -374,8 +387,8 @@ mod tests {
         let mut cfg = HashMap::new();
         cfg.insert("k1".into(), "v1".into());
         cfg.insert("k2".into(), "v2".into());
-        let task = make_task(1, cfg, "/tmp/s.bin");
-        let count = unsafe { malbox_task_get_config_count(task_ptr(&task)) };
+        let ctx = make_ctx(1, cfg, "/tmp/s.bin");
+        let count = unsafe { malbox_task_get_config_count(ctx_ptr(&ctx)) };
         assert_eq!(count, 2);
     }
 
@@ -389,12 +402,12 @@ mod tests {
     fn test_get_config_entry() {
         let mut cfg = HashMap::new();
         cfg.insert("alpha".into(), "one".into());
-        let task = make_task(1, cfg, "/tmp/s.bin");
+        let ctx = make_ctx(1, cfg, "/tmp/s.bin");
 
         let mut out_key: *const c_char = std::ptr::null();
         let mut out_val: *const c_char = std::ptr::null();
         let rc =
-            unsafe { malbox_task_get_config_entry(task_ptr(&task), 0, &mut out_key, &mut out_val) };
+            unsafe { malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &mut out_key, &mut out_val) };
         assert_eq!(rc, 0);
         assert!(!out_key.is_null());
         assert!(!out_val.is_null());
@@ -407,11 +420,11 @@ mod tests {
 
     #[test]
     fn test_get_config_entry_out_of_range() {
-        let task = make_task(1, HashMap::new(), "/tmp/s.bin");
+        let ctx = make_ctx(1, HashMap::new(), "/tmp/s.bin");
         let mut out_key: *const c_char = std::ptr::null();
         let mut out_val: *const c_char = std::ptr::null();
         let rc =
-            unsafe { malbox_task_get_config_entry(task_ptr(&task), 0, &mut out_key, &mut out_val) };
+            unsafe { malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &mut out_key, &mut out_val) };
         assert_eq!(rc, -1);
     }
 
@@ -419,10 +432,10 @@ mod tests {
     fn test_get_config_value_found() {
         let mut cfg = HashMap::new();
         cfg.insert("timeout".into(), "30".into());
-        let task = make_task(1, cfg, "/tmp/s.bin");
+        let ctx = make_ctx(1, cfg, "/tmp/s.bin");
 
         let key = CString::new("timeout").unwrap();
-        let ptr = unsafe { malbox_task_get_config_value(task_ptr(&task), key.as_ptr()) };
+        let ptr = unsafe { malbox_task_get_config_value(ctx_ptr(&ctx), key.as_ptr()) };
         assert!(!ptr.is_null());
         let val = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
         assert_eq!(val, "30");
@@ -431,14 +444,14 @@ mod tests {
 
     #[test]
     fn test_get_config_value_missing() {
-        let task = make_task(1, HashMap::new(), "/tmp/s.bin");
+        let ctx = make_ctx(1, HashMap::new(), "/tmp/s.bin");
         let key = CString::new("missing").unwrap();
-        let ptr = unsafe { malbox_task_get_config_value(task_ptr(&task), key.as_ptr()) };
+        let ptr = unsafe { malbox_task_get_config_value(ctx_ptr(&ctx), key.as_ptr()) };
         assert!(ptr.is_null());
     }
 
     #[test]
-    fn test_get_config_value_null_task() {
+    fn test_get_config_value_null_ctx() {
         let key = CString::new("k").unwrap();
         let ptr = unsafe { malbox_task_get_config_value(std::ptr::null(), key.as_ptr()) };
         assert!(ptr.is_null());

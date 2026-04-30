@@ -5,11 +5,12 @@ use std::path::Path;
 
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
-use malbox_plugin_sdk::guest_plugin::{GuestPlugin, default_launch};
-use malbox_plugin_sdk::types::{HealthStatus, Task};
+use malbox_plugin_sdk::guest_plugin::{GuestPlugin, LaunchResult, default_launch};
+use malbox_plugin_sdk::plugin::Plugin;
+use malbox_plugin_sdk::types::HealthStatus;
 
 use crate::error::last_error_string;
-use crate::ffi_types::{MalboxContext, MalboxGuestPluginVtable, MalboxHealthStatus, MalboxTask};
+use crate::ffi_types::{MalboxContext, MalboxGuestPluginVtable, MalboxHealthStatus};
 
 pub(crate) struct GuestVtablePlugin {
     vtable: MalboxGuestPluginVtable,
@@ -43,49 +44,7 @@ fn check_rc(rc: i32) -> Result<()> {
     }
 }
 
-impl GuestPlugin for GuestVtablePlugin {
-    fn on_start(&self, task: &Task, ctx: &Context) -> Result<()> {
-        let f = match self.vtable.on_start {
-            Some(f) => f,
-            None => return Ok(()),
-        };
-        let task_ptr = task as *const Task as *const MalboxTask;
-        let ctx_ptr = ctx as *const Context as *const MalboxContext;
-        let rc = unsafe { f(self.vtable.plugin_ptr, task_ptr, ctx_ptr) };
-        check_rc(rc)
-    }
-
-    fn on_stop(&self, ctx: &Context) -> Result<()> {
-        let f = match self.vtable.on_stop {
-            Some(f) => f,
-            None => return Ok(()),
-        };
-        let ctx_ptr = ctx as *const Context as *const MalboxContext;
-        let rc = unsafe { f(self.vtable.plugin_ptr, ctx_ptr) };
-        check_rc(rc)
-    }
-
-    fn execute_sample(&self, sample_path: &Path) -> bool {
-        let f = match self.vtable.execute_sample {
-            Some(f) => f,
-            None => return default_launch(sample_path),
-        };
-        let path_str = match sample_path.to_str() {
-            Some(s) => s,
-            None => return false,
-        };
-        let c_path = match std::ffi::CString::new(path_str) {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        let rc = unsafe { f(self.vtable.plugin_ptr, c_path.as_ptr()) };
-        match rc {
-            0 => default_launch(sample_path),
-            1 => true,
-            _ => false,
-        }
-    }
-
+impl Plugin for GuestVtablePlugin {
     fn health_check(&self) -> HealthStatus {
         let f = match self.vtable.health_check {
             Some(f) => f,
@@ -110,6 +69,49 @@ impl GuestPlugin for GuestVtablePlugin {
             HealthStatus::ready()
         } else {
             HealthStatus::not_ready(reason)
+        }
+    }
+}
+
+impl GuestPlugin for GuestVtablePlugin {
+    fn on_start(&self, ctx: &Context) -> Result<()> {
+        let f = match self.vtable.on_start {
+            Some(f) => f,
+            None => return Ok(()),
+        };
+        let ctx_ptr = ctx as *const Context as *const MalboxContext;
+        let rc = unsafe { f(self.vtable.plugin_ptr, ctx_ptr) };
+        check_rc(rc)
+    }
+
+    fn on_stop(&self, ctx: &Context) -> Result<()> {
+        let f = match self.vtable.on_stop {
+            Some(f) => f,
+            None => return Ok(()),
+        };
+        let ctx_ptr = ctx as *const Context as *const MalboxContext;
+        let rc = unsafe { f(self.vtable.plugin_ptr, ctx_ptr) };
+        check_rc(rc)
+    }
+
+    fn execute_sample(&self, sample_path: &Path) -> Result<LaunchResult> {
+        let f = match self.vtable.execute_sample {
+            Some(f) => f,
+            None => return Ok(default_launch(sample_path)),
+        };
+        let path_str = match sample_path.to_str() {
+            Some(s) => s,
+            None => return Ok(LaunchResult::UseDefault),
+        };
+        let c_path = match std::ffi::CString::new(path_str) {
+            Ok(c) => c,
+            Err(_) => return Ok(LaunchResult::UseDefault),
+        };
+        let rc = unsafe { f(self.vtable.plugin_ptr, c_path.as_ptr()) };
+        match rc {
+            0 => Ok(LaunchResult::UseDefault),
+            1 => Ok(LaunchResult::Launched),
+            _ => Ok(LaunchResult::UseDefault),
         }
     }
 }

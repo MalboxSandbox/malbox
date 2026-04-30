@@ -10,7 +10,7 @@
 //! [`#[malbox::on_event(...)]`](macro@on_event).
 //!
 //! Package metadata (`name`, `version`, `description`, `authors`) is read
-//! automatically from the plugin's `Cargo.toml` — only `state` and `execution`
+//! automatically from the plugin's `Cargo.toml` -- only `state` and `execution`
 //! need to be specified in the `#[malbox(...)]` attribute.
 //!
 //! # Example
@@ -26,7 +26,7 @@
 //! #[malbox::handlers]
 //! impl MyPlugin {
 //!     #[malbox::on_task]
-//!     fn analyze(&self, task: Task, ctx: &Context) -> Result<()> {
+//!     fn analyze(&self, ctx: &Context) -> Result<()> {
 //!         Ok(())
 //!     }
 //! }
@@ -51,15 +51,15 @@ pub mod testkit;
 
 /// Convenience re-exports for plugin authors.
 pub mod prelude {
-    pub use crate::context::Context;
+    pub use crate::context::{Context, ResultSink, TaskInfo};
     pub use crate::error::{Result, SdkError};
-    pub use crate::guest_plugin::GuestPlugin;
-    pub use crate::plugin::HostPlugin;
+    pub use crate::guest_plugin::{GuestPlugin, LaunchResult};
+    pub use crate::plugin::{HostPlugin, Plugin};
     pub use crate::types::{
         ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecutionContext,
         GraphEdge, GraphNode, HealthStatus, Indicator, KvPair, PluginInfo, PluginMeta,
-        PluginResult, PluginState, PluginType, REPORT_RESULT_NAME, Report, ReportBuilder,
-        SCHEMA_VERSION, Section, SectionBuilder, Task, TimelineEvent, TreeNode, Ttp, Verdict,
+        PluginResult, PluginState, REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION,
+        Section, SectionBuilder, TimelineEvent, TreeNode, Ttp, Verdict,
     };
 
     // Re-export common dependencies so plugin authors don't need them in Cargo.toml
@@ -74,13 +74,13 @@ pub mod prelude {
 pub use malbox_plugin_macros::*;
 
 // Top-level re-exports
-pub use context::Context;
+pub use context::{Context, ResultSink, TaskInfo};
 pub use error::{Result, SdkError};
-pub use guest_plugin::GuestPlugin;
-pub use plugin::HostPlugin;
+pub use guest_plugin::{GuestPlugin, LaunchResult};
+pub use plugin::{HostPlugin, Plugin};
 pub use types::{
     HealthStatus, PluginMeta, PluginResult, REPORT_RESULT_NAME, Report, ReportBuilder,
-    SCHEMA_VERSION, Task,
+    SCHEMA_VERSION,
 };
 
 #[cfg(test)]

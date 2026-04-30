@@ -7,12 +7,6 @@
 
 namespace malbox {
 
-/// C++ mirror of MalboxPluginType.
-enum class PluginType : uint8_t {
-    Host  = 0, // MALBOX_PLUGIN_TYPE_HOST
-    Guest = 1, // MALBOX_PLUGIN_TYPE_GUEST
-};
-
 /// C++ mirror of MalboxPluginState.
 enum class PluginState : uint8_t {
     Persistent = 0, // MALBOX_PLUGIN_STATE_PERSISTENT
@@ -28,16 +22,12 @@ enum class ExecutionContext : uint8_t {
     Unrestricted = 3, // MALBOX_EXECUTION_CONTEXT_UNRESTRICTED
 };
 
-static_assert(sizeof(PluginType)       == sizeof(MalboxPluginType),
-              "PluginType size mismatch with C enum");
 static_assert(sizeof(PluginState)      == sizeof(MalboxPluginState),
               "PluginState size mismatch with C enum");
 static_assert(sizeof(ExecutionContext) == sizeof(MalboxExecutionContext),
               "ExecutionContext size mismatch with C enum");
 
 // Sanity-check that the numeric values match the C enum values.
-static_assert(static_cast<uint8_t>(PluginType::Host)           == 0u);
-static_assert(static_cast<uint8_t>(PluginType::Guest)          == 1u);
 static_assert(static_cast<uint8_t>(PluginState::Persistent)    == 0u);
 static_assert(static_cast<uint8_t>(PluginState::Ephemeral)     == 1u);
 static_assert(static_cast<uint8_t>(PluginState::Scoped)        == 2u);
@@ -46,16 +36,23 @@ static_assert(static_cast<uint8_t>(ExecutionContext::Sequential)   == 1u);
 static_assert(static_cast<uint8_t>(ExecutionContext::Parallel)     == 2u);
 static_assert(static_cast<uint8_t>(ExecutionContext::Unrestricted) == 3u);
 
+/// Result of execute_sample: did the plugin launch the sample itself?
+enum class LaunchResult : int32_t {
+    UseDefault = 0,
+    Launched   = 1,
+};
+
 /// Metadata describing a plugin. Mirrors MalboxPluginMeta.
-/// All const char* pointers must remain valid for the lifetime of the struct.
+///
+/// All std::string fields are owned. The struct is converted to the
+/// C MalboxPluginMeta (which uses const char*) at runtime entry.
 struct PluginMeta {
-    const char*     name;
-    const char*     version;
-    const char*     description;
-    const char*     authors;
-    PluginType      plugin_type;  // named plugin_type to avoid collision with keyword 'type'
-    PluginState     state;
-    ExecutionContext execution;
+    std::string     name;
+    std::string     version;
+    std::string     description;
+    std::string     authors;
+    PluginState     state         = PluginState::Ephemeral;
+    ExecutionContext execution    = ExecutionContext::Exclusive;
 };
 
 /// Health status returned by a plugin's health_check callback.

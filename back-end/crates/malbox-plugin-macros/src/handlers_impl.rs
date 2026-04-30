@@ -1,5 +1,8 @@
 //! `#[malbox::handlers]` — scans an impl block for tagged methods and generates
-//! a single `impl HostPlugin for T` block.
+//! trait impls for either `HostPlugin` or `GuestPlugin`.
+//!
+//! Detection: if `#[on_task]` is present, generates `HostPlugin`.
+//! Otherwise, generates `GuestPlugin`.
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -9,25 +12,31 @@ use syn::{self, ImplItem, ItemImpl, LitStr, Token};
 struct FoundHandlers {
     task_method: Option<syn::Ident>,
     start_method: Option<StartMethod>,
-    stop_method: Option<syn::Ident>,
+    stop_method: Option<StopMethod>,
     health_check_method: Option<syn::Ident>,
     event_handlers: Vec<FoundEventHandler>,
 }
 
-/// A start handler, optionally accepting a typed config parameter.
+/// A start handler, optionally accepting a typed config parameter (host)
+/// or a `&Context` parameter (guest).
 struct StartMethod {
     name: syn::Ident,
     /// If the user's method takes a parameter, the macro will deserialize
-    /// the raw `HashMap<String, String>` into this type.
-    config_type: Option<syn::Type>,
+    /// the raw `HashMap<String, String>` into this type (host plugins),
+    /// or pass `&Context` through (guest plugins).
+    param_type: Option<syn::Type>,
+}
+
+/// A stop handler, optionally accepting a `&Context` parameter (guest).
+struct StopMethod {
+    name: syn::Ident,
+    has_param: bool,
 }
 
 /// An event handler discovered by scanning `#[on_event(...)]` attributes.
 struct FoundEventHandler {
     variant: syn::Ident,
     method_name: syn::Ident,
-    /// Number of non-`self` parameters on the handler method.
-    param_count: usize,
     /// Whether the method declares an explicit return type (i.e. `-> Result<()>`).
     returns_result: bool,
 }
@@ -91,16 +100,6 @@ fn is_handler_attr(attr: &syn::Attribute, name: &str) -> bool {
     segments.len() == 2 && segments[0].ident == "malbox" && segments[1].ident == name
 }
 
-/// Count non-self parameters in a method signature.
-fn non_self_param_count(method: &syn::ImplItemFn) -> usize {
-    method
-        .sig
-        .inputs
-        .iter()
-        .filter(|arg| !matches!(arg, syn::FnArg::Receiver(_)))
-        .count()
-}
-
 /// Check whether a method has an explicit return type (i.e., returns Result<()>).
 fn has_return_type(method: &syn::ImplItemFn) -> bool {
     !matches!(method.sig.output, syn::ReturnType::Default)
@@ -154,11 +153,14 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
                     to_strip.push(i);
                     found.start_method = Some(StartMethod {
                         name: method.sig.ident.clone(),
-                        config_type: first_param_type(method),
+                        param_type: first_param_type(method),
                     });
                 } else if is_handler_attr(attr, "on_stop") {
                     to_strip.push(i);
-                    found.stop_method = Some(method.sig.ident.clone());
+                    found.stop_method = Some(StopMethod {
+                        name: method.sig.ident.clone(),
+                        has_param: first_param_type(method).is_some(),
+                    });
                 } else if is_handler_attr(attr, "health_check") {
                     to_strip.push(i);
                     found.health_check_method = Some(method.sig.ident.clone());
@@ -168,7 +170,6 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
                     found.event_handlers.push(FoundEventHandler {
                         variant: args.variant,
                         method_name: method.sig.ident.clone(),
-                        param_count: non_self_param_count(method),
                         returns_result: has_return_type(method),
                     });
                 }
@@ -181,8 +182,12 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
         }
     }
 
-    // Generate the single HostPlugin trait impl
-    let plugin_impl = generate_plugin_impl(struct_ty, &found);
+    let is_guest = found.task_method.is_none();
+    let plugin_impl = if is_guest {
+        generate_guest_plugin_impl(struct_ty, &found)
+    } else {
+        generate_host_plugin_impl(struct_ty, &found)
+    };
 
     Ok(quote! {
         #input
@@ -191,24 +196,106 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
     })
 }
 
-/// Generate a single `impl HostPlugin for T` block containing only the methods
-/// that the user annotated. Unannotated methods fall through to the trait defaults.
-fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenStream {
+fn generate_health_check(found: &FoundHandlers) -> Option<TokenStream> {
+    found.health_check_method.as_ref().map(|method_name| {
+        quote! {
+            fn health_check(&self) -> malbox_plugin_sdk::types::HealthStatus {
+                self.#method_name()
+            }
+        }
+    })
+}
+
+/// Generate `impl Plugin + GuestPlugin for T`.
+///
+/// Guest plugins use `on_start(&self, ctx)` and `on_stop(&self, ctx)` -
+/// both receive `&Context`. No `on_task` or `on_event`.
+fn generate_guest_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenStream {
+    let health_check = generate_health_check(found);
+
+    let on_start = found.start_method.as_ref().map(|start| {
+        let name = &start.name;
+        if start.param_type.is_some() {
+            quote! {
+                fn on_start(
+                    &self,
+                    ctx: &malbox_plugin_sdk::context::Context,
+                ) -> malbox_plugin_sdk::error::Result<()> {
+                    self.#name(ctx)
+                }
+            }
+        } else {
+            quote! {
+                fn on_start(
+                    &self,
+                    _ctx: &malbox_plugin_sdk::context::Context,
+                ) -> malbox_plugin_sdk::error::Result<()> {
+                    self.#name()
+                }
+            }
+        }
+    });
+
+    let on_stop = found.stop_method.as_ref().map(|stop| {
+        let name = &stop.name;
+        if stop.has_param {
+            quote! {
+                fn on_stop(
+                    &self,
+                    ctx: &malbox_plugin_sdk::context::Context,
+                ) -> malbox_plugin_sdk::error::Result<()> {
+                    self.#name(ctx)
+                }
+            }
+        } else {
+            quote! {
+                fn on_stop(
+                    &self,
+                    _ctx: &malbox_plugin_sdk::context::Context,
+                ) -> malbox_plugin_sdk::error::Result<()> {
+                    self.#name()
+                }
+            }
+        }
+    });
+
+    let guest_methods: Vec<&TokenStream> = [on_start.as_ref(), on_stop.as_ref()]
+        .into_iter()
+        .flatten()
+        .collect();
+
+    quote! {
+        impl malbox_plugin_sdk::plugin::Plugin for #struct_ty {
+            #health_check
+        }
+
+        impl malbox_plugin_sdk::guest_plugin::GuestPlugin for #struct_ty {
+            #(#guest_methods)*
+        }
+    }
+}
+
+/// Generate `impl Plugin + HostPlugin for T`.
+///
+/// Host plugins use `on_start(&self, config)` and `on_stop(&self)`,
+/// plus `on_task(&self, ctx)` and `on_event(&self, event)`.
+fn generate_host_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenStream {
+    let health_check = generate_health_check(found);
+
     let on_task = found.task_method.as_ref().map(|method_name| {
         quote! {
             fn on_task(
                 &self,
-                task: malbox_plugin_sdk::types::Task,
                 ctx: &malbox_plugin_sdk::context::Context,
             ) -> malbox_plugin_sdk::error::Result<()> {
-                self.#method_name(task, ctx)
+                self.#method_name(ctx)
             }
         }
     });
 
     let on_start = found.start_method.as_ref().map(|start| {
         let name = &start.name;
-        match &start.config_type {
+        match &start.param_type {
             Some(config_ty) => {
                 quote! {
                     fn on_start(
@@ -234,30 +321,21 @@ fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenSt
         }
     });
 
-    let on_stop = found.stop_method.as_ref().map(|method_name| {
+    let on_stop = found.stop_method.as_ref().map(|stop| {
+        let name = &stop.name;
         quote! {
             fn on_stop(&self) -> malbox_plugin_sdk::error::Result<()> {
-                self.#method_name()
-            }
-        }
-    });
-
-    let health_check = found.health_check_method.as_ref().map(|method_name| {
-        quote! {
-            fn health_check(&self) -> malbox_plugin_sdk::types::HealthStatus {
-                self.#method_name()
+                self.#name()
             }
         }
     });
 
     let on_event = generate_on_event(&found.event_handlers);
 
-    // Collect all generated methods — only those that were annotated
-    let methods: Vec<&TokenStream> = [
+    let host_methods: Vec<&TokenStream> = [
         on_task.as_ref(),
         on_start.as_ref(),
         on_stop.as_ref(),
-        health_check.as_ref(),
         on_event.as_ref(),
     ]
     .into_iter()
@@ -265,8 +343,12 @@ fn generate_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> TokenSt
     .collect();
 
     quote! {
+        impl malbox_plugin_sdk::plugin::Plugin for #struct_ty {
+            #health_check
+        }
+
         impl malbox_plugin_sdk::plugin::HostPlugin for #struct_ty {
-            #(#methods)*
+            #(#host_methods)*
         }
     }
 }
@@ -294,7 +376,6 @@ fn generate_on_event(handlers: &[FoundEventHandler]) -> Option<TokenStream> {
         fn on_event(
             &self,
             event: malbox_plugin_transport::messages::events::Event,
-            ctx: &malbox_plugin_sdk::context::Context,
         ) -> malbox_plugin_sdk::error::Result<()> {
             match event {
                 #(#arms,)*
@@ -304,14 +385,14 @@ fn generate_on_event(handlers: &[FoundEventHandler]) -> Option<TokenStream> {
     })
 }
 
-/// Generate a method call expression adapted to the event handler's parameter count.
+/// Generate a method call expression adapted to the event handler's signature.
+///
+/// All event handlers are called with no arguments. Since `on_event` no longer
+/// receives a `ctx` parameter, handlers cannot receive it either.
 fn make_event_handler_call(handler: &FoundEventHandler) -> TokenStream {
     let method = &handler.method_name;
 
-    let call = match handler.param_count {
-        0 => quote! { self.#method() },
-        _ => quote! { self.#method(ctx) },
-    };
+    let call = quote! { self.#method() };
 
     if handler.returns_result {
         call

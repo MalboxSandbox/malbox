@@ -6,12 +6,12 @@
 //! external logs is handled after `on_stop`.
 
 use crate::context::Context;
-use crate::guest_plugin::GuestPlugin;
+use crate::guest_plugin::{GuestPlugin, LaunchResult};
 use crate::log::LogEntry;
 use crate::stash::ResultStash;
-use crate::types::Task;
 use malbox_plugin_transport::grpc::proto;
 use malbox_plugin_transport::plugin::GrpcEmitter;
+use malbox_plugin_transport::traits::TransportEmitter;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,15 +77,20 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(
         return;
     }
 
-    let emitter = GrpcEmitter::with_task(task_id, result_tx.clone());
-    let ctx = Context::new(&emitter, Some(result_tx.clone()))
-        .with_task_id(task_id)
-        .with_stash(Arc::clone(&stash));
+    let emitter: Arc<dyn TransportEmitter + Send + Sync> =
+        Arc::new(GrpcEmitter::with_task(task_id, result_tx.clone()));
 
-    let task = Task::new(task_id, sample_path.clone(), config.clone());
+    let ctx = Context::new(
+        task_id,
+        sample_path.clone(),
+        config.clone(),
+        emitter,
+        Some(result_tx.clone()),
+        Some(Arc::clone(&stash)),
+    );
 
     // (1) on_start - plugin sets up monitoring
-    if let Err(e) = plugin.on_start(&task, &ctx) {
+    if let Err(e) = plugin.on_start(&ctx) {
         error!(error = %e, "GuestPlugin on_start failed");
         send_final_marker(task_id, &result_tx);
         return;
@@ -93,11 +98,25 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(
 
     // (2) execute_sample - SDK launches the sample
     info!(path = %sample_path.display(), "Calling execute_sample");
-    let launched = plugin.execute_sample(&sample_path);
-    if launched {
-        info!(path = %sample_path.display(), "Sample launched successfully");
-    } else {
-        error!(path = %sample_path.display(), "execute_sample failed - sample was NOT launched");
+    match plugin.execute_sample(&sample_path) {
+        Ok(LaunchResult::Launched) => {
+            info!(path = %sample_path.display(), "Sample launched successfully");
+        }
+        Ok(LaunchResult::UseDefault) => {
+            info!(path = %sample_path.display(), "Plugin returned UseDefault, using default launcher");
+            let result = crate::guest_plugin::default_launch(&sample_path);
+            match result {
+                LaunchResult::Launched => {
+                    info!(path = %sample_path.display(), "Default launch succeeded");
+                }
+                LaunchResult::UseDefault => {
+                    error!(path = %sample_path.display(), "Default launch also returned UseDefault");
+                }
+            }
+        }
+        Err(e) => {
+            error!(path = %sample_path.display(), error = %e, "execute_sample failed");
+        }
     }
 
     // (3) Wait for analysis timeout

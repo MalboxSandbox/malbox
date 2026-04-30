@@ -10,13 +10,7 @@ use crate::ffi_events::MalboxEvent;
 /// vtables whose `abi_version` field does not equal this constant.  Increment
 /// this value whenever the vtable layout or calling convention changes in a
 /// backward-incompatible way.
-pub const MALBOX_ABI_VERSION: u32 = 5;
-
-/// Opaque handle representing a [`malbox_plugin_sdk::types::Task`].
-///
-/// C/C++ code must only access a `MalboxTask` through the `malbox_task_*`
-/// accessor functions; it must never dereference the pointer directly.
-pub enum MalboxTask {}
+pub const MALBOX_ABI_VERSION: u32 = 6;
 
 /// Opaque handle representing a [`malbox_plugin_sdk::context::Context`].
 ///
@@ -55,11 +49,10 @@ pub struct MalboxPluginVtable {
 
     /// Called when the daemon dispatches a task to this plugin.
     ///
-    /// Arguments: `plugin_ptr`, task handle, context handle, result builder.
+    /// Arguments: `plugin_ptr`, context handle (contains task info), result builder.
     pub on_task: Option<
         unsafe extern "C" fn(
             *mut std::ffi::c_void,
-            *const MalboxTask,
             *const MalboxContext,
             *mut MalboxResultBuilder,
         ) -> i32,
@@ -87,10 +80,8 @@ pub struct MalboxPluginVtable {
         Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut MalboxHealthStatus) -> i32>,
     /// Called when a system event occurs.
     ///
-    /// Arguments: `plugin_ptr`, flat event (tag + id), context handle.
-    pub on_event: Option<
-        unsafe extern "C" fn(*mut std::ffi::c_void, MalboxEvent, *const MalboxContext) -> i32,
-    >,
+    /// Arguments: `plugin_ptr`, flat event (tag + id).
+    pub on_event: Option<unsafe extern "C" fn(*mut std::ffi::c_void, MalboxEvent) -> i32>,
 }
 
 impl Default for MalboxPluginVtable {
@@ -112,9 +103,7 @@ impl Default for MalboxPluginVtable {
 pub struct MalboxGuestPluginVtable {
     pub abi_version: u32,
     pub plugin_ptr: *mut std::ffi::c_void,
-    pub on_start: Option<
-        unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxTask, *const MalboxContext) -> i32,
-    >,
+    pub on_start: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxContext) -> i32>,
     pub on_stop: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxContext) -> i32>,
     pub execute_sample: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const c_char) -> i32>,
     pub health_check:

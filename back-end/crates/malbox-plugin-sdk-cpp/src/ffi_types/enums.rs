@@ -1,13 +1,3 @@
-/// Whether a plugin runs on the host machine or inside the analysis guest VM.
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MalboxPluginType {
-    /// The plugin runs on the host machine alongside the daemon.
-    Host = 0,
-    /// The plugin runs inside the analysis guest VM.
-    Guest = 1,
-}
-
 /// Lifetime policy of a plugin instance.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +32,6 @@ mod tests {
 
     #[test]
     fn test_enums_are_repr_u8() {
-        assert_eq!(mem::size_of::<MalboxPluginType>(), 1);
         assert_eq!(mem::size_of::<MalboxPluginState>(), 1);
         assert_eq!(mem::size_of::<MalboxExecutionContext>(), 1);
     }

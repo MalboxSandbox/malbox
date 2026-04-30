@@ -2,7 +2,7 @@
 //!
 //! These functions provide the C API for interacting with the plugin execution
 //! context. The `MalboxContext*` pointer passed to plugin callbacks is actually
-//! a `*const Context<'_>` created on the Rust side (in `ffi_callbacks.rs`) and
+//! a `*const Context` created on the Rust side (in `ffi_callbacks.rs`) and
 //! cast through the opaque `MalboxContext` enum.
 
 use crate::error::{clear_last_error, result_to_rc, set_last_error};
@@ -14,16 +14,47 @@ use std::ffi::c_char;
 /// Cast an opaque `MalboxContext*` back to a Rust `Context` reference.
 ///
 /// # Safety
-/// `ptr` must have been created from a `&Context<'a>` in `ffi_callbacks.rs`
+/// `ptr` must have been created from a `&Context` in `ffi_callbacks.rs`
 /// and must remain valid for the duration of the callback.
-unsafe fn ctx_ref<'a>(ptr: *const MalboxContext) -> Option<&'a Context<'a>> {
+unsafe fn ctx_ref<'a>(ptr: *const MalboxContext) -> Option<&'a Context> {
     if ptr.is_null() {
         set_last_error("null context pointer");
         return None;
     }
-    // SAFETY: MalboxContext is an opaque stand-in for Context<'a>;
+    // SAFETY: MalboxContext is an opaque stand-in for Context;
     // the runtime always passes the original *const Context cast to *const MalboxContext.
-    Some(unsafe { &*(ptr as *const Context<'a>) })
+    Some(unsafe { &*(ptr as *const Context) })
+}
+
+/// Clone a Context, incrementing its internal Arc refcount.
+///
+/// Returns a heap-allocated `Context` that the caller owns. The caller must
+/// eventually pass it to [`malbox_context_drop`] to release it.
+///
+/// # Safety
+/// `ctx` must be a valid `*const Context` cast to `*const MalboxContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn malbox_context_clone(ctx: *const MalboxContext) -> *mut MalboxContext {
+    if ctx.is_null() {
+        return std::ptr::null_mut();
+    }
+    let context = unsafe { &*(ctx as *const Context) };
+    let cloned = Box::new(context.clone());
+    Box::into_raw(cloned) as *mut MalboxContext
+}
+
+/// Drop a heap-allocated Context previously returned by [`malbox_context_clone`].
+///
+/// # Safety
+/// `ctx` must have been returned by `malbox_context_clone` (i.e., a
+/// heap-allocated `Box<Context>`). Passing a runtime-owned pointer
+/// (the one passed to callbacks) is undefined behavior.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn malbox_context_drop(ctx: *mut MalboxContext) {
+    if ctx.is_null() {
+        return;
+    }
+    let _ = unsafe { Box::from_raw(ctx as *mut Context) };
 }
 
 /// Report execution progress (0.0-1.0) with an optional status message.
@@ -61,7 +92,7 @@ pub unsafe extern "C" fn malbox_context_emit_progress(
         }
     };
 
-    let (rc, _) = result_to_rc(context.emit_progress(progress, msg));
+    let (rc, _) = result_to_rc(context.progress(progress, msg));
     rc
 }
 
@@ -220,7 +251,7 @@ pub unsafe extern "C" fn malbox_context_flush_results(
     }
 
     for result in results {
-        let (rc, _) = result_to_rc(context.push_result(result));
+        let (rc, _) = result_to_rc(context.results().push(result));
         if rc != 0 {
             return rc;
         }
@@ -235,15 +266,19 @@ mod tests {
     use crate::ffi_types::MalboxContext;
     use malbox_plugin_sdk::context::Context;
     use std::ffi::CString;
+    use std::sync::Arc;
 
-    fn make_ctx_ptr<'a>(ctx: &'a Context<'a>) -> *const MalboxContext {
-        (ctx as *const Context<'a>) as *const MalboxContext
+    fn noop_emitter() -> Arc<dyn malbox_plugin_transport::traits::TransportEmitter + Send + Sync> {
+        Arc::new(())
+    }
+
+    fn make_ctx_ptr(ctx: &Context) -> *const MalboxContext {
+        (ctx as *const Context) as *const MalboxContext
     }
 
     #[test]
     fn emit_progress_succeeds() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let msg = CString::new("halfway").unwrap();
         let rc = unsafe { malbox_context_emit_progress(make_ctx_ptr(&ctx), 0.5, msg.as_ptr()) };
         assert_eq!(rc, 0);
@@ -251,8 +286,7 @@ mod tests {
 
     #[test]
     fn emit_progress_null_message_succeeds() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let rc = unsafe { malbox_context_emit_progress(make_ctx_ptr(&ctx), 0.0, std::ptr::null()) };
         assert_eq!(rc, 0);
     }
@@ -265,8 +299,7 @@ mod tests {
 
     #[test]
     fn emit_event_succeeds() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let event = MalboxEvent {
             tag: MalboxEventTag::TaskCreated,
             id: 1,
@@ -277,8 +310,7 @@ mod tests {
 
     #[test]
     fn emit_event_daemon_succeeds() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let event = MalboxEvent {
             tag: MalboxEventTag::DaemonShutdown,
             id: 0,
@@ -299,8 +331,7 @@ mod tests {
 
     #[test]
     fn warn_succeeds() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let msg = CString::new("watch out").unwrap();
         let rc = unsafe { malbox_context_warn(make_ctx_ptr(&ctx), msg.as_ptr()) };
         assert_eq!(rc, 0);
@@ -315,8 +346,7 @@ mod tests {
 
     #[test]
     fn warn_null_message_returns_minus_one() {
-        let emitter = ();
-        let ctx = Context::test_new(&emitter);
+        let ctx = Context::test_new(noop_emitter());
         let rc = unsafe { malbox_context_warn(make_ctx_ptr(&ctx), std::ptr::null()) };
         assert_eq!(rc, -1);
     }

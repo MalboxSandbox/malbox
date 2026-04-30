@@ -1,6 +1,6 @@
 //! Auto-collection of artifact and external log files after task execution.
 //!
-//! After `HostPlugin::on_task` returns, the runtime walks the artifact and
+//! After `GuestPlugin::on_stop` returns, the runtime walks the artifact and
 //! external-log directories and sends any files that were not already
 //! explicitly sent (or marked as collected) by the plugin.
 
@@ -20,13 +20,13 @@ pub(crate) struct AutoCollectSection {
     pub max_file_size: u64,
 }
 
-/// Collect files from `dir` and send them as results via `ctx.push_result`.
+/// Collect files from `dir` and send them as results via `ctx.results().push()`.
 ///
 /// When `claimed_paths` is `Some`, files whose canonical path appears in the
 /// set are skipped (artifact dedup). When `None`, all matching files are sent
 /// (external log collection - no dedup).
 pub(crate) fn auto_collect(
-    ctx: &Context<'_>,
+    ctx: &Context,
     dir: &Path,
     config: &AutoCollectSection,
     claimed_paths: Option<&HashSet<PathBuf>>,
@@ -112,7 +112,10 @@ pub(crate) fn auto_collect(
             format!("{result_prefix}/{rel_str}")
         };
 
-        if let Err(e) = ctx.push_result(PluginResult::file(result_name.clone(), &file_path)) {
+        if let Err(e) = ctx
+            .results()
+            .push(PluginResult::file(result_name.clone(), &file_path))
+        {
             warn!(
                 path = %file_path.display(),
                 error = %e,

@@ -2,18 +2,18 @@
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::types::{HealthStatus, Task};
+use crate::plugin::Plugin;
 use std::path::Path;
 
 /// Launch a sample using the platform-native process creation API.
 ///
 /// This is the default implementation of [`GuestPlugin::execute_sample`].
-pub fn default_launch(sample_path: &Path) -> bool {
+pub fn default_launch(sample_path: &Path) -> LaunchResult {
     use tracing::{error, info};
 
     if !sample_path.exists() {
         error!(path = %sample_path.display(), "default_launch: sample file does not exist");
-        return false;
+        return LaunchResult::UseDefault;
     }
 
     info!(path = %sample_path.display(), "default_launch: launching sample");
@@ -57,7 +57,7 @@ pub fn default_launch(sample_path: &Path) -> bool {
                 }
             });
 
-            true
+            LaunchResult::Launched
         }
         Err(e) => {
             error!(
@@ -66,50 +66,53 @@ pub fn default_launch(sample_path: &Path) -> bool {
                 kind = ?e.kind(),
                 "default_launch: failed to launch sample"
             );
-            false
+            LaunchResult::UseDefault
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchResult {
+    UseDefault,
+    Launched,
 }
 
 /// Trait for malbox guest plugins that run inside an ephemeral VM.
 ///
 /// The SDK owns the lifecycle sequence:
-/// 1. `on_start` - plugin sets up monitoring, receives task info and context
+/// 1. `on_start` - plugin sets up monitoring, receives context
 /// 2. `execute_sample` - SDK calls this to launch the sample (default: platform launcher)
 /// 3. SDK waits for analysis timeout
 /// 4. `on_stop` - plugin flushes results and tears down
-pub trait GuestPlugin: Send + Sync + 'static {
+pub trait GuestPlugin: Plugin {
     /// Called when the analysis task begins. Set up monitoring infrastructure
     /// (ETW sessions, decoders, sinks, etc.) and return when ready to capture.
     ///
     /// The SDK guarantees `execute_sample` will not be called until this returns.
-    fn on_start(&self, task: &Task, ctx: &Context) -> Result<()>;
+    fn on_start(&self, ctx: &Context) -> Result<()>;
 
     /// Called when the analysis timeout expires or the daemon signals shutdown.
-    /// Flush all buffered results via [`Context::push_result`] and tear down.
+    /// Flush all buffered results via [`Context::results().push()`] and tear down.
     fn on_stop(&self, ctx: &Context) -> Result<()>;
 
     /// Launch the sample at the given path. Called by the SDK after `on_start`.
     ///
     /// The default implementation uses the platform's process creation API.
     /// Override for non-EXE scenarios (DLL loading, COM dispatch, etc.).
-    fn execute_sample(&self, sample_path: &Path) -> bool {
-        default_launch(sample_path)
-    }
-
-    /// Return the plugin's current health status.
-    fn health_check(&self) -> HealthStatus {
-        HealthStatus::ready()
+    fn execute_sample(&self, sample_path: &Path) -> Result<LaunchResult> {
+        Ok(default_launch(sample_path))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin::Plugin;
 
     struct MinimalGuestPlugin;
+    impl Plugin for MinimalGuestPlugin {}
     impl GuestPlugin for MinimalGuestPlugin {
-        fn on_start(&self, _task: &Task, _ctx: &Context) -> Result<()> {
+        fn on_start(&self, _ctx: &Context) -> Result<()> {
             Ok(())
         }
         fn on_stop(&self, _ctx: &Context) -> Result<()> {

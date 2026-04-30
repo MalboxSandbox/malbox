@@ -27,11 +27,6 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
 
     let struct_name = &input.ident;
 
-    let plugin_type = match kind {
-        PluginKind::Host => quote! { malbox_plugin_sdk::types::PluginType::Host },
-        PluginKind::Guest => quote! { malbox_plugin_sdk::types::PluginType::Guest },
-    };
-
     let state = match manifest.runtime.state {
         malbox_plugin_manifest::PluginStateConfig::Persistent => {
             quote! { malbox_plugin_sdk::types::PluginState::Persistent }
@@ -76,18 +71,17 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
 
         impl #struct_name {
             #[doc(hidden)]
-            pub const __MALBOX_META: malbox_plugin_sdk::types::PluginMeta = {
-                const DESC: &str = env!("CARGO_PKG_DESCRIPTION");
+            pub fn __malbox_meta() -> malbox_plugin_sdk::types::PluginMeta {
+                let desc = env!("CARGO_PKG_DESCRIPTION");
                 malbox_plugin_sdk::types::PluginMeta {
-                    name: env!("CARGO_PKG_NAME"),
-                    version: env!("CARGO_PKG_VERSION"),
-                    description: if DESC.is_empty() { None } else { Some(DESC) },
-                    authors: env!("CARGO_PKG_AUTHORS"),
-                    plugin_type: #plugin_type,
+                    name: String::from(env!("CARGO_PKG_NAME")),
+                    version: String::from(env!("CARGO_PKG_VERSION")),
+                    description: if desc.is_empty() { String::new() } else { String::from(desc) },
+                    authors: String::from(env!("CARGO_PKG_AUTHORS")),
                     state: #state,
                     execution: #execution,
                 }
-            };
+            }
 
             #runtime_const
         }

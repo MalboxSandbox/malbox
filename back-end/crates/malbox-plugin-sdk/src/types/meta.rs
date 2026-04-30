@@ -1,4 +1,4 @@
-//! Plugin metadata types: name, version, type, state, execution context.
+//! Plugin metadata types: name, version, state, execution context.
 
 /// Metadata about a plugin.
 ///
@@ -7,22 +7,45 @@
 /// plugin authors don't have to duplicate them in the `#[malbox(…)]` attribute.
 #[derive(Debug, Clone)]
 pub struct PluginMeta {
-    pub name: &'static str,
-    pub version: &'static str,
-    pub description: Option<&'static str>,
-    pub authors: &'static str,
-    pub plugin_type: PluginType,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub authors: String,
     pub state: PluginState,
     pub execution: ExecutionContext,
 }
 
-/// How the plugin communicates with the daemon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginType {
-    /// Runs on the daemon host, communicating over IPC.
-    Host,
-    /// Runs inside a guest VM/container, communicating over gRPC.
-    Guest,
+impl PluginMeta {
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: version.into(),
+            description: String::new(),
+            authors: String::new(),
+            state: PluginState::Ephemeral,
+            execution: ExecutionContext::Exclusive,
+        }
+    }
+
+    pub fn description(mut self, d: impl Into<String>) -> Self {
+        self.description = d.into();
+        self
+    }
+
+    pub fn authors(mut self, a: impl Into<String>) -> Self {
+        self.authors = a.into();
+        self
+    }
+
+    pub fn state(mut self, s: PluginState) -> Self {
+        self.state = s;
+        self
+    }
+
+    pub fn execution(mut self, e: ExecutionContext) -> Self {
+        self.execution = e;
+        self
+    }
 }
 
 /// Lifecycle behavior of the plugin.

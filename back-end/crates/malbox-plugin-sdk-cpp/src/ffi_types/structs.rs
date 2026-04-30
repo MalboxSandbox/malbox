@@ -1,6 +1,6 @@
 use std::ffi::c_char;
 
-use super::enums::{MalboxExecutionContext, MalboxPluginState, MalboxPluginType};
+use super::enums::{MalboxExecutionContext, MalboxPluginState};
 
 /// Health status reported by a plugin's `health_check` callback.
 ///
@@ -32,8 +32,6 @@ pub struct MalboxPluginMeta {
     pub description: *const c_char,
     /// Author(s) of the plugin (non-null, null-terminated UTF-8).
     pub authors: *const c_char,
-    /// Whether this is a host or guest plugin.
-    pub plugin_type: MalboxPluginType,
     /// Lifetime policy for the plugin instance.
     pub state: MalboxPluginState,
     /// Concurrency scheduling policy.

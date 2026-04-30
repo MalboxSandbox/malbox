@@ -22,7 +22,7 @@ pub fn generate_main(struct_name: &Ident, kind: PluginKind, is_unit_struct: bool
             fn main() {
                 malbox_plugin_sdk::internal::init_tracing("info", None);
                 let plugin = #plugin_init;
-                let meta = #struct_name::__MALBOX_META;
+                let meta = #struct_name::__malbox_meta();
                 let runtime = malbox_plugin_sdk::runtime::host::HostRuntime::new(plugin, meta)
                     .expect("failed to initialize host plugin runtime");
                 runtime.run().expect("host plugin runtime error");
