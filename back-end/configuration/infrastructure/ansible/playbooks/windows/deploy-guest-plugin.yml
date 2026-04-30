@@ -12,6 +12,9 @@
     # paths.sample_dir, paths.artifact_dir, paths.stash_dir, paths.log_dir
     # are resolved from the plugin's [runtime.paths] in plugin.toml.
     guest_plugins: []
+    # Must match the user created in configure-autologin.yml.
+    sandbox_username: John
+    sandbox_password: malbox!sandbox42
 
   tasks:
     - name: Create plugin install directory
@@ -72,7 +75,18 @@
         dest: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
       loop: "{{ guest_plugins }}"
 
-    - name: Register guest plugin as scheduled task (auto-start on boot)
+    - name: Grant sandbox user full control of plugin directories
+      win_shell: |
+        icacls "{{ malbox_plugins_dir }}" /grant "{{ sandbox_username }}:(OI)(CI)F" /T /Q
+        icacls "{{ item.paths.sample_dir }}" /grant "{{ sandbox_username }}:(OI)(CI)F" /T /Q
+        icacls "{{ item.paths.artifact_dir }}" /grant "{{ sandbox_username }}:(OI)(CI)F" /T /Q
+        icacls "{{ item.paths.stash_dir }}" /grant "{{ sandbox_username }}:(OI)(CI)F" /T /Q
+        icacls "{{ item.paths.log_dir }}" /grant "{{ sandbox_username }}:(OI)(CI)F" /T /Q
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+      failed_when: false
+
+    - name: Register guest plugin as scheduled task (interactive session)
       win_scheduled_task:
         name: "malbox-{{ item.name }}"
         description: "Malbox guest plugin: {{ item.name }}"
@@ -80,9 +94,11 @@
           - path: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
             working_directory: "{{ malbox_plugins_dir }}\\{{ item.name }}"
         triggers:
-          - type: boot
-            delay: PT30S
-        username: SYSTEM
+          - type: logon
+            user_id: "{{ sandbox_username }}"
+        username: "{{ sandbox_username }}"
+        password: "{{ sandbox_password }}"
+        logon_type: interactive_token
         run_level: highest
         state: present
         enabled: yes
