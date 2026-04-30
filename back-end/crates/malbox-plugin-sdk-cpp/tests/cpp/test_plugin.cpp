@@ -26,7 +26,7 @@ public:
         std::string json = R"({"status": "ok"})";
         auto data = std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(json.data()), json.size());
-        ctx.push_result(malbox::HostPluginResult::json("result", data));
+        ctx.push_result(malbox::PluginResult::json("result", data));
     }
 
     void on_stop() override {
