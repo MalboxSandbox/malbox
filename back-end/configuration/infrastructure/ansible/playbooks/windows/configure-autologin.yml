@@ -1,0 +1,82 @@
+---
+# Configure automatic login with a standard user account.
+#
+# Creates a dedicated non-admin user for the sandbox desktop session.
+# Samples launch in this user's interactive session, mimicking a normal
+# end-user environment rather than running as Administrator.
+#
+# Without auto-login the console session has no user token and
+# WTSQueryUserToken fails with ERROR_NO_TOKEN (1008).
+#
+# Override credentials via extra_vars:
+#   --config '{"extra_vars": {"sandbox_username": "Analyst", "sandbox_password": "..."}}'
+
+- name: Configure Sandbox User and Auto-Login
+  hosts: all
+  gather_facts: no
+
+  vars:
+    sandbox_username: John
+    sandbox_password: malbox!sandbox42
+    winlogon_key: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+
+  tasks:
+    - name: Create sandbox user account
+      win_user:
+        name: "{{ sandbox_username }}"
+        password: "{{ sandbox_password }}"
+        password_never_expires: yes
+        user_cannot_change_password: yes
+        groups:
+          - Users
+          - Administrators
+        state: present
+
+    - name: Enable auto logon
+      win_regedit:
+        path: "{{ winlogon_key }}"
+        name: AutoAdminLogon
+        data: "1"
+        type: string
+
+    - name: Set default username
+      win_regedit:
+        path: "{{ winlogon_key }}"
+        name: DefaultUserName
+        data: "{{ sandbox_username }}"
+        type: string
+
+    - name: Set default password
+      win_regedit:
+        path: "{{ winlogon_key }}"
+        name: DefaultPassword
+        data: "{{ sandbox_password }}"
+        type: string
+
+    - name: Set default domain (local machine)
+      win_regedit:
+        path: "{{ winlogon_key }}"
+        name: DefaultDomainName
+        data: "."
+        type: string
+
+    - name: Disable lock screen
+      win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization
+        name: NoLockScreen
+        data: 1
+        type: dword
+
+    - name: Grant sample directory access to sandbox user
+      win_shell: |
+        icacls "C:\ProgramData" /grant "{{ sandbox_username }}:(OI)(CI)RX" /T /Q
+      failed_when: false
+
+    - name: Enable test signing for driver loading
+      win_shell: bcdedit /set testsigning on
+      register: testsigning_set
+      failed_when: false
+
+    - name: Reboot to apply auto-login and test signing
+      win_reboot:
+        reboot_timeout: 900
