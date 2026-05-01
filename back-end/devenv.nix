@@ -90,6 +90,7 @@ in {
     protoc-gen-rust
     protobuf
     cargo-nextest
+    git-cliff
 
     # C++ plugin SDK build dependencies
     cmake
