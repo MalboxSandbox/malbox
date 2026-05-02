@@ -1,5 +1,6 @@
 use crate::error::{Result, SampleError};
 use sqlx::{FromRow, PgPool, postgres::PgDatabaseError, query_as};
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
@@ -24,6 +25,8 @@ pub struct SampleEntity {
     pub sha256: String,
     pub sha512: String,
     pub ssdeep: String,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 impl Default for SampleEntity {
@@ -38,6 +41,8 @@ impl Default for SampleEntity {
             sha256: String::from("none"),
             sha512: String::from("none"),
             ssdeep: String::from("none"),
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
         }
     }
 }

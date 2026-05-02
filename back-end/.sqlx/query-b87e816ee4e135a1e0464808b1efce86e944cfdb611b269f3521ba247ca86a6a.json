@@ -47,6 +47,16 @@
         "ordinal": 8,
         "name": "ssdeep",
         "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -62,6 +72,8 @@
       ]
     },
     "nullable": [
+      false,
+      false,
       false,
       false,
       false,
