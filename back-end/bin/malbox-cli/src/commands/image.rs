@@ -41,7 +41,7 @@ struct RegisterArgs {
     path: String,
     /// Image format (e.g. qcow2, vmdk)
     #[arg(long)]
-    format: Option<String>,
+    image_format: Option<String>,
     /// Description
     #[arg(long)]
     description: Option<String>,
@@ -78,7 +78,7 @@ async fn register(api: &ApiClient, args: RegisterArgs) -> Result<()> {
             platform: args.platform,
             arch: args.arch,
             path: args.path,
-            format: args.format,
+            format: args.image_format,
             description: args.description,
         })
         .await?;
