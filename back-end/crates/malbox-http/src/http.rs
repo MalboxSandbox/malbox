@@ -3,6 +3,7 @@ use malbox_config::Config as MalboxConfig;
 use malbox_database::{PgPool, repositories::tasks::Task};
 use malbox_plugin_internal::registry::PluginRegistry;
 use malbox_resources::MachinePool;
+use malbox_scheduler::TaskCancellationRegistry;
 use malbox_utils::SampleStore;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -28,8 +29,10 @@ struct AppState {
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
     plugin_registry: Arc<PluginRegistry>,
+    cancel_registry: Arc<TaskCancellationRegistry>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn serve(
     conf: MalboxConfig,
     db: PgPool,
@@ -37,6 +40,7 @@ pub async fn serve(
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
     plugin_registry: Arc<PluginRegistry>,
+    cancel_registry: Arc<TaskCancellationRegistry>,
     shutdown_token: CancellationToken,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
@@ -46,6 +50,7 @@ pub async fn serve(
         sample_store,
         machine_pool,
         plugin_registry,
+        cancel_registry,
     };
 
     let app = api_router()
@@ -80,6 +85,7 @@ fn api_router() -> Router<AppState> {
     Router::new()
         .route("/", get(root))
         .fallback(handler_404)
+        .merge(tasks::cancel::router())
         .merge(tasks::create::router())
         .merge(tasks::get::router())
         .merge(tasks::report::router())
