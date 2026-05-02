@@ -3,6 +3,7 @@
 //! Spawns and manages a pool of Worker actors as tokio tasks.
 
 use super::Worker;
+use crate::task::cancel::TaskCancellationRegistry;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
@@ -43,6 +44,7 @@ struct WorkerDeps {
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
+    cancel_registry: Arc<TaskCancellationRegistry>,
 }
 
 /// Pool of workers for task execution.
@@ -109,6 +111,7 @@ impl WorkerPool {
         transport: Option<Arc<ResolvedTransport>>,
         sample_store: Arc<SampleStore>,
         result_store: Arc<ResultStore>,
+        cancel_registry: Arc<TaskCancellationRegistry>,
     ) {
         let deps = WorkerDeps {
             task_queue,
@@ -119,6 +122,7 @@ impl WorkerPool {
             transport,
             sample_store,
             result_store,
+            cancel_registry,
         };
 
         for _ in 0..self.min_workers {
@@ -146,6 +150,7 @@ impl WorkerPool {
             Arc::clone(&deps.result_store),
             Arc::clone(&self.busy_count),
             idle_timeout,
+            Arc::clone(&deps.cancel_registry),
         );
 
         let worker_id = worker.id().clone();

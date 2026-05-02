@@ -21,7 +21,10 @@ pub mod worker;
 
 // Re-export common types
 pub use error::{Result, SchedulerError, TaskError, WorkerError};
-pub use task::{PluginContext, PluginResult, PluginStatus, ResourceAllocation, TaskResult};
+pub use task::{
+    PluginContext, PluginResult, PluginStatus, ResourceAllocation, TaskCancellationRegistry,
+    TaskResult,
+};
 
 /// Initialize and start the scheduler.
 ///
@@ -39,7 +42,7 @@ pub async fn init_scheduler(
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
     token: CancellationToken,
-) -> Result<mpsc::Sender<Task>> {
+) -> Result<(mpsc::Sender<Task>, Arc<TaskCancellationRegistry>)> {
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
 
     let scheduler = scheduler::Scheduler::new(
@@ -54,6 +57,7 @@ pub async fn init_scheduler(
         result_store,
         token.clone(),
     );
+    let cancel_registry = scheduler.cancel_registry();
 
     tokio::spawn(async move {
         if let Err(e) = scheduler.run(task_rx, token).await {
@@ -65,5 +69,5 @@ pub async fn init_scheduler(
         max_workers,
         min_workers, idle_timeout_ms, "Scheduler started"
     );
-    Ok(task_tx)
+    Ok((task_tx, cancel_registry))
 }

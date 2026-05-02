@@ -5,6 +5,7 @@
 //! the HTTP layer, and spawns Worker actors to process them.
 
 use crate::error::Result;
+use crate::task::cancel::TaskCancellationRegistry;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use crate::worker::event::WorkerEvent;
@@ -31,6 +32,7 @@ pub struct Scheduler {
     transport: Option<Arc<ResolvedTransport>>,
     sample_store: Arc<SampleStore>,
     result_store: Arc<ResultStore>,
+    cancel_registry: Arc<TaskCancellationRegistry>,
     #[allow(dead_code)]
     token: CancellationToken,
 }
@@ -50,6 +52,7 @@ impl Scheduler {
         token: CancellationToken,
     ) -> Self {
         let idle_timeout = std::time::Duration::from_millis(idle_timeout_ms);
+        let cancel_registry = Arc::new(TaskCancellationRegistry::new());
         Self {
             task_queue: Arc::new(TaskQueue::new()),
             task_store: Arc::new(TaskStore::new(db_pool)),
@@ -66,8 +69,13 @@ impl Scheduler {
             transport,
             sample_store,
             result_store,
+            cancel_registry,
             token,
         }
+    }
+
+    pub fn cancel_registry(&self) -> Arc<TaskCancellationRegistry> {
+        Arc::clone(&self.cancel_registry)
     }
 
     pub async fn run(
@@ -115,6 +123,7 @@ impl Scheduler {
             self.transport.clone(),
             Arc::clone(&self.sample_store),
             Arc::clone(&self.result_store),
+            Arc::clone(&self.cancel_registry),
         );
 
         debug!(

@@ -17,6 +17,7 @@ pub use handle::WorkerHandle;
 pub use job::Job;
 
 use crate::error::{Result, SchedulerError};
+use crate::task::cancel::TaskCancellationRegistry;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use malbox_database::repositories::samples::fetch_sample_by_id;
@@ -130,6 +131,7 @@ pub struct Worker {
     result_store: Arc<ResultStore>,
     busy_count: Arc<std::sync::atomic::AtomicUsize>,
     idle_timeout: Option<Duration>,
+    cancel_registry: Arc<TaskCancellationRegistry>,
 }
 
 impl Worker {
@@ -146,6 +148,7 @@ impl Worker {
         result_store: Arc<ResultStore>,
         busy_count: Arc<std::sync::atomic::AtomicUsize>,
         idle_timeout: Option<Duration>,
+        cancel_registry: Arc<TaskCancellationRegistry>,
     ) -> Self {
         Self {
             id: WorkerId::new(),
@@ -159,6 +162,7 @@ impl Worker {
             result_store,
             busy_count,
             idle_timeout,
+            cancel_registry,
         }
     }
 
@@ -223,10 +227,27 @@ impl Worker {
                 None => continue,
             };
 
+            // Skip tasks that were cancelled while queued.
+            if let Ok(Some(task)) =
+                malbox_database::repositories::tasks::fetch_task(self.task_store.pool(), task_id)
+                    .await
+                && task.status == TaskState::Canceled
+            {
+                debug!(worker_id = %self.id, task_id, "Skipping cancelled task");
+                continue;
+            }
+
             info!(worker_id = %self.id, task_id, "Worker picked up task");
 
+            let task_token = token.child_token();
+            self.cancel_registry
+                .register(task_id, task_token.clone())
+                .await;
+
             let start = std::time::Instant::now();
-            let result = self.execute_task(task_id, &token).await;
+            let result = self.execute_task(task_id, &task_token).await;
+
+            self.cancel_registry.remove(task_id).await;
             let duration = start.elapsed();
 
             match result {
@@ -307,16 +328,76 @@ impl Worker {
         // Load full task for spec building
         let task = self.task_store.load_task(task_id).await?;
 
+        // --- Host-only fast path ---
+        if Self::is_host_only_task(&task) {
+            info!(task_id, "Host-only task detected, skipping VM acquisition");
+            let _busy = BusyGuard::new(Arc::clone(&self.busy_count));
+
+            let work_result = self.execute_host_only_task(task_id, &task, token).await;
+
+            // Stopping state
+            if let Err(e) = self
+                .task_store
+                .update_task_state(task_id, TaskState::Stopping)
+                .await
+            {
+                error!(task_id, error = %e, "Failed to update task state to Stopping");
+            }
+
+            // Final state based on outcome (same pattern as the VM path)
+            match &work_result {
+                Ok(TaskOutcome::Completed) => {
+                    self.task_store
+                        .update_task_state(task_id, TaskState::Completed)
+                        .await?;
+                    self.emit_task_event(Event::TaskCompleted { task_id });
+                }
+                Ok(TaskOutcome::TimedOut { .. }) => {
+                    if let Err(e) = self
+                        .task_store
+                        .update_task_state(task_id, TaskState::Failed)
+                        .await
+                    {
+                        error!(task_id, error = %e, "Failed to update task state to Failed after timeout");
+                    }
+                    self.emit_task_event(Event::TaskFailed { task_id });
+                }
+                Ok(TaskOutcome::Cancelled) => {
+                    if let Err(e) = self
+                        .task_store
+                        .update_task_state(task_id, TaskState::Canceled)
+                        .await
+                    {
+                        error!(task_id, error = %e, "Failed to update task state to Canceled");
+                    }
+                    self.emit_task_event(Event::TaskCanceled { task_id });
+                }
+                Err(_) => {
+                    if let Err(e) = self
+                        .task_store
+                        .update_task_state(task_id, TaskState::Failed)
+                        .await
+                    {
+                        error!(task_id, error = %e, "Failed to update task state to Failed");
+                    }
+                    self.emit_task_event(Event::TaskFailed { task_id });
+                }
+                Ok(TaskOutcome::Requeued) => unreachable!("host-only tasks don't requeue"),
+            }
+
+            return work_result;
+        }
+
         // --- Preparing Resources ---
         self.task_store
             .update_task_state(task_id, TaskState::PreparingResources)
             .await?;
 
-        let db_machine = match self
-            .machine_pool
-            .acquire(task.platform.clone(), task_id)
-            .await
-        {
+        let platform = task.platform.clone().ok_or_else(|| {
+            SchedulerError::Internal("Task requires VM but has no platform set".into())
+        })?;
+
+        let db_machine = match self.machine_pool.acquire(platform, task_id).await {
             Ok(Some(m)) => m,
             Ok(None) => {
                 // No machine available — re-enqueue and wait
@@ -659,139 +740,333 @@ impl Worker {
         }
 
         // --- Plugin execution phase ---
-        // The analysis timeout wraps only this phase. Shutdown cancellation
-        // is also checked here via select! so the worker can exit promptly.
+        // The analysis timeout wraps this phase. Cancellation is handled
+        // inside each plugin's execute_task via the token, so handles are
+        // always properly released.
         let analysis_timeout = Duration::from_secs(analysis_secs);
+        let mut cancelled = false;
 
-        let timed_out = tokio::select! {
-            result = tokio::time::timeout(analysis_timeout, async {
-                for entry in snapshot.list() {
-                    let plugin_id = &entry.id;
-                    async {
-                        if entry.manifest.plugin.plugin_type
-                            == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
-                            && !snapshot_guest_plugins
-                                .iter()
-                                .any(|n| n == plugin_id.as_str())
-                        {
-                            info!(
-                                task_id,
-                                plugin = plugin_id.as_str(),
-                                "Skipping guest plugin not in active snapshot"
+        let timed_out = tokio::time::timeout(analysis_timeout, async {
+            for entry in snapshot.list() {
+                if token.is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
+
+                let plugin_id = &entry.id;
+                async {
+                    if entry.manifest.plugin.plugin_type
+                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
+                        && !snapshot_guest_plugins
+                            .iter()
+                            .any(|n| n == plugin_id.as_str())
+                    {
+                        info!(
+                            task_id,
+                            plugin = plugin_id.as_str(),
+                            "Skipping guest plugin not in active snapshot"
+                        );
+                        return;
+                    }
+
+                    match self.plugin_manager.acquire(plugin_id).await {
+                        Ok(handle) => {
+                            let mut config = std::collections::HashMap::new();
+                            let plugin_timeout_secs = analysis_secs
+                                .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
+                            config.insert(
+                                "analysis_timeout".to_string(),
+                                plugin_timeout_secs.to_string(),
                             );
-                            return;
-                        }
+                            match handle.execute_task(task_id, &task.target, config).await {
+                                Ok(outputs) => {
+                                    info!(
+                                        task_id,
+                                        plugin = plugin_id.as_str(),
+                                        result_count = outputs.len(),
+                                        "Plugin execution completed"
+                                    );
 
-                        match self.plugin_manager.acquire(plugin_id).await {
-                            Ok(handle) => {
-                                let mut config = std::collections::HashMap::new();
-                                // Advertise the plugin's own budget — the host's
-                                // wrapping timeout is `plugin budget + grace` so
-                                // the plugin has room to flush after its sleep.
-                                let plugin_timeout_secs = analysis_secs
-                                    .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
-                                config.insert(
-                                    "analysis_timeout".to_string(),
-                                    plugin_timeout_secs.to_string(),
-                                );
-                                match handle.execute_task(task_id, &task.target, config).await {
-                                    Ok(outputs) => {
-                                        info!(
-                                            task_id,
-                                            plugin = plugin_id.as_str(),
-                                            result_count = outputs.len(),
-                                            "Plugin execution completed"
-                                        );
+                                    let plugin_name = plugin_id.as_str();
+                                    for output in &outputs {
+                                        let fs_format = match output.format {
+                                            OutputFormat::Json => ResultFormat::Json,
+                                            OutputFormat::Bytes => ResultFormat::Bytes,
+                                        };
+                                        let db_format = match output.format {
+                                            OutputFormat::Json => DbResultFormat::Json,
+                                            OutputFormat::Bytes => DbResultFormat::Bytes,
+                                        };
+                                        let db_role = if matches!(output.format, OutputFormat::Json)
+                                            && output.result_name
+                                                == malbox_plugin_transport::REPORT_RESULT_NAME
+                                        {
+                                            ResultRole::Report
+                                        } else {
+                                            ResultRole::Artifact
+                                        };
 
-                                        let plugin_name = plugin_id.as_str();
-                                        for output in &outputs {
-                                            let fs_format = match output.format {
-                                                OutputFormat::Json => ResultFormat::Json,
-                                                OutputFormat::Bytes => ResultFormat::Bytes,
-                                            };
-                                            let db_format = match output.format {
-                                                OutputFormat::Json => DbResultFormat::Json,
-                                                OutputFormat::Bytes => DbResultFormat::Bytes,
-                                            };
-                                            let db_role = if matches!(output.format, OutputFormat::Json)
-                                                && output.result_name
-                                                    == malbox_plugin_transport::REPORT_RESULT_NAME
-                                            {
-                                                ResultRole::Report
-                                            } else {
-                                                ResultRole::Artifact
-                                            };
-
-                                            match self
-                                                .result_store
-                                                .store(
-                                                    task_id,
-                                                    plugin_name,
-                                                    &output.result_name,
-                                                    fs_format,
-                                                    &output.data,
+                                        match self
+                                            .result_store
+                                            .store(
+                                                task_id,
+                                                plugin_name,
+                                                &output.result_name,
+                                                fs_format,
+                                                &output.data,
+                                            )
+                                            .await
+                                        {
+                                            Ok(rel_path) => {
+                                                if let Err(e) = task_results::insert_task_result(
+                                                    self.task_store.pool(),
+                                                    &task_results::InsertTaskResult {
+                                                        task_id,
+                                                        plugin_name,
+                                                        result_name: &output.result_name,
+                                                        format: db_format,
+                                                        role: db_role,
+                                                        size_bytes: output.data.len() as i64,
+                                                        file_path: &rel_path,
+                                                    },
                                                 )
                                                 .await
-                                            {
-                                                Ok(rel_path) => {
-                                                    if let Err(e) = task_results::insert_task_result(
-                                                        self.task_store.pool(),
-                                                        &task_results::InsertTaskResult {
-                                                            task_id,
-                                                            plugin_name,
-                                                            result_name: &output.result_name,
-                                                            format: db_format,
-                                                            role: db_role,
-                                                            size_bytes: output.data.len() as i64,
-                                                            file_path: &rel_path,
-                                                        },
-                                                    )
-                                                    .await
-                                                    {
-                                                        error!(
-                                                            task_id,
-                                                            plugin_name,
-                                                            result_name = output.result_name.as_str(),
-                                                            error = %e,
-                                                            "Failed to insert task result into DB"
-                                                        );
-                                                    }
-                                                }
-                                                Err(e) => {
+                                                {
                                                     error!(
                                                         task_id,
                                                         plugin_name,
                                                         result_name = output.result_name.as_str(),
                                                         error = %e,
-                                                        "Failed to store task result to filesystem"
+                                                        "Failed to insert task result into DB"
                                                     );
                                                 }
                                             }
+                                            Err(e) => {
+                                                error!(
+                                                    task_id,
+                                                    plugin_name,
+                                                    result_name = output.result_name.as_str(),
+                                                    error = %e,
+                                                    "Failed to store task result to filesystem"
+                                                );
+                                            }
                                         }
                                     }
-                                    Err(e) => {
-                                        error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
-                                    }
                                 }
-                                handle.release().await;
+                                Err(e) => {
+                                    error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
+                                }
                             }
-                            Err(e) => {
-                                warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
-                            }
+                            handle.release().await;
+                        }
+                        Err(e) => {
+                            warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
                         }
                     }
-                    .instrument(debug_span!("plugin.execute", plugin = %plugin_id))
-                    .await;
                 }
-            }) => result.is_err(),
-            _ = token.cancelled() => {
-                info!(task_id, "Analysis phase cancelled due to shutdown");
-                return Ok(TaskOutcome::Cancelled);
+                .instrument(debug_span!("plugin.execute", plugin = %plugin_id))
+                .await;
             }
-        };
+        })
+        .await
+        .is_err();
+
+        if cancelled {
+            info!(task_id, "Analysis phase cancelled");
+            return Ok(TaskOutcome::Cancelled);
+        }
 
         if timed_out {
             warn!(task_id, analysis_secs, "Analysis phase timed out");
+            return Ok(TaskOutcome::TimedOut { analysis_secs });
+        }
+
+        Ok(TaskOutcome::Completed)
+    }
+
+    /// Returns `true` when the task should bypass VM acquisition entirely
+    /// and run only host-side plugins.
+    fn is_host_only_task(task: &malbox_database::repositories::tasks::Task) -> bool {
+        task.platform.is_none() && task.snapshot_id.is_none()
+    }
+
+    /// Execute a host-only task (no VM, no guest plugins).
+    ///
+    /// This mirrors the plugin-execution loop from [`run_task_on_machine`] but
+    /// skips all VM interaction, sample transfer, and guest plugin registration.
+    /// Only host-type plugins listed in `task.plugins` are executed.
+    #[instrument(skip_all, fields(task_id, worker_id = %self.id), err)]
+    async fn execute_host_only_task(
+        &self,
+        task_id: i32,
+        task: &malbox_database::repositories::tasks::Task,
+        token: &CancellationToken,
+    ) -> Result<TaskOutcome> {
+        // Check cancellation before starting work.
+        if token.is_cancelled() {
+            return Ok(TaskOutcome::Cancelled);
+        }
+
+        // --- Running ---
+        self.task_store
+            .update_task_state(task_id, TaskState::Running)
+            .await?;
+
+        let plugin_timeout_secs = if task.timeout > 0 {
+            task.timeout as u64
+        } else {
+            300
+        };
+        let analysis_secs = plugin_timeout_secs.saturating_add(ANALYSIS_TIMEOUT_GRACE_SECS);
+        let analysis_timeout = Duration::from_secs(analysis_secs);
+
+        let snapshot = self.plugin_manager.registry().snapshot();
+
+        let mut cancelled = false;
+
+        let timed_out = tokio::time::timeout(analysis_timeout, async {
+            for plugin_name in &task.plugins {
+                if token.is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
+
+                let plugin_id =
+                    malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
+
+                async {
+                    let entry = match snapshot.get(&plugin_id) {
+                        Some(e) => e,
+                        None => {
+                            warn!(
+                                task_id,
+                                plugin = plugin_name.as_str(),
+                                "Plugin not found in registry, skipping"
+                            );
+                            return;
+                        }
+                    };
+
+                    if entry.manifest.plugin.plugin_type
+                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
+                    {
+                        info!(
+                            task_id,
+                            plugin = plugin_name.as_str(),
+                            "Skipping guest plugin in host-only task"
+                        );
+                        return;
+                    }
+
+                    match self.plugin_manager.acquire(&plugin_id).await {
+                        Ok(handle) => {
+                            let mut config = std::collections::HashMap::new();
+                            let plugin_budget = analysis_secs
+                                .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
+                            config.insert(
+                                "analysis_timeout".to_string(),
+                                plugin_budget.to_string(),
+                            );
+                            match handle.execute_task(task_id, &task.target, config).await {
+                                Ok(outputs) => {
+                                    info!(
+                                        task_id,
+                                        plugin = plugin_name.as_str(),
+                                        result_count = outputs.len(),
+                                        "Plugin execution completed"
+                                    );
+
+                                    let pname = plugin_id.as_str();
+                                    for output in &outputs {
+                                        let fs_format = match output.format {
+                                            OutputFormat::Json => ResultFormat::Json,
+                                            OutputFormat::Bytes => ResultFormat::Bytes,
+                                        };
+                                        let db_format = match output.format {
+                                            OutputFormat::Json => DbResultFormat::Json,
+                                            OutputFormat::Bytes => DbResultFormat::Bytes,
+                                        };
+                                        let db_role = if matches!(output.format, OutputFormat::Json)
+                                            && output.result_name
+                                                == malbox_plugin_transport::REPORT_RESULT_NAME
+                                        {
+                                            ResultRole::Report
+                                        } else {
+                                            ResultRole::Artifact
+                                        };
+
+                                        match self
+                                            .result_store
+                                            .store(
+                                                task_id,
+                                                pname,
+                                                &output.result_name,
+                                                fs_format,
+                                                &output.data,
+                                            )
+                                            .await
+                                        {
+                                            Ok(rel_path) => {
+                                                if let Err(e) = task_results::insert_task_result(
+                                                    self.task_store.pool(),
+                                                    &task_results::InsertTaskResult {
+                                                        task_id,
+                                                        plugin_name: pname,
+                                                        result_name: &output.result_name,
+                                                        format: db_format,
+                                                        role: db_role,
+                                                        size_bytes: output.data.len() as i64,
+                                                        file_path: &rel_path,
+                                                    },
+                                                )
+                                                .await
+                                                {
+                                                    error!(
+                                                        task_id,
+                                                        plugin_name = pname,
+                                                        result_name = output.result_name.as_str(),
+                                                        error = %e,
+                                                        "Failed to insert task result into DB"
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    task_id,
+                                                    plugin_name = pname,
+                                                    result_name = output.result_name.as_str(),
+                                                    error = %e,
+                                                    "Failed to store task result to filesystem"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(task_id, plugin = plugin_name.as_str(), error = %e, "Plugin execution failed");
+                                }
+                            }
+                            handle.release().await;
+                        }
+                        Err(e) => {
+                            warn!(task_id, plugin = plugin_name.as_str(), error = %e, "Failed to acquire plugin");
+                        }
+                    }
+                }
+                .instrument(debug_span!("plugin.execute", plugin = %plugin_name))
+                .await;
+            }
+        })
+        .await
+        .is_err();
+
+        if cancelled {
+            info!(task_id, "Host-only analysis phase cancelled");
+            return Ok(TaskOutcome::Cancelled);
+        }
+
+        if timed_out {
+            warn!(task_id, analysis_secs, "Host-only analysis phase timed out");
             return Ok(TaskOutcome::TimedOut { analysis_secs });
         }
 

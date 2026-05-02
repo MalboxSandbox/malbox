@@ -214,7 +214,7 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
     let result_store = Arc::new(ResultStore::new(&config.paths.data_dir));
 
     // Initialize scheduler and keep channels alive
-    let task_tx = {
+    let (task_tx, cancel_registry) = {
         let _span = info_span!("init.scheduler").entered();
         init_scheduler(
             db.clone(),
@@ -241,6 +241,7 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
         sample_store,
         machine_pool,
         registry,
+        cancel_registry,
         shutdown_token.child_token(),
     )
     .await
