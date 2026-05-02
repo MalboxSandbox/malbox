@@ -1,7 +1,7 @@
 use crate::http::AppState;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post},
@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/v1/machines/{id}/provision", post(provision_machine))
         .route("/v1/machines/{id}/provisions", get(list_provisions))
+        .route("/v1/snapshots", get(list_all_snapshots))
 }
 
 async fn list_machines(State(state): State<AppState>) -> impl IntoResponse {
@@ -216,6 +217,25 @@ async fn list_provisions(State(state): State<AppState>, Path(id): Path<i32>) -> 
     .await
     {
         Ok(runs) => (StatusCode::OK, Json(serde_json::json!(runs))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SnapshotQuery {
+    platform: String,
+}
+
+async fn list_all_snapshots(
+    State(state): State<AppState>,
+    Query(query): Query<SnapshotQuery>,
+) -> impl IntoResponse {
+    match snapshots::fetch_snapshots_by_platform(&state.pool, &query.platform).await {
+        Ok(snaps) => (StatusCode::OK, Json(serde_json::json!(snaps))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),
