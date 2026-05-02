@@ -111,7 +111,7 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
 
 fn format_cpp_vector(patterns: &[String]) -> String {
     if patterns.is_empty() {
-        return "{{}}".to_string();
+        return "{}".to_string();
     }
     let items: Vec<String> = patterns.iter().map(|p| format!("{p:?}")).collect();
     format!("{{{}}}", items.join(", "))
