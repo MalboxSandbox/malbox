@@ -23,7 +23,7 @@
 #include <variant>
 #include <vector>
 
-#include "malbox_plugin.h"
+#include "../../generated/malbox_plugin.h"
 #include <malbox/error.hpp>
 #include <malbox/result.hpp>
 

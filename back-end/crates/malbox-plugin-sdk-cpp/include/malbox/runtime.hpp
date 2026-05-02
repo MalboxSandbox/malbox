@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "malbox_plugin.h"
+#include "../../generated/malbox_plugin.h"
 #include <malbox/error.hpp>
 #include <malbox/types.hpp>
 #include <malbox/events.hpp>

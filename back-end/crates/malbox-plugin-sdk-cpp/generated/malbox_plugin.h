@@ -48,6 +48,31 @@ typedef int32_t MalboxEventTag;
 #endif // __cplusplus
 
 /**
+ * Lifetime policy of a plugin instance.
+ */
+enum MalboxPluginState
+#ifdef __cplusplus
+  : uint8_t
+#endif // __cplusplus
+ {
+    /**
+     * The plugin instance is kept alive across tasks.
+     */
+    MALBOX_PLUGIN_STATE_PERSISTENT = 0,
+    /**
+     * A new plugin instance is created for each task and discarded afterwards.
+     */
+    MALBOX_PLUGIN_STATE_EPHEMERAL = 1,
+    /**
+     * The plugin instance lives for a user-defined scope.
+     */
+    MALBOX_PLUGIN_STATE_SCOPED = 2,
+};
+#ifndef __cplusplus
+typedef uint8_t MalboxPluginState;
+#endif // __cplusplus
+
+/**
  * Concurrency policy controlling how the scheduler dispatches tasks to a plugin.
  */
 enum MalboxExecutionContext
@@ -75,31 +100,6 @@ enum MalboxExecutionContext
 };
 #ifndef __cplusplus
 typedef uint8_t MalboxExecutionContext;
-#endif // __cplusplus
-
-/**
- * Lifetime policy of a plugin instance.
- */
-enum MalboxPluginState
-#ifdef __cplusplus
-  : uint8_t
-#endif // __cplusplus
- {
-    /**
-     * The plugin instance is kept alive across tasks.
-     */
-    MALBOX_PLUGIN_STATE_PERSISTENT = 0,
-    /**
-     * A new plugin instance is created for each task and discarded afterwards.
-     */
-    MALBOX_PLUGIN_STATE_EPHEMERAL = 1,
-    /**
-     * The plugin instance lives for a user-defined scope.
-     */
-    MALBOX_PLUGIN_STATE_SCOPED = 2,
-};
-#ifndef __cplusplus
-typedef uint8_t MalboxPluginState;
 #endif // __cplusplus
 
 /**

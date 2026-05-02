@@ -8,8 +8,8 @@ fn main() {
         .with_config(config)
         .generate()
         .map(|bindings| {
-            let include_dir = format!("{crate_dir}/include");
-            std::fs::create_dir_all(&include_dir).unwrap();
-            bindings.write_to_file(format!("{include_dir}/malbox_plugin.h"));
+            let generated_dir = format!("{crate_dir}/generated");
+            std::fs::create_dir_all(&generated_dir).unwrap();
+            bindings.write_to_file(format!("{generated_dir}/malbox_plugin.h"));
         });
 }

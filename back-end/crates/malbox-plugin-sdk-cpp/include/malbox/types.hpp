@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "malbox_plugin.h"
+#include "../../generated/malbox_plugin.h"
 
 namespace malbox {
 

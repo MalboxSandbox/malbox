@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include "malbox_plugin.h"
+#include "../../generated/malbox_plugin.h"
 
 namespace malbox {
 

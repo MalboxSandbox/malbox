@@ -103,7 +103,7 @@ pub fn run() {
     fs::create_dir_all(&include_dst)
         .unwrap_or_else(|e| panic!("failed to create `{}`: {e}", include_dst.display()));
 
-    let header_src = sdk_crate.join("include/malbox_plugin.h");
+    let header_src = sdk_crate.join("generated/malbox_plugin.h");
     copy_file(&header_src, &include_dst.join("malbox_plugin.h"));
 
     // dist/include/malbox/*.hpp

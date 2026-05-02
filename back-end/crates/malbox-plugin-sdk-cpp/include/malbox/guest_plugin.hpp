@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 
-#include "malbox_plugin.h"
+#include "../../generated/malbox_plugin.h"
 #include <malbox/context.hpp>
 #include <malbox/types.hpp>
 
