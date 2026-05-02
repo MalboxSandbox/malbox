@@ -53,10 +53,10 @@ fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
-    let ac_art_include = format_cpp_str_array(&r.auto_collect_artifacts.include);
-    let ac_art_exclude = format_cpp_str_array(&r.auto_collect_artifacts.exclude);
-    let ac_ext_include = format_cpp_str_array(&r.auto_collect_external_logs.include);
-    let ac_ext_exclude = format_cpp_str_array(&r.auto_collect_external_logs.exclude);
+    let ac_art_include = format_cpp_vector(&r.auto_collect_artifacts.include);
+    let ac_art_exclude = format_cpp_vector(&r.auto_collect_artifacts.exclude);
+    let ac_ext_include = format_cpp_vector(&r.auto_collect_external_logs.include);
+    let ac_ext_exclude = format_cpp_vector(&r.auto_collect_external_logs.exclude);
 
     format!(
         "// AUTO-GENERATED from plugin.toml by malbox-codegen - do not edit by hand.\n\
@@ -67,12 +67,7 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
          \n\
          namespace malbox::generated {{\n\
          \n\
-         static constexpr const char* ac_art_include[] = {ac_art_include};\n\
-         static constexpr const char* ac_art_exclude[] = {ac_art_exclude};\n\
-         static constexpr const char* ac_ext_include[] = {ac_ext_include};\n\
-         static constexpr const char* ac_ext_exclude[] = {ac_ext_exclude};\n\
-         \n\
-         inline constexpr ::malbox::RuntimeConfig runtime_config{{\n\
+         inline const ::malbox::RuntimeConfig runtime_config{{\n\
          \x20   .port                   = {port},\n\
          \x20   .sample_dir             = {sample_dir:?},\n\
          \x20   .artifact_dir           = {artifact_dir:?},\n\
@@ -85,18 +80,14 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
          \x20   .analysis_timeout       = {analysis_timeout},\n\
          \x20   .auto_collect_artifacts = {{\n\
          \x20       .enabled       = {ac_art_enabled},\n\
-         \x20       .include       = ac_art_include,\n\
-         \x20       .include_count = {ac_art_include_count},\n\
-         \x20       .exclude       = ac_art_exclude,\n\
-         \x20       .exclude_count = {ac_art_exclude_count},\n\
+         \x20       .include       = {ac_art_include},\n\
+         \x20       .exclude       = {ac_art_exclude},\n\
          \x20       .max_file_size = {ac_art_max},\n\
          \x20   }},\n\
          \x20   .auto_collect_external_logs = {{\n\
          \x20       .enabled       = {ac_ext_enabled},\n\
-         \x20       .include       = ac_ext_include,\n\
-         \x20       .include_count = {ac_ext_include_count},\n\
-         \x20       .exclude       = ac_ext_exclude,\n\
-         \x20       .exclude_count = {ac_ext_exclude_count},\n\
+         \x20       .include       = {ac_ext_include},\n\
+         \x20       .exclude       = {ac_ext_exclude},\n\
          \x20       .max_file_size = {ac_ext_max},\n\
          \x20   }},\n\
          }};\n\
@@ -112,17 +103,13 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
         log_filter = r.log_filter,
         analysis_timeout = r.analysis_timeout,
         ac_art_enabled = r.auto_collect_artifacts.enabled,
-        ac_art_include_count = r.auto_collect_artifacts.include.len(),
-        ac_art_exclude_count = r.auto_collect_artifacts.exclude.len(),
         ac_art_max = r.auto_collect_artifacts.max_file_size,
         ac_ext_enabled = r.auto_collect_external_logs.enabled,
-        ac_ext_include_count = r.auto_collect_external_logs.include.len(),
-        ac_ext_exclude_count = r.auto_collect_external_logs.exclude.len(),
         ac_ext_max = r.auto_collect_external_logs.max_file_size,
     )
 }
 
-fn format_cpp_str_array(patterns: &[String]) -> String {
+fn format_cpp_vector(patterns: &[String]) -> String {
     if patterns.is_empty() {
         return "{{}}".to_string();
     }
