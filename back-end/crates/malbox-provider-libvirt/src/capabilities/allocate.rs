@@ -32,9 +32,14 @@ impl Allocate for LibvirtProvider {
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Register the domain in libvirt (persistent, not started)
-        let domain = Domain::define_xml(self.connection(), &xml)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let domain = if let Ok(existing) = Domain::lookup_by_name(self.connection(), &domain_name) {
+            tracing::warn!(domain = %domain_name, "Domain already exists, reusing");
+            existing
+        } else {
+            Domain::define_xml(self.connection(), &xml)
+                .map_err(LibvirtError::from)
+                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?
+        };
 
         // Store the machine name in domain metadata so we can link back
         // to the DB record when reconstructing Machine structs on restart.

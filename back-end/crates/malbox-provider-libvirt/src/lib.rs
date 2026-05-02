@@ -173,7 +173,12 @@ impl LibvirtProvider {
             )
         };
 
-        let vol = StorageVol::create_xml(&self.storage_pool, &vol_xml, 0)?;
+        let vol = if let Ok(existing) = StorageVol::lookup_by_name(&self.storage_pool, &vol_name) {
+            warn!(volume = %vol_name, "Storage volume already exists, reusing");
+            existing
+        } else {
+            StorageVol::create_xml(&self.storage_pool, &vol_xml, 0)?
+        };
         let path = vol.get_path()?;
         Ok(path)
     }
@@ -237,16 +242,29 @@ fn install_libvirt_error_handler() {
         };
 
         let level = unsafe { (*err).level };
+        let code = unsafe { (*err).code };
 
-        match level as virt::sys::virErrorLevel {
-            virt::sys::VIR_ERR_WARNING => {
-                warn!(target: "libvirt", "{}", message);
-            }
-            virt::sys::VIR_ERR_ERROR => {
-                error!(target: "libvirt", "{}", message);
-            }
-            _ => {
-                debug!(target: "libvirt", "{}", message);
+        // "Not found" errors are expected during existence checks
+        let is_not_found = matches!(
+            code as virt::sys::virErrorNumber,
+            virt::sys::VIR_ERR_NO_DOMAIN
+                | virt::sys::VIR_ERR_NO_STORAGE_VOL
+                | virt::sys::VIR_ERR_NO_DOMAIN_SNAPSHOT
+        );
+
+        if is_not_found {
+            debug!(target: "libvirt", "{}", message);
+        } else {
+            match level as virt::sys::virErrorLevel {
+                virt::sys::VIR_ERR_WARNING => {
+                    warn!(target: "libvirt", "{}", message);
+                }
+                virt::sys::VIR_ERR_ERROR => {
+                    error!(target: "libvirt", "{}", message);
+                }
+                _ => {
+                    debug!(target: "libvirt", "{}", message);
+                }
             }
         }
     }
