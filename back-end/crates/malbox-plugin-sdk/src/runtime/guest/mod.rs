@@ -190,7 +190,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let auto_collect_external_logs = self.auto_collect_external_logs.clone();
         let default_timeout = self.default_timeout;
 
-        let _ = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             stream::guest_linear_task(
                 plugin,
                 req.task_id,
@@ -204,8 +204,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
                 auto_collect_external_logs,
                 default_timeout,
             );
-        })
-        .await;
+        });
 
         let stream: TaskResultStream = Box::pin(ReceiverStream::new(rx));
         Ok(Response::new(stream))
