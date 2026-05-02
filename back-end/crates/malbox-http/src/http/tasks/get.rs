@@ -64,7 +64,10 @@ impl From<Task> for TaskResponse {
             id: t.id.unwrap_or_default(),
             status: format!("{:?}", t.status).to_lowercase(),
             target: t.target,
-            platform: format!("{:?}", t.platform).to_lowercase(),
+            platform: t
+                .platform
+                .map(|p| format!("{:?}", p).to_lowercase())
+                .unwrap_or_default(),
             timeout: t.timeout,
             priority: t.priority,
             owner: t.owner,

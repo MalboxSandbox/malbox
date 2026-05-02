@@ -63,6 +63,10 @@ struct CreateTaskRequest {
     /// Override the sample filename used on the guest VM.
     /// If not set, the original uploaded filename is used.
     target_filename: Option<String>,
+    /// Comma-separated list of plugin IDs to run for this task.
+    plugins: Option<String>,
+    /// UUID of the snapshot to use for this task.
+    snapshot_id: Option<String>,
 }
 
 #[tracing::instrument(skip_all, fields(task_id = tracing::field::Empty), err)]
@@ -154,6 +158,22 @@ async fn create_task(
     let utc_now = OffsetDateTime::now_utc();
     let current_primitive_datetime = PrimitiveDateTime::new(utc_now.date(), utc_now.time());
 
+    let plugins: Vec<String> = request
+        .plugins
+        .as_ref()
+        .map(|p| {
+            p.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let snapshot_id = request
+        .snapshot_id
+        .as_ref()
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
     let task = Task {
         id: None,
         target: request
@@ -163,9 +183,10 @@ async fn create_task(
         timeout: request.timeout.unwrap_or(300),
         priority: request.priority.unwrap_or(1),
         platform: match request.platform.as_deref() {
-            Some("windows") => MachinePlatform::Windows,
-            Some("linux") => MachinePlatform::Linux,
-            _ => MachinePlatform::Windows, // default to Windows for malware analysis
+            Some("windows") => Some(MachinePlatform::Windows),
+            Some("linux") => Some(MachinePlatform::Linux),
+            Some(_) => Some(MachinePlatform::Windows),
+            None => None,
         },
         tags: request
             .tags
@@ -181,8 +202,9 @@ async fn create_task(
         machine_cpus: None,
         machine_id: None,
         machine_memory: None,
-        plugins: vec!["0".to_string()],
+        plugins,
         profile: None,
+        snapshot_id,
     };
 
     Ok(insert_task(&state.pool, task).await.unwrap())
