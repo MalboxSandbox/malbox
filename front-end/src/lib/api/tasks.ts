@@ -33,6 +33,10 @@ export async function getResultContent(
 	return request(fetchFn, `/api/tasks/${taskId}/results/${resultId}`);
 }
 
+export async function cancelTask(fetchFn: FetchLike, id: number): Promise<{ status: string; task_id: number }> {
+	return requestJson(fetchFn, `/api/tasks/${id}/cancel`, { method: 'POST' });
+}
+
 export async function createTaskFromFile(
 	fetchFn: FetchLike,
 	req: CreateTaskFromFileRequest
@@ -48,6 +52,8 @@ export async function createTaskFromFile(
 	if (req.enforce_timeout !== undefined)
 		form.append('enforce_timeout', String(req.enforce_timeout));
 	if (req.target_filename !== undefined) form.append('target_filename', req.target_filename);
+	if (req.plugins !== undefined) form.append('plugins', req.plugins);
+	if (req.snapshot_id !== undefined) form.append('snapshot_id', req.snapshot_id);
 
 	return requestJson<{ task_id: number }>(fetchFn, '/api/tasks/create/file', {
 		method: 'POST',

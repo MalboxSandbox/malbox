@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { splitDateTime, isTerminalStatus, formatBytes } from '$lib/api/format';
+	import { cancelTask } from '$lib/api/tasks';
 	import ScoreBar from './ScoreBar.svelte';
 	import PluginTile from './PluginTile.svelte';
 	import Iocs from './blocks/Iocs.svelte';
@@ -88,6 +89,19 @@
 		if (!hasScore) return label;
 		return `${label}, with a score of ${data.aggregate.score}/100`;
 	});
+
+	let canceling = $state(false);
+
+	async function handleCancel() {
+		if (canceling) return;
+		canceling = true;
+		try {
+			await cancelTask(fetch, data.task.id);
+		} catch (e) {
+			console.error('Failed to cancel task:', e);
+			canceling = false;
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -95,18 +109,31 @@
 	<div class="flex items-baseline justify-between gap-4">
 		<h1 class="text-xl font-semibold text-[var(--color-text-primary)]">Summary</h1>
 		{#if running}
-			<span class="rounded bg-amber-500/20 px-3 py-1 text-xs font-medium text-amber-200">
-				Analysis in progress
-			</span>
+			<div class="flex items-center gap-2">
+				<span class="rounded bg-amber-500/20 px-3 py-1 text-xs font-medium text-amber-200">
+					Analysis in progress
+				</span>
+				<button
+					type="button"
+					disabled={canceling}
+					onclick={handleCancel}
+					class="flex items-center gap-1 rounded bg-[var(--color-text-secondary)]/15 px-3 py-1 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-text-secondary)]/25 disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
+						<path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" />
+					</svg>
+					{canceling ? 'Cancelling...' : 'Cancel'}
+				</button>
+			</div>
 		{:else if data.task.status === 'failed'}
 			<span class="rounded bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300">
 				Failed
 			</span>
-		{:else if data.task.status === 'cancelled'}
+		{:else if data.task.status === 'canceled'}
 			<span
 				class="rounded bg-[var(--color-text-secondary)]/20 px-3 py-1 text-xs font-medium text-[var(--color-text-secondary)]"
 			>
-				Cancelled
+				Canceled
 			</span>
 		{/if}
 	</div>

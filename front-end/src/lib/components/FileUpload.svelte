@@ -5,6 +5,8 @@
 	import { toasts } from '$lib/stores/toasts.svelte';
 	import { createTaskFromFile, createTaskFromUrl, createTaskFromHash } from '$lib/api/tasks';
 	import { isApiError } from '$lib/api/errors';
+	import SubmissionConfigModal from '$lib/components/SubmissionConfigModal.svelte';
+	import type { Platform } from '$lib/api/types';
 
 	let activeTab = $state<'file' | 'url'>('file');
 	let urlInput = $state('');
@@ -12,6 +14,39 @@
 	let selectedFile = $state<File | null>(null);
 	let submitting = $state(false);
 	let dragOver = $state(false);
+
+	let submissionConfig = $state<{
+		timeout: number | null;
+		platform: Platform | null;
+		tags: string[];
+		plugins: string[];
+		machineId: number | null;
+		snapshotId: string | null;
+		priority: number;
+		vmMode: 'windows' | 'linux' | 'no-vm';
+	}>({
+		timeout: null,
+		platform: null,
+		tags: [],
+		plugins: [],
+		machineId: null,
+		snapshotId: null,
+		priority: 2,
+		vmMode: 'windows'
+	});
+
+	function defaultConfig() {
+		return {
+			timeout: null,
+			platform: null,
+			tags: [],
+			plugins: [],
+			machineId: null,
+			snapshotId: null,
+			priority: 2,
+			vmMode: 'windows' as const
+		};
+	}
 
 	function onFileChosen(file: File | null) {
 		selectedFile = file;
@@ -27,11 +62,26 @@
 		if (!selectedFile || submitting) return;
 		submitting = true;
 		try {
-			const { task_id } = await createTaskFromFile(fetch, { file: selectedFile });
+			const { task_id } = await createTaskFromFile(fetch, {
+				file: selectedFile,
+				...(submissionConfig.timeout !== null && { timeout: submissionConfig.timeout }),
+				...(submissionConfig.vmMode !== 'no-vm' && {
+					platform: submissionConfig.vmMode as Platform
+				}),
+				...(submissionConfig.tags.length > 0 && { tags: submissionConfig.tags.join(',') }),
+				...(submissionConfig.plugins.length > 0 && {
+					plugins: submissionConfig.plugins.join(',')
+				}),
+				...(submissionConfig.snapshotId !== null && {
+					snapshot_id: submissionConfig.snapshotId
+				}),
+				priority: submissionConfig.priority
+			});
 			toasts.push({ kind: 'success', message: `Task #${task_id} submitted.` });
 			await invalidate('malbox:tasks');
 			selectedFile = null;
 			if (fileInput) fileInput.value = '';
+			submissionConfig = defaultConfig();
 			goto(`/submissions/${task_id}`);
 		} catch (err) {
 			const msg = isApiError(err) ? err.message : 'Upload failed.';
@@ -52,12 +102,24 @@
 		if (!value || submitting) return;
 		submitting = true;
 		try {
+			const optionalFields = {
+				...(submissionConfig.timeout !== null && { timeout: submissionConfig.timeout }),
+				...(submissionConfig.tags.length > 0 && { tags: submissionConfig.tags.join(',') }),
+				...(submissionConfig.plugins.length > 0 && {
+					plugins: submissionConfig.plugins.join(',')
+				}),
+				...(submissionConfig.snapshotId !== null && {
+					snapshot_id: submissionConfig.snapshotId
+				}),
+				priority: submissionConfig.priority
+			};
 			const { task_id } = looksLikeHash(value)
-				? await createTaskFromHash(fetch, { hash: value })
-				: await createTaskFromUrl(fetch, { url: value });
+				? await createTaskFromHash(fetch, { hash: value, ...optionalFields })
+				: await createTaskFromUrl(fetch, { url: value, ...optionalFields });
 			toasts.push({ kind: 'success', message: `Task #${task_id} submitted.` });
 			await invalidate('malbox:tasks');
 			urlInput = '';
+			submissionConfig = defaultConfig();
 			goto(`/submissions/${task_id}`);
 		} catch (err) {
 			const msg = isApiError(err)
@@ -79,7 +141,7 @@
 				onclick={() => (activeTab = 'file')}
 				class="rounded-lg px-4 py-2 transition-colors {activeTab === 'file'
 					? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
-					: 'text-[var(--color-text-secondary)] hover:cursor-pointer hover:text-[var(--color-text-primary)]'}"
+					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
 			>
 				File
 			</button>
@@ -87,7 +149,7 @@
 				onclick={() => (activeTab = 'url')}
 				class="rounded-lg px-4 py-2 transition-colors {activeTab === 'url'
 					? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
-					: 'text-[var(--color-text-secondary)] hover:cursor-pointer hover:text-[var(--color-text-primary)]'}"
+					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
 			>
 				URL or Hash
 			</button>
@@ -159,38 +221,44 @@
 							<p class="mt-4 text-sm text-[var(--color-text-secondary)]">
 								Selected: <span class="text-[var(--color-text-primary)]">{selectedFile.name}</span>
 							</p>
-							<button
-								class="mt-4 inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-								disabled={submitting}
-								onclick={submitFile}
-							>
-								{#if submitting}
-									<svg
-										class="h-4 w-4 animate-spin"
-										viewBox="0 0 24 24"
-										fill="none"
-										aria-hidden="true"
-									>
-										<circle
-											cx="12"
-											cy="12"
-											r="10"
-											stroke="currentColor"
-											stroke-width="4"
-											opacity="0.25"
-										/>
-										<path
-											d="M4 12a8 8 0 018-8"
-											stroke="currentColor"
-											stroke-width="4"
-											stroke-linecap="round"
-										/>
-									</svg>
-									Submitting…
-								{:else}
-									Submit for analysis
-								{/if}
-							</button>
+							<div class="mt-4 flex items-center gap-2">
+								<SubmissionConfigModal
+									config={submissionConfig}
+									onApply={(c) => (submissionConfig = c)}
+								/>
+								<button
+									class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+									disabled={submitting}
+									onclick={submitFile}
+								>
+									{#if submitting}
+										<svg
+											class="h-4 w-4 animate-spin"
+											viewBox="0 0 24 24"
+											fill="none"
+											aria-hidden="true"
+										>
+											<circle
+												cx="12"
+												cy="12"
+												r="10"
+												stroke="currentColor"
+												stroke-width="4"
+												opacity="0.25"
+											/>
+											<path
+												d="M4 12a8 8 0 018-8"
+												stroke="currentColor"
+												stroke-width="4"
+												stroke-linecap="round"
+											/>
+										</svg>
+										Submitting…
+									{:else}
+										Submit for analysis
+									{/if}
+								</button>
+							</div>
 						{/if}
 					</div>
 
@@ -214,6 +282,10 @@
 									if (e.key === 'Enter') submitUrlOrHash();
 								}}
 								class="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-4 py-3 text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+							/>
+							<SubmissionConfigModal
+								config={submissionConfig}
+								onApply={(c) => (submissionConfig = c)}
 							/>
 							<button
 								class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-6 py-3 font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"

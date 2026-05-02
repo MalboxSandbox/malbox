@@ -4,6 +4,16 @@
 @import '@fontsource/onest/600.css';
 @import '@fontsource/onest/700.css';
 
+@layer base {
+	button:not(:disabled),
+	[role="button"]:not(:disabled),
+	a[href],
+	select:not(:disabled),
+	summary {
+		cursor: pointer;
+	}
+}
+
 @theme {
 	/* Color palette */
 	--color-bg-primary: #101013;

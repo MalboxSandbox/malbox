@@ -25,13 +25,13 @@ export function taskStatusLabel(status: TaskStatus): string {
 			return 'Finished';
 		case 'failed':
 			return 'Failed';
-		case 'cancelled':
-			return 'Cancelled';
+		case 'canceled':
+			return 'Canceled';
 	}
 }
 
 export function isTerminalStatus(status: TaskStatus): boolean {
-	return status === 'completed' || status === 'failed' || status === 'cancelled';
+	return status === 'completed' || status === 'failed' || status === 'canceled';
 }
 
 export function formatBytes(bytes: number): string {

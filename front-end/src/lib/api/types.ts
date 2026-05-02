@@ -3,7 +3,7 @@
 // `unknown`-like records here and will be tightened against live responses
 // in the relevant route tasks (machines list, machine detail, images).
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
 export type Platform = 'windows' | 'linux';
 export type Arch = 'x64' | 'x86';
 export type ResultFormat = 'json' | 'bytes';
@@ -58,6 +58,39 @@ export interface Plugin {
 	binary_path: string;
 	plugin_dir: string;
 	status: string;
+}
+
+export interface HostPluginInfo {
+	name: string;
+	version: string;
+	description: string | null;
+	execution: string;
+}
+
+export interface GuestPluginInfo {
+	name: string;
+	version: string;
+	description: string | null;
+	execution: string;
+	provisioned: boolean;
+	snapshot_ids: string[];
+}
+
+export interface AvailablePlugins {
+	host: HostPluginInfo[];
+	guest: GuestPluginInfo[];
+}
+
+export interface SnapshotForSubmission {
+	id: string;
+	machine_id: number;
+	machine_name: string;
+	name: string;
+	description: string | null;
+	guest_plugins: string[] | null;
+	is_active: boolean;
+	platform: string;
+	created_at: string | null;
 }
 
 export type MachineStatus =
@@ -144,6 +177,8 @@ export interface CreateTaskFromFileRequest {
 	owner?: string;
 	enforce_timeout?: boolean;
 	target_filename?: string;
+	plugins?: string;
+	snapshot_id?: string;
 }
 
 export interface CreateTaskFromUrlRequest {

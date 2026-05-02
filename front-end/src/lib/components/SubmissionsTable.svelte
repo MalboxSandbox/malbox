@@ -12,7 +12,7 @@
 	function statusClasses(status: Task['status']): string {
 		if (status === 'completed') return 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]';
 		if (status === 'failed') return 'bg-red-500/20 text-red-300';
-		if (status === 'cancelled')
+		if (status === 'canceled')
 			return 'bg-[var(--color-text-secondary)]/20 text-[var(--color-text-secondary)]';
 		return 'bg-amber-500/20 text-amber-200';
 	}
