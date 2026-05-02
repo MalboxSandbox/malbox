@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, target, plugins, profile, platform AS \"platform!: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags\n        FROM \"tasks\" WHERE status = 'pending'\n        ",
+  "query": "\n        SELECT\n            id, target, plugins, profile, platform AS \"platform: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags, snapshot_id\n        FROM \"tasks\" WHERE status = 'pending'\n        ",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,7 @@
       },
       {
         "ordinal": 4,
-        "name": "platform!: MachinePlatform",
+        "name": "platform: MachinePlatform",
         "type_info": {
           "Custom": {
             "name": "machine_platform",
@@ -118,6 +118,11 @@
         "ordinal": 17,
         "name": "tags",
         "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "snapshot_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -128,7 +133,7 @@
       false,
       false,
       true,
-      false,
+      true,
       false,
       false,
       false,
@@ -139,10 +144,11 @@
       true,
       true,
       false,
+      true,
       true,
       true,
       true
     ]
   },
-  "hash": "bea0c2445082ce3e377c454cc2661f0ad21420d60dbb811a4df2280546a7ab7a"
+  "hash": "ef923b9aaae737fe685a6526bec382bee2eafb0f5f529acadad2b69e0c2a2e63"
 }

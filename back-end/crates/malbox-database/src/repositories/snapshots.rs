@@ -202,3 +202,45 @@ pub async fn delete_snapshots_for_machine(pool: &PgPool, machine_id: i32) -> Res
     .map_err(|e| SnapshotError::DeleteFailed { source: e })?;
     Ok(())
 }
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct SnapshotWithMachine {
+    pub id: Uuid,
+    pub machine_id: i32,
+    pub machine_name: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub guest_plugins: Option<serde_json::Value>,
+    pub is_active: bool,
+    pub platform: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub created_at: Option<OffsetDateTime>,
+}
+
+pub async fn fetch_snapshots_by_platform(
+    pool: &PgPool,
+    platform: &str,
+) -> Result<Vec<SnapshotWithMachine>> {
+    sqlx::query_as::<_, SnapshotWithMachine>(
+        r#"
+        SELECT
+            ms.id,
+            ms.machine_id,
+            m.name AS machine_name,
+            ms.name,
+            ms.description,
+            ms.guest_plugins,
+            ms.is_active,
+            m.platform::text AS platform,
+            ms.created_at
+        FROM machine_snapshots ms
+        JOIN machines m ON ms.machine_id = m.id
+        WHERE m.platform::text = $1
+        ORDER BY ms.created_at DESC
+        "#,
+    )
+    .bind(platform)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| SnapshotError::FetchFailed { source: e }.into())
+}

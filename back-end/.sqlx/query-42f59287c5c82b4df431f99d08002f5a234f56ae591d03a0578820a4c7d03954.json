@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, target, plugins, profile, platform AS \"platform!: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags\n        FROM \"tasks\" WHERE id = $1\n        ",
+  "query": "\n        UPDATE \"tasks\"\n        SET\n            status = $1\n        WHERE id = $2\n        RETURNING\n            id, target, plugins, profile, platform AS \"platform: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags, snapshot_id\n        ",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,7 @@
       },
       {
         "ordinal": 4,
-        "name": "platform!: MachinePlatform",
+        "name": "platform: MachinePlatform",
         "type_info": {
           "Custom": {
             "name": "machine_platform",
@@ -118,10 +118,32 @@
         "ordinal": 17,
         "name": "tags",
         "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "snapshot_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
       "Left": [
+        {
+          "Custom": {
+            "name": "task_state",
+            "kind": {
+              "Enum": [
+                "pending",
+                "initializing",
+                "preparing_resources",
+                "running",
+                "stopping",
+                "completed",
+                "failed",
+                "canceled"
+              ]
+            }
+          }
+        },
         "Int4"
       ]
     },
@@ -130,7 +152,7 @@
       false,
       false,
       true,
-      false,
+      true,
       false,
       false,
       false,
@@ -141,10 +163,11 @@
       true,
       true,
       false,
+      true,
       true,
       true,
       true
     ]
   },
-  "hash": "f2e0987d0c132c2add8657d93b8819b6e858a7b1ee092248e013790c44b8f939"
+  "hash": "42f59287c5c82b4df431f99d08002f5a234f56ae591d03a0578820a4c7d03954"
 }

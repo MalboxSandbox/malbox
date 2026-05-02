@@ -22,7 +22,7 @@ pub struct Task {
     pub target: String,
     pub plugins: Vec<String>,
     pub profile: Option<String>,
-    pub platform: MachinePlatform,
+    pub platform: Option<MachinePlatform>,
     pub timeout: i64,
     pub enforce_timeout: Option<bool>,
     pub priority: i64,
@@ -36,6 +36,7 @@ pub struct Task {
     pub sample_id: Option<i64>,
     pub owner: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub snapshot_id: Option<uuid::Uuid>,
 }
 
 pub async fn insert_task(pool: &PgPool, task: Task) -> Result<Task> {
@@ -46,21 +47,21 @@ pub async fn insert_task(pool: &PgPool, task: Task) -> Result<Task> {
             target, plugins, profile, platform,
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status, sample_id, owner, tags
+            status, sample_id, owner, tags, snapshot_id
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
         )
         RETURNING
-            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            id, target, plugins, profile, platform AS "platform: MachinePlatform",
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags
+            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
         "#,
         task.target,
         &task.plugins,
         task.profile,
-        task.platform as MachinePlatform,
+        task.platform as Option<MachinePlatform>,
         task.timeout,
         task.enforce_timeout,
         task.priority,
@@ -74,6 +75,7 @@ pub async fn insert_task(pool: &PgPool, task: Task) -> Result<Task> {
         task.sample_id,
         task.owner,
         task.tags.as_deref(),
+        task.snapshot_id,
     )
     .fetch_one(pool)
     .await
@@ -92,10 +94,10 @@ pub async fn fetch_task(pool: &PgPool, id: i32) -> Result<Option<Task>> {
         Task,
         r#"
         SELECT
-            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            id, target, plugins, profile, platform AS "platform: MachinePlatform",
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags
+            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
         FROM "tasks" WHERE id = $1
         "#,
         id
@@ -116,10 +118,10 @@ pub async fn fetch_all_tasks(pool: &PgPool) -> Result<Vec<Task>> {
         Task,
         r#"
         SELECT
-            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            id, target, plugins, profile, platform AS "platform: MachinePlatform",
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags
+            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
         FROM "tasks" ORDER BY created_on DESC
         "#,
     )
@@ -139,10 +141,10 @@ pub async fn fetch_pending_tasks(pool: &PgPool) -> Result<Vec<Task>> {
         Task,
         r#"
         SELECT
-            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            id, target, plugins, profile, platform AS "platform: MachinePlatform",
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags
+            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
         FROM "tasks" WHERE status = 'pending'
         "#,
     )
@@ -194,10 +196,10 @@ pub async fn update_task_status(pool: &PgPool, id: i32, status: TaskState) -> Re
             status = $1
         WHERE id = $2
         RETURNING
-            id, target, plugins, profile, platform AS "platform!: MachinePlatform",
+            id, target, plugins, profile, platform AS "platform: MachinePlatform",
             timeout, enforce_timeout, priority, machine_id, machine_memory,
             machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags
+            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
         "#,
         status as TaskState,
         id

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, target, plugins, profile, platform AS \"platform!: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags\n        FROM \"tasks\" ORDER BY created_on DESC\n        ",
+  "query": "\n        INSERT into \"tasks\" (\n            target, plugins, profile, platform,\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status, sample_id, owner, tags, snapshot_id\n        )\n        VALUES (\n            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18\n        )\n        RETURNING\n            id, target, plugins, profile, platform AS \"platform: MachinePlatform\",\n            timeout, enforce_timeout, priority, machine_id, machine_memory,\n            machine_cpus, created_on, started_on, completed_on,\n            status AS \"status!: TaskState\", sample_id, owner, tags, snapshot_id\n        ",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,7 @@
       },
       {
         "ordinal": 4,
-        "name": "platform!: MachinePlatform",
+        "name": "platform: MachinePlatform",
         "type_info": {
           "Custom": {
             "name": "machine_platform",
@@ -118,17 +118,67 @@
         "ordinal": 17,
         "name": "tags",
         "type_info": "VarcharArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "snapshot_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Varchar",
+        "VarcharArray",
+        "Varchar",
+        {
+          "Custom": {
+            "name": "machine_platform",
+            "kind": {
+              "Enum": [
+                "windows",
+                "linux"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Bool",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Timestamp",
+        "Timestamp",
+        "Timestamp",
+        {
+          "Custom": {
+            "name": "task_state",
+            "kind": {
+              "Enum": [
+                "pending",
+                "initializing",
+                "preparing_resources",
+                "running",
+                "stopping",
+                "completed",
+                "failed",
+                "canceled"
+              ]
+            }
+          }
+        },
+        "Int8",
+        "Varchar",
+        "VarcharArray",
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
       false,
       false,
       true,
-      false,
+      true,
       false,
       false,
       false,
@@ -139,10 +189,11 @@
       true,
       true,
       false,
+      true,
       true,
       true,
       true
     ]
   },
-  "hash": "6b2a3da7fad13e55e0eebdca592237228b5aeb4de3ede60830165055621609d5"
+  "hash": "0b179cb495d01d508d73935a069d234b777dc17474dc1044d97ba75b1c89086e"
 }
