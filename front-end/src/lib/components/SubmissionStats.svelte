@@ -23,14 +23,14 @@
 				onclick={() => (statsTab = 'user')}
 				class="px-3 py-1 rounded-lg text-sm transition-colors {statsTab === 'user'
 					? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
-					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:cursor-pointer'}"
+					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
 				>User</button
 			>
 			<button
 				onclick={() => (statsTab = 'globales')}
 				class="px-3 py-1 rounded-lg text-sm transition-colors {statsTab === 'globales'
 					? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
-					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:cursor-pointer'}"
+					: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
 				>Globales</button
 			>
 		</div>
