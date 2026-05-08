@@ -7,7 +7,15 @@ use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(about = "Manage VM images")]
+#[command(
+    about = "Manage VM images",
+    long_about = "Register, inspect, and manage base VM images used for analysis machines.",
+    after_help = "Examples:\n  \
+                  malbox image list\n  \
+                  malbox image get win10-x64\n  \
+                  malbox image register --name win10-x64 --platform windows --arch x64 --path /vms/win10.qcow2\n  \
+                  malbox image delete win10-x64"
+)]
 pub struct ImageCommand {
     #[command(subcommand)]
     command: ImageCommands,
@@ -16,12 +24,18 @@ pub struct ImageCommand {
 #[derive(Subcommand)]
 enum ImageCommands {
     /// Register a new VM image
+    #[command(after_help = "Examples:\n  \
+                            malbox image register --name win10-x64 --platform windows --arch x64 --path /vms/win10.qcow2\n  \
+                            malbox image register --name ubuntu-22 --platform linux --arch x64 --path /vms/ubuntu.qcow2 --description 'Ubuntu 22.04 LTS'")]
     Register(RegisterArgs),
     /// List all registered images
     List,
     /// Get details of a specific image
     Get(GetArgs),
     /// Delete an image
+    #[command(
+        after_help = "Examples:\n  malbox image delete win10-x64\n  malbox image delete win10-x64 -y"
+    )]
     Delete(DeleteArgs),
 }
 
@@ -65,7 +79,7 @@ impl Command for ImageCommand {
             ImageCommands::Register(args) => register(&ctx.api, args).await,
             ImageCommands::List => list(&ctx.api).await,
             ImageCommands::Get(args) => get(&ctx.api, args).await,
-            ImageCommands::Delete(args) => delete(&ctx.api, args).await,
+            ImageCommands::Delete(args) => delete(ctx, args).await,
         }
     }
 }
@@ -93,18 +107,14 @@ async fn list(api: &ApiClient) -> Result<()> {
     let images = api.list_images().await?;
 
     if images.is_empty() {
-        format::empty("No images found.");
+        format::empty_with_hint(
+            "No images found.",
+            "Run 'malbox image register' to add a VM image.",
+        );
         return Ok(());
     }
 
-    let mut table = Table::new(&[
-        ("ID", 38),
-        ("NAME", 20),
-        ("PLATFORM", 10),
-        ("ARCH", 8),
-        ("FORMAT", 10),
-        ("AVAILABLE", 10),
-    ]);
+    let mut table = Table::new(&["ID", "NAME", "PLATFORM", "ARCH", "FORMAT", "AVAILABLE"]);
 
     for img in &images {
         table.add_row(vec![
@@ -131,9 +141,15 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
     Ok(())
 }
 
-async fn delete(api: &ApiClient, args: DeleteArgs) -> Result<()> {
+async fn delete(ctx: &Context, args: DeleteArgs) -> Result<()> {
+    let prompt = format!("Delete image '{}'?", args.name);
+    if !format::confirm(&prompt, ctx.yes) {
+        format::empty("Cancelled.");
+        return Ok(());
+    }
+
     let spinner = Spinner::start(format!("Deleting image '{}'...", args.name));
-    api.delete_image(&args.name).await?;
+    ctx.api.delete_image(&args.name).await?;
     drop(spinner);
     format::success(format!("Image '{}' deleted.", args.name));
     Ok(())

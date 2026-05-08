@@ -1,13 +1,23 @@
 use crate::api::ApiClient;
 use crate::api::machines::ProvisionRequest;
 use crate::commands::{Command, Context};
-use crate::error::Result;
-use crate::utils::format::{self, Detail, Table, display_json};
+use crate::error::{CliError, Result};
+use crate::utils::format::{self, Detail, Table, display_json, styled_status};
 use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(about = "Manage analysis machines")]
+#[command(
+    about = "Manage analysis machines",
+    long_about = "Manage analysis machines - list, inspect, provision, and manage snapshots.\n\n\
+                  Machines can be referenced by name or numeric ID.",
+    after_help = "Examples:\n  \
+                  malbox machine list\n  \
+                  malbox machine get threatforge-test-2\n  \
+                  malbox machine provision win10-dev --provisioner ansible --snapshot with-yara\n  \
+                  malbox machine snapshot list win10-dev\n  \
+                  malbox machine snapshot delete win10-dev with-yara"
+)]
 pub struct MachineCommand {
     #[command(subcommand)]
     command: MachineCommands,
@@ -20,7 +30,8 @@ enum MachineCommands {
     /// Get details of a specific machine
     Get(GetArgs),
     /// Manage snapshots for a machine
-    Snapshot(SnapshotCommand),
+    #[command(subcommand)]
+    Snapshot(SnapshotCommands),
     /// Run a provisioning step against a machine
     Provision(ProvisionArgs),
     /// List provision run history for a machine
@@ -28,54 +39,52 @@ enum MachineCommands {
 }
 
 #[derive(Parser)]
+#[command(
+    after_help = "Examples:\n  malbox machine get threatforge-test-2\n  malbox machine get 3"
+)]
 struct GetArgs {
-    /// Machine ID
-    id: i32,
-}
-
-// -- Snapshot subcommand group --
-
-#[derive(Parser)]
-#[command(about = "Manage machine snapshots")]
-struct SnapshotCommand {
-    #[command(subcommand)]
-    command: SnapshotCommands,
+    /// Machine name or ID (interactive selection if omitted)
+    machine: Option<String>,
 }
 
 #[derive(Subcommand)]
 enum SnapshotCommands {
     /// List snapshots for a machine
+    #[command(after_help = "Examples:\n  malbox machine snapshot list win10-dev")]
     List(SnapshotListArgs),
     /// Delete a snapshot (and its associated provision runs)
+    #[command(after_help = "Examples:\n  malbox machine snapshot delete win10-dev with-yara")]
     Delete(SnapshotDeleteArgs),
 }
 
 #[derive(Parser)]
 struct SnapshotListArgs {
-    /// Machine ID
-    machine_id: i32,
+    /// Machine name or ID (interactive selection if omitted)
+    machine: Option<String>,
 }
 
 #[derive(Parser)]
 struct SnapshotDeleteArgs {
-    /// Machine ID
-    machine_id: i32,
-    /// Snapshot name (e.g., "with-yara")
-    snapshot_name: String,
+    /// Machine name or ID
+    machine: Option<String>,
+    /// Snapshot name (interactive selection if omitted)
+    snapshot_name: Option<String>,
 }
-
-// -- Provision args --
 
 #[derive(Parser)]
 struct ProvisionHistoryArgs {
-    /// Machine ID
-    id: i32,
+    /// Machine name or ID (interactive selection if omitted)
+    machine: Option<String>,
 }
 
 #[derive(Parser)]
+#[command(after_help = "Examples:\n  \
+                  malbox machine provision win10-dev --provisioner ansible --snapshot with-yara\n  \
+                  malbox machine provision win10-dev --provisioner ansible --config '{\"playbook\": \"setup.yml\"}'\n  \
+                  malbox machine provision win10-dev --provisioner native --plugins yara capa")]
 struct ProvisionArgs {
-    /// Machine ID
-    id: i32,
+    /// Machine name or ID
+    machine: Option<String>,
     /// Provisioner type (e.g., "ansible", "native")
     #[arg(long)]
     provisioner: String,
@@ -97,14 +106,46 @@ impl Command for MachineCommand {
     async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
             MachineCommands::List => list(&ctx.api).await,
-            MachineCommands::Get(args) => get(&ctx.api, args).await,
-            MachineCommands::Snapshot(cmd) => match cmd.command {
-                SnapshotCommands::List(args) => snapshot_list(&ctx.api, args).await,
-                SnapshotCommands::Delete(args) => snapshot_delete(&ctx.api, args).await,
+            MachineCommands::Get(args) => get(ctx, args).await,
+            MachineCommands::Snapshot(cmd) => match cmd {
+                SnapshotCommands::List(args) => snapshot_list(ctx, args).await,
+                SnapshotCommands::Delete(args) => snapshot_delete(ctx, args).await,
             },
-            MachineCommands::Provision(args) => provision(&ctx.api, args).await,
-            MachineCommands::ProvisionHistory(args) => provision_history(&ctx.api, args).await,
+            MachineCommands::Provision(args) => provision(ctx, args).await,
+            MachineCommands::ProvisionHistory(args) => provision_history(ctx, args).await,
         }
+    }
+}
+
+async fn select_machine(api: &ApiClient) -> Result<i32> {
+    let machines = api.list_machines().await?;
+    if machines.is_empty() {
+        return Err(CliError::InvalidArgument(
+            "no machines available".to_string(),
+        ));
+    }
+    let items: Vec<String> = machines
+        .iter()
+        .map(|m| {
+            let status = display_json(&m.status);
+            let id = m.id.map(|i| i.to_string()).unwrap_or_default();
+            format!("{} ({}) [{}]", m.name, id, status)
+        })
+        .collect();
+
+    let selection = format::fuzzy_select("Select machine", &items).ok_or_else(|| {
+        CliError::InvalidArgument("machine selection required (not a terminal?)".to_string())
+    })?;
+
+    machines[selection]
+        .id
+        .ok_or_else(|| CliError::InvalidArgument("selected machine has no ID".to_string()))
+}
+
+async fn resolve_machine(ctx: &Context, machine: Option<String>) -> Result<i32> {
+    match machine {
+        Some(ref name_or_id) => ctx.api.resolve_machine_id(name_or_id).await,
+        None => select_machine(&ctx.api).await,
     }
 }
 
@@ -112,26 +153,23 @@ async fn list(api: &ApiClient) -> Result<()> {
     let machines = api.list_machines().await?;
 
     if machines.is_empty() {
-        format::empty("No machines found.");
+        format::empty_with_hint(
+            "No machines found.",
+            "Run 'malbox provider install' to set up a provider first.",
+        );
         return Ok(());
     }
 
-    let mut table = Table::new(&[
-        ("ID", 6),
-        ("NAME", 20),
-        ("PLATFORM", 10),
-        ("ARCH", 8),
-        ("STATUS", 15),
-        ("IP", 15),
-    ]);
+    let mut table = Table::new(&["ID", "NAME", "PLATFORM", "ARCH", "STATUS", "IP"]);
 
     for m in &machines {
+        let status = display_json(&m.status);
         table.add_row(vec![
             m.id.map(|id| id.to_string()).unwrap_or_default(),
             m.name.clone(),
             display_json(&m.platform),
             display_json(&m.arch),
-            display_json(&m.status),
+            styled_status(&status),
             m.ip.as_deref().unwrap_or("-").to_string(),
         ]);
     }
@@ -141,21 +179,23 @@ async fn list(api: &ApiClient) -> Result<()> {
     Ok(())
 }
 
-async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
-    let machine = api.get_machine(args.id).await?;
+async fn get(ctx: &Context, args: GetArgs) -> Result<()> {
+    let id = resolve_machine(ctx, args.machine).await?;
+    let machine = ctx.api.get_machine(id).await?;
     print_machine(&machine);
     Ok(())
 }
 
-async fn snapshot_list(api: &ApiClient, args: SnapshotListArgs) -> Result<()> {
-    let snaps = api.list_snapshots(args.machine_id).await?;
+async fn snapshot_list(ctx: &Context, args: SnapshotListArgs) -> Result<()> {
+    let machine_id = resolve_machine(ctx, args.machine).await?;
+    let snaps = ctx.api.list_snapshots(machine_id).await?;
 
     if snaps.is_empty() {
-        format::empty(format!("No snapshots for machine {}.", args.machine_id));
+        format::empty("No snapshots for this machine.");
         return Ok(());
     }
 
-    let mut table = Table::new(&[("ACTIVE", 8), ("NAME", 20), ("TAGS", 8), ("CREATED", 20)]);
+    let mut table = Table::new(&["ACTIVE", "NAME", "TAGS", "CREATED"]);
 
     for s in &snaps {
         let active = if s.is_active {
@@ -171,7 +211,7 @@ async fn snapshot_list(api: &ApiClient, args: SnapshotListArgs) -> Result<()> {
         let created = s
             .created_at
             .as_ref()
-            .map(display_json)
+            .map(|v| format::format_time(&display_json(v)))
             .unwrap_or_else(|| "-".to_string());
 
         table.add_row(vec![active, s.name.clone(), tags, created]);
@@ -182,16 +222,44 @@ async fn snapshot_list(api: &ApiClient, args: SnapshotListArgs) -> Result<()> {
     Ok(())
 }
 
-async fn snapshot_delete(api: &ApiClient, args: SnapshotDeleteArgs) -> Result<()> {
-    let spinner = Spinner::start(format!("Deleting snapshot '{}'...", args.snapshot_name));
-    api.delete_snapshot(args.machine_id, &args.snapshot_name)
-        .await?;
+async fn snapshot_delete(ctx: &Context, args: SnapshotDeleteArgs) -> Result<()> {
+    let machine_id = resolve_machine(ctx, args.machine).await?;
+
+    let snapshot_name = match args.snapshot_name {
+        Some(name) => name,
+        None => {
+            let snaps = ctx.api.list_snapshots(machine_id).await?;
+            if snaps.is_empty() {
+                return Err(CliError::InvalidArgument(
+                    "no snapshots available on this machine".to_string(),
+                ));
+            }
+            let items: Vec<String> = snaps.iter().map(|s| s.name.clone()).collect();
+            let selection =
+                format::fuzzy_select("Select snapshot to delete", &items).ok_or_else(|| {
+                    CliError::InvalidArgument(
+                        "snapshot selection required (not a terminal?)".to_string(),
+                    )
+                })?;
+            items[selection].clone()
+        }
+    };
+
+    let prompt = format!("Delete snapshot '{}'?", snapshot_name);
+    if !format::confirm(&prompt, ctx.yes) {
+        format::empty("Cancelled.");
+        return Ok(());
+    }
+
+    let spinner = Spinner::start(format!("Deleting snapshot '{}'...", snapshot_name));
+    ctx.api.delete_snapshot(machine_id, &snapshot_name).await?;
     drop(spinner);
-    format::success(format!("Snapshot '{}' deleted.", args.snapshot_name));
+    format::success(format!("Snapshot '{}' deleted.", snapshot_name));
     Ok(())
 }
 
 fn print_machine(m: &crate::api::machines::Machine) {
+    let status = display_json(&m.status);
     let tags_display = m
         .tags
         .as_ref()
@@ -204,27 +272,38 @@ fn print_machine(m: &crate::api::machines::Machine) {
         .field("Name", &m.name)
         .field("Platform", display_json(&m.platform))
         .field("Arch", display_json(&m.arch))
-        .field("Status", display_json(&m.status))
+        .field_status("Status", &status)
         .field("IP", m.ip.as_deref().unwrap_or("-"))
         .field_opt("Provider", m.provider.as_deref())
         .field_opt("Provider ID", m.provider_id.as_deref())
         .field_opt("Task", m.current_task_id)
         .field_opt("Error", m.error_message.as_deref())
         .field_opt("Tags", tags_display)
-        .field_opt("Created", m.created_at.as_ref().map(display_json))
-        .field_opt("Updated", m.updated_at.as_ref().map(display_json));
+        .field_opt(
+            "Created",
+            m.created_at
+                .as_ref()
+                .map(|v| format::format_time(&display_json(v))),
+        )
+        .field_opt(
+            "Updated",
+            m.updated_at
+                .as_ref()
+                .map(|v| format::format_time(&display_json(v))),
+        );
+
     detail.print();
 }
 
-async fn provision(api: &ApiClient, args: ProvisionArgs) -> Result<()> {
+async fn provision(ctx: &Context, args: ProvisionArgs) -> Result<()> {
+    let machine_id = resolve_machine(ctx, args.machine).await?;
+
     let config = args
         .config
         .as_deref()
         .map(serde_json::from_str)
         .transpose()
-        .map_err(|e| {
-            crate::error::CliError::InvalidArgument(format!("invalid --config JSON: {}", e))
-        })?;
+        .map_err(|e| CliError::InvalidArgument(format!("invalid --config JSON: {}", e)))?;
 
     let request = ProvisionRequest {
         provisioner: args.provisioner,
@@ -234,40 +313,39 @@ async fn provision(api: &ApiClient, args: ProvisionArgs) -> Result<()> {
         revert_to: args.revert_to,
     };
 
-    let spinner = Spinner::start(format!("Running provisioning on machine {}...", args.id));
-    let result = api.provision_machine(args.id, request).await?;
+    let spinner = Spinner::start("Running provisioning...");
+    let result = ctx.api.provision_machine(machine_id, request).await?;
     drop(spinner);
 
     let mut detail = Detail::new();
     detail
-        .field("Status", &result.status)
+        .field_status("Status", &result.status)
         .field_opt("Error", result.error_message.as_deref())
         .field_opt("Snapshot", result.snapshot_id.as_ref().map(display_json));
 
     if result.status == "completed" || result.status == "success" {
-        format::success(format!("Provisioning completed on machine {}.", args.id));
+        format::success("Provisioning completed.");
     } else {
-        println!("Provisioning finished on machine {}.", args.id);
+        println!(
+            "Provisioning finished with status: {}",
+            styled_status(&result.status)
+        );
     }
     detail.print();
 
     Ok(())
 }
 
-async fn provision_history(api: &ApiClient, args: ProvisionHistoryArgs) -> Result<()> {
-    let runs = api.list_provision_runs(args.id).await?;
+async fn provision_history(ctx: &Context, args: ProvisionHistoryArgs) -> Result<()> {
+    let machine_id = resolve_machine(ctx, args.machine).await?;
+    let runs = ctx.api.list_provision_runs(machine_id).await?;
 
     if runs.is_empty() {
-        format::empty(format!("No provision runs for machine {}.", args.id));
+        format::empty("No provision runs for this machine.");
         return Ok(());
     }
 
-    let mut table = Table::new(&[
-        ("STATUS", 10),
-        ("PROVISIONER", 15),
-        ("SNAPSHOT", 10),
-        ("CREATED", 20),
-    ]);
+    let mut table = Table::new(&["STATUS", "PROVISIONER", "SNAPSHOT", "CREATED"]);
 
     for r in &runs {
         let snapshot = r
@@ -278,11 +356,11 @@ async fn provision_history(api: &ApiClient, args: ProvisionHistoryArgs) -> Resul
         let created = r
             .created_at
             .as_ref()
-            .map(display_json)
+            .map(|v| format::format_time(&display_json(v)))
             .unwrap_or_else(|| "-".to_string());
 
         table.add_row(vec![
-            r.status.clone(),
+            styled_status(&r.status),
             r.provisioner.clone(),
             snapshot,
             created,

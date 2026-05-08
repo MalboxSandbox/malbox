@@ -8,10 +8,8 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-/// A terminal spinner using the rattles `diagswipe` braille glyph.
-///
-/// Renders on stderr so it does not interfere with piped stdout.
-/// Automatically cleans up on drop.
+use crate::utils::format::Brand;
+
 pub struct Spinner {
     running: Arc<AtomicBool>,
     message: Arc<Mutex<String>>,
@@ -19,7 +17,6 @@ pub struct Spinner {
 }
 
 impl Spinner {
-    /// Start a spinner with the given message displayed beside the glyph.
     pub fn start(message: impl Into<String>) -> Self {
         let running = Arc::new(AtomicBool::new(true));
         let msg = Arc::new(Mutex::new(message.into()));
@@ -30,9 +27,14 @@ impl Spinner {
         let handle = if Term::stderr().is_term() {
             Some(thread::spawn(move || {
                 let rattle = presets::diagswipe();
+                let style = Brand::accent();
                 while running_clone.load(Ordering::Relaxed) {
                     let text = msg_clone.lock().unwrap().clone();
-                    eprint!("\r\x1b[2K{} {}", rattle.current_frame(), text);
+                    eprint!(
+                        "\r\x1b[2K{} {}",
+                        style.apply_to(rattle.current_frame()),
+                        text
+                    );
                     std::io::stderr().flush().ok();
                     thread::sleep(Duration::from_millis(60));
                 }
@@ -48,7 +50,6 @@ impl Spinner {
         }
     }
 
-    /// Update the message displayed beside the spinner.
     pub fn set_message(&self, message: impl Into<String>) {
         *self.message.lock().unwrap() = message.into();
     }

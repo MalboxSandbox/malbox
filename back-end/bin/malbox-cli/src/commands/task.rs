@@ -2,14 +2,21 @@ use crate::api::ApiClient;
 use crate::api::tasks::SubmitTaskRequest;
 use crate::commands::{Command, Context};
 use crate::error::{CliError, Result};
-use crate::utils::format::{self, Detail, Table};
+use crate::utils::format::{self, Detail, Table, styled_status};
 use crate::utils::progress::Spinner;
 use clap::{Parser, Subcommand};
-use console::Style;
 use std::io::{IsTerminal, Write};
 
 #[derive(Parser)]
-#[command(about = "Manage analysis tasks")]
+#[command(
+    about = "Manage analysis tasks",
+    long_about = "Submit samples for analysis, inspect task status, and retrieve results.",
+    after_help = "Examples:\n  \
+                  malbox task list\n  \
+                  malbox task get 7\n  \
+                  malbox task get 7 --result 2\n  \
+                  malbox task submit sample.exe --package default --timeout 120"
+)]
 pub struct TaskCommand {
     #[command(subcommand)]
     command: TaskCommands,
@@ -20,15 +27,23 @@ enum TaskCommands {
     /// List all tasks
     List,
     /// Get details and results of a specific task
+    #[command(after_help = "Examples:\n  \
+                            malbox task get 7\n  \
+                            malbox task get 7 --result 2\n  \
+                            malbox task get 7 --result 2 > output.json")]
     Get(GetArgs),
     /// Submit a file for analysis
+    #[command(after_help = "Examples:\n  \
+                            malbox task submit malware.exe\n  \
+                            malbox task submit sample.dll --package dll --timeout 300\n  \
+                            malbox task submit doc.pdf --tags phishing campaign-2024 --priority 5")]
     Submit(SubmitArgs),
 }
 
 #[derive(Parser)]
 struct GetArgs {
-    /// Task ID
-    id: i32,
+    /// Task ID (interactive selection if omitted)
+    id: Option<i32>,
     /// Fetch and print the content of a specific result by its ID.
     /// JSON results are pretty-printed to a terminal (raw when piped);
     /// binary results are written raw when piped and refused on a TTY.
@@ -73,41 +88,55 @@ impl Command for TaskCommand {
     async fn execute(self, ctx: &Context) -> Result<()> {
         match self.command {
             TaskCommands::List => list(&ctx.api).await,
-            TaskCommands::Get(args) => get(&ctx.api, args).await,
+            TaskCommands::Get(args) => get(ctx, args).await,
             TaskCommands::Submit(args) => submit(&ctx.api, args).await,
         }
     }
+}
+
+async fn select_task(api: &ApiClient) -> Result<i32> {
+    let tasks = api.list_tasks().await?;
+    if tasks.is_empty() {
+        return Err(CliError::InvalidArgument("no tasks available".to_string()));
+    }
+    let items: Vec<String> = tasks
+        .iter()
+        .map(|t| format!("#{} {} [{}] ({})", t.id, t.target, t.status, t.created_on))
+        .collect();
+
+    let selection = format::fuzzy_select("Select task", &items).ok_or_else(|| {
+        CliError::InvalidArgument("task selection required (not a terminal?)".to_string())
+    })?;
+
+    Ok(tasks[selection].id)
 }
 
 async fn list(api: &ApiClient) -> Result<()> {
     let tasks = api.list_tasks().await?;
 
     if tasks.is_empty() {
-        format::empty("No tasks found.");
+        format::empty_with_hint(
+            "No tasks found.",
+            "Run 'malbox task submit <file>' to submit a sample for analysis.",
+        );
         return Ok(());
     }
 
     let mut table = Table::new(&[
-        ("ID", 6),
-        ("STATUS", 12),
-        ("TARGET", 25),
-        ("PLATFORM", 10),
-        ("PRIORITY", 10),
-        ("MACHINE", 10),
-        ("CREATED", 20),
+        "ID", "STATUS", "TARGET", "PLATFORM", "PRIORITY", "MACHINE", "CREATED",
     ]);
 
     for t in &tasks {
         table.add_row(vec![
             t.id.to_string(),
-            t.status.clone(),
+            styled_status(&t.status),
             t.target.clone(),
             t.platform.clone(),
             t.priority.to_string(),
             t.machine_id
                 .map(|m| m.to_string())
                 .unwrap_or_else(|| "-".to_string()),
-            t.created_on.clone(),
+            format::format_time(&t.created_on),
         ]);
     }
 
@@ -116,12 +145,17 @@ async fn list(api: &ApiClient) -> Result<()> {
     Ok(())
 }
 
-async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
+async fn get(ctx: &Context, args: GetArgs) -> Result<()> {
+    let task_id = match args.id {
+        Some(id) => id,
+        None => select_task(&ctx.api).await?,
+    };
+
     if let Some(result_id) = args.result {
-        return print_result_content(api, args.id, result_id).await;
+        return print_result_content(&ctx.api, task_id, result_id).await;
     }
 
-    let task = api.get_task(args.id).await?;
+    let task = ctx.api.get_task(task_id).await?;
 
     let tags_display = task
         .tags
@@ -132,7 +166,7 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
     let mut detail = Detail::new();
     detail
         .field("ID", task.id)
-        .field("Status", &task.status)
+        .field_status("Status", &task.status)
         .field("Target", &task.target)
         .field("Platform", &task.platform)
         .field("Timeout", format!("{}s", task.timeout))
@@ -140,16 +174,18 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
         .field_opt("Owner", task.owner.as_deref())
         .field_opt("Machine", task.machine_id)
         .field_opt("Tags", tags_display)
-        .field("Created", &task.created_on)
-        .field_opt("Completed", task.completed_on.as_deref());
+        .field("Created", format::format_time(&task.created_on))
+        .field_opt(
+            "Completed",
+            task.completed_on.as_deref().map(format::format_time),
+        );
     detail.print();
 
-    let results = api.get_task_results(args.id).await?;
-    let bold = Style::new().bold();
-    println!("\n  {} {}", bold.apply_to("Results:"), results.len());
+    let results = ctx.api.get_task_results(task_id).await?;
+    format::section_header(&format!("Results ({})", results.len()));
 
     if !results.is_empty() {
-        let mut table = Table::new(&[("ID", 6), ("PLUGIN", 25), ("RESULT", 20), ("SIZE", 10)]);
+        let mut table = Table::new(&["ID", "PLUGIN", "RESULT", "SIZE"]);
         table.set_indent(2);
 
         for r in &results {

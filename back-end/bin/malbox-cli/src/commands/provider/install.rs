@@ -5,7 +5,10 @@ use crate::error::Result;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(about = "Install a provider (adds to config and rebuilds daemon)")]
+#[command(
+    about = "Install a provider (adds to config and rebuilds daemon)",
+    after_help = "Examples:\n  malbox provider install libvirt\n  malbox provider install vmware --no-rebuild"
+)]
 pub struct InstallCommand {
     /// Provider name (e.g., "libvirt", "vmware")
     pub name: String,

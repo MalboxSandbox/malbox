@@ -1,11 +1,14 @@
 use crate::api::ApiClient;
 use crate::commands::{Command, Context};
 use crate::error::Result;
-use crate::utils::format::{self, Table};
+use crate::utils::format::{self, Table, styled_status};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(about = "Manage plugins")]
+#[command(
+    about = "Manage analysis plugins",
+    after_help = "Examples:\n  malbox plugin list\n  malbox plugin list --type guest"
+)]
 pub struct PluginCommand {
     #[command(subcommand)]
     command: PluginCommands,
@@ -40,22 +43,15 @@ async fn list(api: &ApiClient, args: ListArgs) -> Result<()> {
         return Ok(());
     }
 
-    let mut table = Table::new(&[
-        ("NAME", 25),
-        ("VERSION", 10),
-        ("TYPE", 8),
-        ("STATE", 10),
-        ("STATUS", 10),
-        ("DESCRIPTION", 30),
-    ]);
+    let mut table = Table::new(&["NAME", "VERSION", "TYPE", "STATE", "STATUS", "DESCRIPTION"]);
 
     for p in &plugins {
         table.add_row(vec![
             p.name.clone(),
             p.version.clone(),
             p.plugin_type.clone(),
-            p.state.clone(),
-            p.status.clone(),
+            styled_status(&p.state),
+            styled_status(&p.status),
             p.description.as_deref().unwrap_or("-").to_string(),
         ]);
     }

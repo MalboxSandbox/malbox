@@ -31,6 +31,7 @@ async fn main() -> Result<()> {
         api: ApiClient::new(api_url),
         format: cli.format.clone(),
         verbose: cli.verbose,
+        yes: cli.yes,
     };
 
     cli.execute(&ctx)

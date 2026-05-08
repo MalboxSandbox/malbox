@@ -79,6 +79,31 @@ impl ApiClient {
         Ok(response.json().await?)
     }
 
+    pub async fn resolve_machine(&self, name_or_id: &str) -> Result<Machine> {
+        if let Ok(id) = name_or_id.parse::<i32>()
+            && let Ok(m) = self.get_machine(id).await
+        {
+            return Ok(m);
+        }
+        let machines = self.list_machines().await?;
+        machines
+            .into_iter()
+            .find(|m| m.name.eq_ignore_ascii_case(name_or_id))
+            .ok_or_else(|| {
+                crate::error::CliError::InvalidArgument(format!(
+                    "machine '{}' not found",
+                    name_or_id
+                ))
+            })
+    }
+
+    pub async fn resolve_machine_id(&self, name_or_id: &str) -> Result<i32> {
+        let machine = self.resolve_machine(name_or_id).await?;
+        machine
+            .id
+            .ok_or_else(|| crate::error::CliError::InvalidArgument("machine has no ID".to_string()))
+    }
+
     pub async fn list_snapshots(&self, machine_id: i32) -> Result<Vec<MachineSnapshot>> {
         let response = self
             .client
