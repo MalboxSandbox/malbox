@@ -1,0 +1,253 @@
+import { split } from "std/text"
+
+let GITHUB_REPO = "DualHorizon/malbox"
+let BINARY_NAME = "malbox"
+let GUM_TMP_DIR = ""
+
+let COLOR_ACCENT = "#516cf9"
+let COLOR_SUCCESS = "#4ade80"
+let COLOR_ERROR = "#ef4444"
+let COLOR_WARN = "#f59e0b"
+let COLOR_FAINT = "#8a8f94"
+let COLOR_BORDER = "#393b43"
+
+fun ensure_gum() {
+    const has_gum = trust $command -v gum > /dev/null 2>&1 && echo "yes" || echo "no"$
+
+    if has_gum == "no" {
+
+        const uname_arch = trust $uname -m$
+        let gum_arch = ""
+        if {
+            uname_arch == "x86_64" or uname_arch == "amd64" {
+                gum_arch = "x86_64"
+            }
+            uname_arch == "aarch64" or uname_arch == "arm64" {
+                gum_arch = "arm64"
+            }
+            else {
+                echo("Error: unsupported architecture for gum: {uname_arch}")
+                exit(1)
+            }
+        }
+
+        const gum_release_json = $curl -sSfL "https://api.github.com/repos/charmbracelet/gum/releases/latest"$ failed {
+            echo("Error: could not fetch gum release info")
+            exit(1)
+        }
+
+        const gum_tag = $printf "%s" "{gum_release_json}" | grep "tag_name" | head -1 | sed 's/.*: *"v//;s/".*//'$ failed {
+            echo("Error: could not determine gum version")
+            exit(1)
+        }
+
+        const gum_asset = "gum_{gum_tag}_Linux_{gum_arch}.tar.gz"
+        const gum_url = "https://github.com/charmbracelet/gum/releases/download/v{gum_tag}/{gum_asset}"
+
+        GUM_TMP_DIR = trust $mktemp -d$
+
+        $curl -sSfL "{gum_url}" | tar -xz -C "{GUM_TMP_DIR}" --strip-components=1 --wildcards "*/gum"$ failed {
+            echo("Error: could not download gum")
+            trust silent $rm -rf "{GUM_TMP_DIR}"$
+            exit(1)
+        }
+
+        trust $export PATH="{GUM_TMP_DIR}:\$PATH"$
+    }
+}
+
+fun cleanup_gum() {
+    if GUM_TMP_DIR != "" {
+        trust silent $rm -rf "{GUM_TMP_DIR}"$
+    }
+}
+
+fun check_os(): Text {
+    const os = trust $uname -s$
+    if os != "Linux" {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Malbox currently only supports Linux (got {os})"$
+        exit(1)
+    }
+    return os
+}
+
+fun detect_arch(): Text {
+    const uname_arch = trust $uname -m$
+    if {
+        uname_arch == "x86_64" or uname_arch == "amd64" {
+            return "linux-x64"
+        }
+        uname_arch == "aarch64" or uname_arch == "arm64" {
+            return "linux-arm64"
+        }
+        else {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Unsupported architecture: {uname_arch}"$
+            exit(1)
+        }
+    }
+    return ""
+}
+
+fun detect_install_dir(): Text {
+    const uid = trust $id -u$
+    if uid == "0" {
+        return "/usr/local/bin"
+    }
+
+    const home = trust $echo \$HOME$
+    const local_bin = "{home}/.local/bin"
+    const path_var = trust $echo \$PATH$
+    const path_entries = split(path_var, ":")
+
+    let found = false
+    for entry in path_entries {
+        if entry == local_bin {
+            found = true
+            break
+        }
+    }
+
+    if not found {
+        trust $gum log --level warn --prefix.foreground "{COLOR_WARN}" "{local_bin} is not on your PATH"$
+        trust $gum style --foreground "{COLOR_FAINT}" "Add it with: export PATH=\"\$HOME/.local/bin:\$PATH\""$
+        echo("")
+    }
+
+    trust silent $mkdir -p "{local_bin}"$
+    return local_bin
+}
+
+fun choose_channel(): Text {
+    const channel = $gum choose --cursor.foreground "{COLOR_ACCENT}" --selected.foreground "{COLOR_ACCENT}" --header.foreground "{COLOR_FAINT}" "stable" "nightly"$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "No channel selected"$
+        exit(1)
+    }
+    return channel
+}
+
+fun fetch_release(channel: Text): Text {
+    if channel == "stable" {
+        const release_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest stable release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases/latest"$ failed {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not fetch release information (no stable release found)"$
+            exit(1)
+        }
+
+        const tag = $printf "%s" "{release_json}" | grep "tag_name" | head -1 | sed 's/.*: *"//;s/".*//'$ failed {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest stable release"$
+            exit(1)
+        }
+
+        if tag == "" {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest stable release"$
+            exit(1)
+        }
+
+        trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Latest stable: {tag}"$
+        return tag
+    }
+
+    const releases_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest nightly release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases"$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not fetch release information"$
+        exit(1)
+    }
+
+    const tag = $printf "%s" "{releases_json}" | grep "tag_name" | head -1 | sed 's/.*: *"//;s/".*//'$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest nightly release"$
+        exit(1)
+    }
+
+    if tag == "" {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest nightly release"$
+        exit(1)
+    }
+
+    trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Latest nightly: {tag}"$
+    return tag
+}
+
+fun download_binary(tag: Text, asset_name: Text): Text {
+    const download_url = "https://github.com/{GITHUB_REPO}/releases/download/{tag}/{asset_name}"
+    const checksum_url = "{download_url}.sha256"
+
+    const tmp_dir = trust $mktemp -d$
+
+    $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Downloading {asset_name}..." -- curl -sSfL -o "{tmp_dir}/{asset_name}" "{download_url}"$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to download binary"$
+        trust silent $rm -rf "{tmp_dir}"$
+        exit(1)
+    }
+
+    $curl -sSfL -o "{tmp_dir}/{asset_name}.sha256" "{checksum_url}"$ failed {
+        trust $gum log --level warn --prefix.foreground "{COLOR_WARN}" "No checksum available, skipping verification"$
+    }
+
+    return tmp_dir
+}
+
+fun verify_checksum(tmp_dir: Text, asset_name: Text) {
+    $test -f "{tmp_dir}/{asset_name}.sha256"$ succeeded {
+        $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Verifying checksum..." -- bash -c "cd \"{tmp_dir}\" && sha256sum -c \"{asset_name}.sha256\""$ failed {
+            $bash -c "cd \"{tmp_dir}\" && shasum -a 256 -c \"{asset_name}.sha256\""$ failed {
+                trust $gum log --level warn --prefix.foreground "{COLOR_WARN}" "Checksum verification failed"$
+            }
+        }
+    }
+}
+
+fun install_binary(tmp_dir: Text, asset_name: Text, install_dir: Text) {
+    $tar -xzf "{tmp_dir}/{asset_name}" -C "{tmp_dir}" --strip-components=1$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to extract archive"$
+        exit(1)
+    }
+
+    $mv "{tmp_dir}/malbox-cli" "{install_dir}/{BINARY_NAME}"$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to install binary"$
+        exit(1)
+    }
+
+    $chmod +x "{install_dir}/{BINARY_NAME}"$ failed {
+        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to set permissions"$
+        exit(1)
+    }
+
+    trust silent $rm -rf "{tmp_dir}"$
+}
+
+main {
+    check_os()
+    ensure_gum()
+    const arch = detect_arch()
+    const install_dir = detect_install_dir()
+
+    trust $gum style --border rounded --border-foreground "{COLOR_ACCENT}" --padding "0 2" --bold "Installing Malbox CLI"$
+    echo("")
+    trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Architecture: {arch}"$
+    trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Install to:   {install_dir}/{BINARY_NAME}"$
+    echo("")
+
+    trust $gum style --bold "Select release channel:"$
+    const channel = choose_channel()
+    echo("")
+
+    $test -f "{install_dir}/{BINARY_NAME}"$ succeeded {
+        const force = trust $printenv MALBOX_FORCE || true$
+        if force != "1" {
+            $gum confirm --prompt.foreground "{COLOR_ACCENT}" --selected.background "{COLOR_ACCENT}" --unselected.foreground "{COLOR_FAINT}" "Malbox CLI already exists at {install_dir}/{BINARY_NAME}. Overwrite?"$ failed {
+                trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Installation cancelled."$
+                exit(0)
+            }
+        }
+    }
+
+    const tag = fetch_release(channel)
+    const asset_name = "malbox-{tag}-{arch}.tar.gz"
+    const tmp_dir = download_binary(tag, asset_name)
+    verify_checksum(tmp_dir, asset_name)
+    install_binary(tmp_dir, asset_name, install_dir)
+
+    echo("")
+    trust $gum style --foreground "{COLOR_SUCCESS}" --bold "Malbox CLI installed successfully!"$
+    trust $gum style --foreground "{COLOR_FAINT}" "Run malbox install to set up Malbox."$
+
+    cleanup_gum()
+}
