@@ -1,0 +1,41 @@
+name: Install Script
+
+on:
+  push:
+    paths:
+      - "back-end/scripts/install.ab"
+      - ".github/workflows/install-script.yml"
+  pull_request:
+    paths:
+      - "back-end/scripts/install.ab"
+      - ".github/workflows/install-script.yml"
+
+jobs:
+  build:
+    name: Compile install script
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Amber
+      run: |
+        curl -sSfL "https://github.com/amber-lang/amber/releases/latest/download/amber-linux-musl-x86_64.tar.xz" \
+          | tar -xJ -C /usr/local/bin amber
+        chmod +x /usr/local/bin/amber
+
+    - name: Check syntax
+      run: amber check back-end/scripts/install.ab
+
+    - name: Compile to Bash
+      run: amber build back-end/scripts/install.ab back-end/scripts/install.sh
+
+    - name: Validate generated Bash
+      run: bash -n back-end/scripts/install.sh
+
+    - name: Check for uncommitted changes
+      run: |
+        if ! git diff --quiet back-end/scripts/install.sh; then
+          echo "::error::install.sh is out of date. Run 'amber build install.ab install.sh' and commit the result."
+          git diff back-end/scripts/install.sh
+          exit 1
+        fi
