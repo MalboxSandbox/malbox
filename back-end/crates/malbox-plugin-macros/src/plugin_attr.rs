@@ -13,44 +13,34 @@ use syn::{self, ItemStruct};
 pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenStream> {
     let input: ItemStruct = syn::parse2(item)?;
 
-    // Reject any remaining #[malbox(...)] attrs - they are no longer supported.
-    for attr in &input.attrs {
-        if attr.path().is_ident("malbox") {
-            return Err(syn::Error::new_spanned(
-                attr,
-                "#[malbox(...)] attributes are no longer supported. Set state and execution in the [runtime] section of plugin.toml instead.",
-            ));
-        }
-    }
-
     let manifest = read_manifest(&input)?;
 
     let struct_name = &input.ident;
 
     let state = match manifest.runtime.state {
         malbox_plugin_manifest::PluginStateConfig::Persistent => {
-            quote! { malbox_plugin_sdk::types::PluginState::Persistent }
+            quote! { malbox_plugin_sdk::meta::PluginState::Persistent }
         }
         malbox_plugin_manifest::PluginStateConfig::Ephemeral => {
-            quote! { malbox_plugin_sdk::types::PluginState::Ephemeral }
+            quote! { malbox_plugin_sdk::meta::PluginState::Ephemeral }
         }
         malbox_plugin_manifest::PluginStateConfig::Scoped => {
-            quote! { malbox_plugin_sdk::types::PluginState::Scoped }
+            quote! { malbox_plugin_sdk::meta::PluginState::Scoped }
         }
     };
 
     let execution = match manifest.runtime.execution {
         malbox_plugin_manifest::ExecutionContextConfig::Exclusive => {
-            quote! { malbox_plugin_sdk::types::ExecutionContext::Exclusive }
+            quote! { malbox_plugin_sdk::meta::ExecutionContext::Exclusive }
         }
         malbox_plugin_manifest::ExecutionContextConfig::Sequential => {
-            quote! { malbox_plugin_sdk::types::ExecutionContext::Sequential }
+            quote! { malbox_plugin_sdk::meta::ExecutionContext::Sequential }
         }
         malbox_plugin_manifest::ExecutionContextConfig::Parallel => {
-            quote! { malbox_plugin_sdk::types::ExecutionContext::Parallel }
+            quote! { malbox_plugin_sdk::meta::ExecutionContext::Parallel }
         }
         malbox_plugin_manifest::ExecutionContextConfig::Unrestricted => {
-            quote! { malbox_plugin_sdk::types::ExecutionContext::Unrestricted }
+            quote! { malbox_plugin_sdk::meta::ExecutionContext::Unrestricted }
         }
     };
 
@@ -71,16 +61,16 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
 
         impl #struct_name {
             #[doc(hidden)]
-            pub fn __malbox_meta() -> malbox_plugin_sdk::types::PluginMeta {
+            pub fn __malbox_meta() -> malbox_plugin_sdk::meta::PluginMeta {
                 let desc = env!("CARGO_PKG_DESCRIPTION");
-                malbox_plugin_sdk::types::PluginMeta {
-                    name: String::from(env!("CARGO_PKG_NAME")),
-                    version: String::from(env!("CARGO_PKG_VERSION")),
-                    description: if desc.is_empty() { String::new() } else { String::from(desc) },
-                    authors: String::from(env!("CARGO_PKG_AUTHORS")),
-                    state: #state,
-                    execution: #execution,
-                }
+                let meta = malbox_plugin_sdk::meta::PluginMeta::new(
+                    env!("CARGO_PKG_NAME"),
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .with_authors(env!("CARGO_PKG_AUTHORS"))
+                .with_state(#state)
+                .with_execution(#execution);
+                if desc.is_empty() { meta } else { meta.with_description(desc) }
             }
 
             #runtime_const

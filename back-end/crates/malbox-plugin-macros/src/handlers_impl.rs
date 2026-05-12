@@ -51,15 +51,7 @@ struct EventAttrArgs {
 
 impl syn::parse::Parse for EventAttrArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        // Support both flat `TaskCompleted` and legacy `TaskEvent::TaskCompleted` syntax.
-        // For legacy paths, we take the last segment as the variant name.
-        let path: syn::Path = input.parse()?;
-        let variant = path
-            .segments
-            .last()
-            .ok_or_else(|| syn::Error::new_spanned(&path, "expected event variant name"))?
-            .ident
-            .clone();
+        let variant: syn::Ident = input.parse()?;
 
         let mut from_filter = Vec::new();
 
@@ -199,7 +191,7 @@ pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
 fn generate_health_check(found: &FoundHandlers) -> Option<TokenStream> {
     found.health_check_method.as_ref().map(|method_name| {
         quote! {
-            fn health_check(&self) -> malbox_plugin_sdk::types::HealthStatus {
+            fn health_check(&self) -> malbox_plugin_sdk::health::HealthStatus {
                 self.#method_name()
             }
         }
@@ -269,7 +261,7 @@ fn generate_guest_plugin_impl(struct_ty: &syn::Type, found: &FoundHandlers) -> T
             #health_check
         }
 
-        impl malbox_plugin_sdk::guest_plugin::GuestPlugin for #struct_ty {
+        impl malbox_plugin_sdk::plugin::guest::GuestPlugin for #struct_ty {
             #(#guest_methods)*
         }
     }
@@ -387,8 +379,7 @@ fn generate_on_event(handlers: &[FoundEventHandler]) -> Option<TokenStream> {
 
 /// Generate a method call expression adapted to the event handler's signature.
 ///
-/// All event handlers are called with no arguments. Since `on_event` no longer
-/// receives a `ctx` parameter, handlers cannot receive it either.
+/// All event handlers are called with no arguments.
 fn make_event_handler_call(handler: &FoundEventHandler) -> TokenStream {
     let method = &handler.method_name;
 
