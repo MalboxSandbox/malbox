@@ -5,18 +5,21 @@ edition = "2024"
 
 [features]
 default = []
-ipc = ["dep:iceoryx2"]
+grpc = ["dep:tonic", "dep:prost", "dep:tonic-prost", "dep:tokio", "dep:tokio-stream", "dep:tonic-prost-build"]
+ipc = ["dep:iceoryx2", "dep:postcard", "dep:serde"]
 
 [dependencies]
 iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
+postcard = { version = "1", features = ["alloc"], optional = true }
+serde = { workspace = true, optional = true }
 
-tonic = "0.14.5"
-prost = "0.14.3"
-tonic-prost = "0.14.5"
-tokio = { workspace = true }
-tokio-stream = { workspace = true }
+tonic = { version = "0.14.5", optional = true }
+prost = { version = "0.14.3", optional = true }
+tonic-prost = { version = "0.14.5", optional = true }
+tokio = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
 
 thiserror.workspace = true
 
 [build-dependencies]
-tonic-prost-build = "0.14.5"
+tonic-prost-build = { version = "0.14.5", optional = true }

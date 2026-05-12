@@ -4,10 +4,8 @@
 //! All methods are async.
 
 use crate::error::{Result, TransportError};
-use crate::grpc::conversions;
 use crate::grpc::proto;
 use crate::grpc::proto::guest_plugin_service_client::GuestPluginServiceClient;
-use crate::messages::events::Event;
 use std::collections::HashMap;
 
 /// Daemon-side gRPC client wrapping the generated tonic stub.
@@ -75,17 +73,6 @@ impl GrpcClient {
         let response = self
             .inner
             .shutdown(request)
-            .await
-            .map_err(TransportError::GrpcStatus)?;
-        Ok(response.into_inner())
-    }
-
-    /// Notify the guest plugin of a system-wide event.
-    pub async fn notify_event(&mut self, event: &Event) -> Result<proto::EventAck> {
-        let notification = conversions::event_to_proto(event)?;
-        let response = self
-            .inner
-            .notify_event(notification)
             .await
             .map_err(TransportError::GrpcStatus)?;
         Ok(response.into_inner())

@@ -13,9 +13,6 @@ service GuestPluginService {
   // Task execution — daemon sends task, guest streams results back
   rpc ExecuteTask(TaskRequest) returns (stream TaskResult);
 
-  // Event notification — daemon pushes events to guest plugin
-  rpc NotifyEvent(EventNotification) returns (EventAck);
-
   // Guest access — file transfer and command execution on guest OS
   rpc PushFile(stream FileChunk) returns (FileTransferResponse);
   rpc PullFile(PullFileRequest) returns (stream FileChunk);
@@ -102,70 +99,6 @@ message ResultChunk {
   bytes data = 1;
   uint32 index = 2;
   bool is_last = 3;
-}
-
-// --- Event messages ---
-
-message EventNotification {
-  oneof event {
-    TaskEventProto task = 1;
-    PluginEventProto plugin = 2;
-    SampleEventProto sample = 3;
-    DaemonEventProto daemon = 4;
-  }
-}
-
-message TaskEventProto {
-  TaskEventType event_type = 1;
-  int32 task_id = 2;
-}
-
-enum TaskEventType {
-  TASK_EVENT_TYPE_UNSPECIFIED = 0;
-  TASK_EVENT_TYPE_CREATED = 1;
-  TASK_EVENT_TYPE_STARTING = 2;
-  TASK_EVENT_TYPE_COMPLETED = 3;
-  TASK_EVENT_TYPE_FAILED = 4;
-  TASK_EVENT_TYPE_CANCELED = 5;
-}
-
-message PluginEventProto {
-  PluginEventType event_type = 1;
-  int32 plugin_id = 2;
-}
-
-enum PluginEventType {
-  PLUGIN_EVENT_TYPE_UNSPECIFIED = 0;
-  PLUGIN_EVENT_TYPE_STARTED = 1;
-  PLUGIN_EVENT_TYPE_STOPPED = 2;
-  PLUGIN_EVENT_TYPE_RESULT_PRODUCED = 3;
-}
-
-message SampleEventProto {
-  SampleEventType event_type = 1;
-  int32 sample_id = 2;
-}
-
-enum SampleEventType {
-  SAMPLE_EVENT_TYPE_UNSPECIFIED = 0;
-  SAMPLE_EVENT_TYPE_STARTED = 1;
-  SAMPLE_EVENT_TYPE_STOPPED = 2;
-  SAMPLE_EVENT_TYPE_RESULT_PRODUCED = 3;
-}
-
-message DaemonEventProto {
-  DaemonEventType event_type = 1;
-}
-
-enum DaemonEventType {
-  DAEMON_EVENT_TYPE_UNSPECIFIED = 0;
-  DAEMON_EVENT_TYPE_SHUTDOWN = 1;
-  DAEMON_EVENT_TYPE_CONFIG_RELOADED = 2;
-}
-
-message EventAck {
-  bool success = 1;
-  string error_message = 2;
 }
 
 // --- Guest access messages ---

@@ -5,17 +5,20 @@ pub enum TransportError {
     #[error("Internal IPC Error: {0}")]
     Ipc(#[from] Box<dyn std::error::Error + Send + Sync>),
 
+    #[error("IPC buffer full: {0}")]
+    BufferFull(String),
+
+    #[cfg(feature = "grpc")]
     #[error("gRPC error: {0}")]
     Grpc(String),
 
+    #[cfg(feature = "grpc")]
     #[error("gRPC status: {0}")]
     GrpcStatus(#[from] tonic::Status),
 
+    #[cfg(feature = "grpc")]
     #[error("gRPC transport error: {0}")]
     GrpcTransport(#[from] tonic::transport::Error),
-
-    #[error("Invalid event ID: {0}")]
-    InvalidEventId(usize),
 }
 
 pub type Result<T> = std::result::Result<T, TransportError>;

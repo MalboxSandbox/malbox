@@ -1,9 +1,12 @@
+#[cfg(feature = "grpc")]
 pub mod daemon;
 pub mod error;
+#[cfg(feature = "grpc")]
 pub mod grpc;
 #[cfg(feature = "ipc")]
 pub mod ipc;
 pub mod messages;
+#[cfg(feature = "grpc")]
 pub mod plugin;
 pub mod traits;
 
