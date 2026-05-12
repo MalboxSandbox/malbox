@@ -64,13 +64,56 @@
 				parts.push(`<ol class="list-decimal space-y-1 pl-6">${items.join('')}</ol>`);
 				continue;
 			}
+			// table
+			if (/^\s*\|(.+)\|/.test(line)) {
+				const tableLines: string[] = [];
+				while (i < lines.length && /^\s*\|(.+)\|/.test(lines[i])) {
+					tableLines.push(lines[i]);
+					i++;
+				}
+				if (tableLines.length >= 2 && /^\s*\|[\s:]*-+/.test(tableLines[1])) {
+					const parseCells = (row: string) =>
+						row
+							.trim()
+							.replace(/^\||\|$/g, '')
+							.split('|')
+							.map((c) => c.trim());
+					const headers = parseCells(tableLines[0]);
+					const aligns = parseCells(tableLines[1]).map((c) => {
+						if (c.startsWith(':') && c.endsWith(':')) return 'center';
+						if (c.endsWith(':')) return 'right';
+						return 'left';
+					});
+					const headerHtml = headers
+						.map(
+							(h, idx) =>
+								`<th class="px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)]" style="text-align:${aligns[idx] ?? 'left'}">${renderInline(h)}</th>`
+						)
+						.join('');
+					const bodyRows = tableLines.slice(2);
+					const rowsHtml = bodyRows
+						.map((r) => {
+							const cells = parseCells(r);
+							return `<tr class="border-t border-[var(--color-border)]">${cells.map((c, idx) => `<td class="px-3 py-2 text-sm" style="text-align:${aligns[idx] ?? 'left'}">${renderInline(c)}</td>`).join('')}</tr>`;
+						})
+						.join('');
+					parts.push(
+						`<div class="overflow-x-auto"><table class="w-full border-collapse"><thead><tr class="border-b border-[var(--color-border)]">${headerHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+					);
+					continue;
+				}
+				// not a valid table, treat lines as paragraph
+				parts.push(`<p>${tableLines.map((l) => renderInline(l)).join('<br />')}</p>`);
+				continue;
+			}
 			// paragraph: consume consecutive non-empty non-list lines
 			const para: string[] = [];
 			while (
 				i < lines.length &&
 				lines[i].trim() !== '' &&
 				!/^\s*[-*]\s+/.test(lines[i]) &&
-				!/^\s*\d+\.\s+/.test(lines[i])
+				!/^\s*\d+\.\s+/.test(lines[i]) &&
+				!/^\s*\|(.+)\|/.test(lines[i])
 			) {
 				para.push(renderInline(lines[i]));
 				i++;

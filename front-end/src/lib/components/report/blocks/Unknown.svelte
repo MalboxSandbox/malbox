@@ -9,7 +9,7 @@
 	let { block }: Props = $props();
 </script>
 
-<div class="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-4">
+<div class="space-y-2 rounded-lg bg-[var(--color-bg-tertiary)] p-4">
 	<div class="text-xs text-[var(--color-text-secondary)]">
 		Unsupported block type:
 		<span class="font-mono text-[var(--color-text-primary)]">{(block as { type: string }).type}</span>

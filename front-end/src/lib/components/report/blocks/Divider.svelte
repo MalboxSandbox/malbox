@@ -1,1 +1,1 @@
-<hr class="border-[var(--color-border)]" />
+<hr class="border-[var(--color-border)]/30" />

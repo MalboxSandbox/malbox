@@ -16,7 +16,7 @@
 		<img
 			src={url}
 			alt={caption ?? artifact}
-			class="max-w-full rounded-lg border border-[var(--color-border)]"
+			class="max-w-full rounded-lg"
 		/>
 		{#if caption}
 			<figcaption class="text-xs text-[var(--color-text-secondary)]">{caption}</figcaption>
@@ -24,7 +24,7 @@
 	</figure>
 {:else}
 	<div
-		class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+		class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200"
 	>
 		Missing artifact: <span class="font-mono">{artifact}</span>
 	</div>

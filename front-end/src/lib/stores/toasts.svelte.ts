@@ -4,6 +4,7 @@ export interface Toast {
 	id: number;
 	kind: ToastKind;
 	message: string;
+	ttlMs: number;
 }
 
 class ToastStore {
@@ -14,9 +15,9 @@ class ToastStore {
 		return this.items;
 	}
 
-	push(toast: Omit<Toast, 'id'>, ttlMs = 5000): number {
+	push(toast: Omit<Toast, 'id' | 'ttlMs'>, ttlMs = 5000): number {
 		const id = this.nextId++;
-		this.items = [...this.items, { id, ...toast }];
+		this.items = [...this.items, { id, ttlMs, ...toast }];
 		if (ttlMs > 0) setTimeout(() => this.dismiss(id), ttlMs);
 		return id;
 	}

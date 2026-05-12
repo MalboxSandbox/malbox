@@ -40,7 +40,7 @@
 	</div>
 
 	{#if pollingError}
-		<div class="rounded border border-yellow-500/40 bg-yellow-500/20 p-3 text-sm text-yellow-200">
+		<div class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-sm text-amber-200">
 			{pollingError}
 		</div>
 	{/if}

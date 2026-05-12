@@ -36,7 +36,6 @@
 				const c = slice[j];
 				ascii += c >= 32 && c < 127 ? String.fromCharCode(c) : '.';
 			}
-			// pad hex so columns align
 			while (hexParts.length < 16) hexParts.push('  ');
 			out.push({
 				off: offsetHex(offset + i),
@@ -48,7 +47,12 @@
 	});
 </script>
 
-<pre class="overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-4 font-mono text-xs leading-5 text-[var(--color-text-primary)]">
-{#each rows as r, i (i)}<span class="text-[var(--color-text-secondary)]">{r.off}</span>  {r.hex}  <span class="text-[var(--color-text-secondary)]">{r.ascii}</span>
-{/each}
-</pre>
+<div class="overflow-hidden rounded-lg bg-[var(--color-bg-primary)]">
+	<div class="px-4 py-2">
+		<span class="font-mono text-[10px] uppercase text-[var(--color-text-secondary)]">
+			hex · {bytes.length} bytes
+		</span>
+	</div>
+	<pre class="overflow-x-auto border-t border-[var(--color-border)]/30 px-4 py-3 font-mono text-xs leading-5 text-[var(--color-text-primary)]">{#each rows as r, i (i)}<span class="select-none text-[var(--color-text-secondary)]">{r.off}</span>  {r.hex}  <span class="text-[var(--color-accent)]/60">{r.ascii}</span>
+{/each}</pre>
+</div>

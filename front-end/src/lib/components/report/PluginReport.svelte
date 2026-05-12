@@ -1,5 +1,5 @@
 <script lang="ts">
-	import VerdictBadge from './VerdictBadge.svelte';
+	import ScoreBar from './ScoreBar.svelte';
 	import ArtifactLinks from './ArtifactLinks.svelte';
 	import Section from './Section.svelte';
 	import type { PluginReportView } from '$lib/api/types';
@@ -46,11 +46,10 @@
 					</div>
 				{/if}
 			</div>
-			{#if report?.verdict}
-				<VerdictBadge
-					classification={report.verdict.classification}
+			{#if report?.verdict?.score !== undefined}
+				<ScoreBar
 					score={report.verdict.score}
-					confidence={report.verdict.confidence}
+					classification={report.verdict.classification}
 				/>
 			{/if}
 		</div>
@@ -79,7 +78,7 @@
 		</div>
 
 		{#if schemaWarning}
-			<div class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+			<div class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200">
 				This report uses schema version {report?.schema_version}; some fields may not render.
 			</div>
 		{/if}

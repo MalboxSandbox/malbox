@@ -33,7 +33,7 @@
 	}
 
 	function formatCell(value: unknown, type: string | undefined): string {
-		if (value == null) return '—';
+		if (value == null) return '-';
 		switch (type) {
 			case 'datetime': {
 				const s = String(value);
@@ -74,32 +74,45 @@
 		type === 'number' ? 'text-right' : 'text-left';
 </script>
 
-<div class="space-y-3">
+<div class="max-w-full space-y-3 overflow-hidden">
 	{#if searchable}
 		<input
 			type="search"
 			bind:value={query}
-			placeholder="Search…"
-			class="w-full max-w-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+			placeholder="Search..."
+			class="w-full max-w-xs rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
 		/>
 	{/if}
 
-	<div class="overflow-x-auto rounded-lg border border-[var(--color-border)]">
+	<div class="max-h-[32rem] overflow-auto rounded-lg bg-[var(--color-bg-primary)]">
 		<table class="w-full text-sm">
-			<thead class="bg-[var(--color-bg-tertiary)] text-xs uppercase text-[var(--color-text-secondary)]">
-				<tr>
+			<thead class="sticky top-0 z-10 bg-[var(--color-bg-primary)]">
+				<tr class="text-xs uppercase text-[var(--color-text-secondary)]">
 					{#each columns as c (c.key)}
-						<th class="px-4 py-2 font-medium {cellAlign(c.type)}">
+						<th class="px-4 py-2.5 font-medium {cellAlign(c.type)}">
 							{#if sortable}
 								<button
 									type="button"
-									class="inline-flex items-center gap-1 hover:text-[var(--color-text-primary)]"
+									class="inline-flex items-center gap-1.5 transition-colors hover:text-[var(--color-text-primary)]"
 									onclick={() => toggleSort(c.key)}
 								>
 									<span>{c.label}</span>
-									{#if sortKey === c.key}
-										<span>{sortDir === 'asc' ? '↑' : '↓'}</span>
-									{/if}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 16 16"
+										fill="currentColor"
+										class="size-3 transition-transform {sortKey === c.key
+											? 'text-[var(--color-text-primary)]'
+											: 'opacity-0'} {sortKey === c.key && sortDir === 'desc'
+											? 'rotate-180'
+											: ''}"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M8 3.5a.75.75 0 0 1 .75.75v6.19l2.72-2.72a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 0 1 1.06-1.06l2.72 2.72V4.25A.75.75 0 0 1 8 3.5Z"
+											clip-rule="evenodd"
+										/>
+									</svg>
 								</button>
 							{:else}
 								{c.label}
@@ -111,7 +124,7 @@
 			<tbody>
 				{#each sorted as row, i (i)}
 					<tr
-						class="border-t border-[var(--color-border)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]/50"
+						class="border-t border-[var(--color-border)]/30 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]/40"
 					>
 						{#each columns as c (c.key)}
 							<td class="px-4 py-2 {cellAlign(c.type)} {c.type === 'string' || !c.type ? 'break-all' : ''}">

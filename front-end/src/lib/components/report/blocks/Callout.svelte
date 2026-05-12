@@ -10,6 +10,6 @@
 	const cls = $derived(calloutClasses(level));
 </script>
 
-<div class="rounded-lg border px-4 py-3 text-sm {cls}">
+<div class="rounded-lg border-l-2 px-4 py-3 text-sm {cls}">
 	{text}
 </div>

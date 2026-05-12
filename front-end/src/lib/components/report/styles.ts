@@ -41,14 +41,14 @@ export function classificationClasses(c: Classification | string | undefined) {
 export function calloutClasses(level: CalloutLevel) {
 	switch (level) {
 		case 'error':
-			return 'border-red-500/40 bg-red-500/10 text-red-200';
+			return 'border-red-500 bg-red-500/10 text-red-200';
 		case 'warn':
-			return 'border-amber-500/40 bg-amber-500/10 text-amber-200';
+			return 'border-amber-500 bg-amber-500/10 text-amber-200';
 		case 'success':
-			return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200';
+			return 'border-emerald-500 bg-emerald-500/10 text-emerald-200';
 		case 'info':
 		default:
-			return 'border-sky-500/40 bg-sky-500/10 text-sky-200';
+			return 'border-sky-500 bg-sky-500/10 text-sky-200';
 	}
 }
 

@@ -103,7 +103,7 @@
 					<a
 						href={a.url}
 						download={a.result_name}
-						class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 py-2 text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]"
+						class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-card)] px-3 py-2 text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]"
 					>
 						<span>{node.name}</span>
 						<span class="text-[var(--color-text-secondary)]">&middot;</span>
@@ -119,7 +119,7 @@
 		{#each folders as folder (folder.name)}
 			{@const flat = flattenFolder(folder, '')}
 			{@const expanded = expandedFolders.has(flat.path)}
-			<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)]">
+			<div class="rounded-lg bg-[var(--color-bg-card)]">
 				<button
 					type="button"
 					class="flex w-full items-center gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-[var(--color-bg-tertiary)]"
@@ -157,7 +157,7 @@
 				</button>
 
 				{#if expanded}
-					<div class="max-h-80 overflow-y-auto border-t border-[var(--color-border)]">
+					<div class="max-h-80 overflow-y-auto border-t border-[var(--color-border)]/50">
 						{#each flat.files as a (a.result_name)}
 							<a
 								href={a.url}
