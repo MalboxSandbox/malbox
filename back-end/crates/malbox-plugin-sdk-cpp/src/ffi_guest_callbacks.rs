@@ -5,9 +5,9 @@ use std::path::Path;
 
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
-use malbox_plugin_sdk::guest_plugin::{GuestPlugin, LaunchResult, default_launch};
+use malbox_plugin_sdk::health::HealthStatus;
 use malbox_plugin_sdk::plugin::Plugin;
-use malbox_plugin_sdk::types::HealthStatus;
+use malbox_plugin_sdk::plugin::guest::{GuestPlugin, LaunchResult, default_launch};
 
 use crate::error::last_error_string;
 use crate::ffi_types::{MalboxContext, MalboxGuestPluginVtable, MalboxHealthStatus};

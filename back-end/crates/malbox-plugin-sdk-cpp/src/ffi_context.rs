@@ -167,6 +167,47 @@ pub unsafe extern "C" fn malbox_context_warn(
     rc
 }
 
+/// Mark a file path as already collected so auto-collection skips it.
+///
+/// Call this when your plugin reads a file from the artifacts directory and
+/// sends its own processed version as a result. Without this, the
+/// auto-collector would send the raw file as a duplicate.
+///
+/// Returns `0` on success, `-1` on failure (last error is set).
+///
+/// # Safety
+///
+/// - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
+///   provided by the runtime to plugin callbacks.
+/// - `path` must point to a valid null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn malbox_context_mark_collected(
+    ctx: *const MalboxContext,
+    path: *const c_char,
+) -> i32 {
+    let context = match unsafe { ctx_ref(ctx) } {
+        Some(c) => c,
+        None => return -1,
+    };
+
+    if path.is_null() {
+        set_last_error("path must not be null");
+        return -1;
+    }
+
+    let path_str = match unsafe { std::ffi::CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(e) => {
+            set_last_error(&format!("path is not valid UTF-8: {e}"));
+            return -1;
+        }
+    };
+
+    context.mark_collected(std::path::Path::new(path_str));
+    clear_last_error();
+    0
+}
+
 /// Flush a batch of results to the daemon immediately during on_task.
 ///
 /// `names`, `datas`, `data_lens`, and `formats` are parallel arrays of length `count`.
@@ -188,7 +229,7 @@ pub unsafe extern "C" fn malbox_context_flush_results(
     formats: *const i32,
     count: usize,
 ) -> i32 {
-    use malbox_plugin_sdk::types::PluginResult;
+    use malbox_plugin_sdk::result::PluginResult;
 
     let context = match unsafe { ctx_ref(ctx) } {
         Some(c) => c,
@@ -303,6 +344,8 @@ mod tests {
         let event = MalboxEvent {
             tag: MalboxEventTag::TaskCreated,
             id: 1,
+            source: std::ptr::null(),
+            result_name: std::ptr::null(),
         };
         let rc = unsafe { malbox_context_emit_event(make_ctx_ptr(&ctx), event) };
         assert_eq!(rc, 0);
@@ -314,6 +357,8 @@ mod tests {
         let event = MalboxEvent {
             tag: MalboxEventTag::DaemonShutdown,
             id: 0,
+            source: std::ptr::null(),
+            result_name: std::ptr::null(),
         };
         let rc = unsafe { malbox_context_emit_event(make_ctx_ptr(&ctx), event) };
         assert_eq!(rc, 0);
@@ -324,6 +369,8 @@ mod tests {
         let event = MalboxEvent {
             tag: MalboxEventTag::TaskCreated,
             id: 0,
+            source: std::ptr::null(),
+            result_name: std::ptr::null(),
         };
         let rc = unsafe { malbox_context_emit_event(std::ptr::null(), event) };
         assert_eq!(rc, -1);

@@ -5,7 +5,7 @@
 
 use crate::error::{clear_last_error, set_last_error};
 use crate::ffi_types::MalboxResultBuilder;
-use malbox_plugin_sdk::types::PluginResult;
+use malbox_plugin_sdk::result::PluginResult;
 use std::ffi::c_char;
 use std::path::PathBuf;
 

@@ -11,7 +11,7 @@ crate-type = ["staticlib"]
 [features]
 default = ["host", "guest"]
 host = ["malbox-plugin-sdk/host", "malbox-plugin-transport/ipc"]
-guest = ["malbox-plugin-sdk/guest"]
+guest = ["malbox-plugin-sdk/guest", "malbox-plugin-transport/grpc"]
 
 [dependencies]
 malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }

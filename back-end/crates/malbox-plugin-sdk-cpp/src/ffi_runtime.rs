@@ -10,11 +10,11 @@
 
 use std::ffi::{CStr, c_char};
 
+use malbox_plugin_sdk::meta::{ExecutionContext, PluginMeta, PluginState};
 #[cfg(feature = "guest")]
 use malbox_plugin_sdk::runtime::guest::GuestRuntime;
 #[cfg(feature = "host")]
 use malbox_plugin_sdk::runtime::host::HostRuntime;
-use malbox_plugin_sdk::types::{ExecutionContext, PluginMeta, PluginState};
 
 use crate::error::set_last_error;
 #[cfg(feature = "host")]
@@ -95,14 +95,11 @@ unsafe fn convert_meta(meta: MalboxPluginMeta) -> Result<PluginMeta, String> {
         MalboxExecutionContext::Unrestricted => ExecutionContext::Unrestricted,
     };
 
-    Ok(PluginMeta {
-        name,
-        version,
-        description,
-        authors,
-        state,
-        execution,
-    })
+    Ok(PluginMeta::new(name, version)
+        .with_description(description)
+        .with_authors(authors)
+        .with_state(state)
+        .with_execution(execution))
 }
 
 /// Start an IPC-based host plugin runtime.
@@ -147,7 +144,7 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
 
     malbox_plugin_sdk::internal::init_tracing("info", None);
 
-    let runtime = match HostRuntime::new(plugin, plugin_meta) {
+    let runtime = match HostRuntime::new(plugin, plugin_meta, &[]) {
         Ok(r) => r,
         Err(e) => {
             set_last_error(&format!("failed to create host runtime: {e}"));
@@ -323,9 +320,7 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         auto_collect_external_logs,
     };
 
-    // `plugin_meta` comes from C++ but we no longer pass it to `with_config`
-    // (the SDK's `with_config` takes only plugin + config). Keep it alive to
-    // ensure its `&'static str` strings aren't dropped mid-run.
+    // Keep plugin_meta alive to prevent its `&'static str` strings from being dropped.
     let _meta_keepalive = plugin_meta;
 
     let runtime = GuestRuntime::with_config(plugin, rt_config).with_log_bus(log_bus);
@@ -602,7 +597,7 @@ mod tests {
         let result = unsafe { convert_meta(meta) };
         assert!(result.is_ok());
         let plugin_meta = result.unwrap();
-        assert!(plugin_meta.description.is_empty());
-        assert_eq!(plugin_meta.name, "plugin");
+        assert!(plugin_meta.description().is_empty());
+        assert_eq!(plugin_meta.name(), "plugin");
     }
 }

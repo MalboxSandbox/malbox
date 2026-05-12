@@ -10,8 +10,8 @@ use std::ffi::CString;
 
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::error::{Result, SdkError};
+use malbox_plugin_sdk::health::HealthStatus;
 use malbox_plugin_sdk::plugin::{HostPlugin, Plugin};
-use malbox_plugin_sdk::types::HealthStatus;
 use malbox_plugin_transport::messages::events::Event;
 
 use crate::error::last_error_string;
@@ -186,10 +186,11 @@ impl HostPlugin for VtablePlugin {
             None => return Ok(()),
         };
 
-        let c_event = rust_event_to_c(&event);
+        let owned = rust_event_to_c(&event);
 
-        // SAFETY: c_event is a Copy value.
-        let rc = unsafe { on_event(self.vtable.plugin_ptr, c_event) };
+        // SAFETY: owned.event is Copy; the OwnedCEvent keeps any backing
+        // CStrings alive until after the callback returns.
+        let rc = unsafe { on_event(self.vtable.plugin_ptr, owned.event) };
         check_rc(rc)
     }
 }
@@ -264,9 +265,8 @@ mod tests {
         plugin.on_task(&ctx).expect("on_task should succeed");
 
         assert!(ON_TASK_CALLED.load(Ordering::SeqCst));
-        let received = rx.try_recv().expect("one result expected");
-        let task_result = received.expect("should be Ok");
-        assert_eq!(task_result.result_name, "result");
+        let msg = rx.try_recv().expect("one result expected");
+        assert_eq!(msg.result_name, "result");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -78,6 +79,20 @@ public:
     /// Emit a flat event back to the daemon.
     void emit_event(const Event& event) const {
         detail::check_rc(malbox_context_emit_event(ptr_, event.to_c()));
+    }
+
+    /// Mark a file path as already collected so auto-collection skips it.
+    ///
+    /// Call this when your plugin reads a file from the artifacts directory
+    /// and sends its own processed version as a result. Without this, the
+    /// auto-collector would send the raw file as a duplicate.
+    void mark_collected(const char* path) const {
+        detail::check_rc(malbox_context_mark_collected(ptr_, path));
+    }
+
+    /// Mark a file path as already collected so auto-collection skips it.
+    void mark_collected(const std::filesystem::path& path) const {
+        mark_collected(path.c_str());
     }
 
     /// Get the raw opaque pointer (for advanced use).

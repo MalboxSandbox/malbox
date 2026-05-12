@@ -19,7 +19,7 @@
  * this value whenever the vtable layout or calling convention changes in a
  * backward-incompatible way.
  */
-#define MALBOX_ABI_VERSION 6
+#define MALBOX_ABI_VERSION 7
 
 /**
  * Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
@@ -36,7 +36,7 @@ enum MalboxEventTag
     MALBOX_EVENT_TAG_TASK_CANCELED = 4,
     MALBOX_EVENT_TAG_PLUGIN_STARTED = 5,
     MALBOX_EVENT_TAG_PLUGIN_STOPPED = 6,
-    MALBOX_EVENT_TAG_PLUGIN_RESULT_PRODUCED = 7,
+    MALBOX_EVENT_TAG_PLUGIN_RESULT_AVAILABLE = 7,
     MALBOX_EVENT_TAG_SAMPLE_STARTED = 8,
     MALBOX_EVENT_TAG_SAMPLE_STOPPED = 9,
     MALBOX_EVENT_TAG_SAMPLE_RESULT_PRODUCED = 10,
@@ -128,10 +128,16 @@ typedef struct MalboxResultBuilder MalboxResultBuilder;
  * - Plugin events: `id` is the `plugin_id`.
  * - Sample events: `id` is the `sample_id`.
  * - Daemon events: `id` is unused (set to `0`).
+ *
+ * For `PluginResultAvailable` events, `source` and `result_name` point to
+ * null-terminated strings identifying which plugin produced the result and
+ * the result's name. Both are null for all other event types.
  */
 typedef struct MalboxEvent {
     MalboxEventTag tag;
     int32_t id;
+    const char *source;
+    const char *result_name;
 } MalboxEvent;
 
 /**
@@ -411,6 +417,23 @@ int32_t malbox_context_emit_event(const struct MalboxContext *ctx, struct Malbox
  * - `message` must point to a valid null-terminated C string.
  */
 int32_t malbox_context_warn(const struct MalboxContext *ctx, const char *message);
+
+/**
+ * Mark a file path as already collected so auto-collection skips it.
+ *
+ * Call this when your plugin reads a file from the artifacts directory and
+ * sends its own processed version as a result. Without this, the
+ * auto-collector would send the raw file as a duplicate.
+ *
+ * Returns `0` on success, `-1` on failure (last error is set).
+ *
+ * # Safety
+ *
+ * - `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, as
+ *   provided by the runtime to plugin callbacks.
+ * - `path` must point to a valid null-terminated C string.
+ */
+int32_t malbox_context_mark_collected(const struct MalboxContext *ctx, const char *path);
 
 /**
  * Flush a batch of results to the daemon immediately during on_task.

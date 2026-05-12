@@ -10,7 +10,7 @@ use crate::ffi_events::MalboxEvent;
 /// vtables whose `abi_version` field does not equal this constant.  Increment
 /// this value whenever the vtable layout or calling convention changes in a
 /// backward-incompatible way.
-pub const MALBOX_ABI_VERSION: u32 = 6;
+pub const MALBOX_ABI_VERSION: u32 = 7;
 
 /// Opaque handle representing a [`malbox_plugin_sdk::context::Context`].
 ///
