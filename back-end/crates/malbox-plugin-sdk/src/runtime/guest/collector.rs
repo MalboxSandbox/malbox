@@ -5,7 +5,7 @@
 //! explicitly sent (or marked as collected) by the plugin.
 
 use crate::context::Context;
-use crate::types::PluginResult;
+use crate::result::PluginResult;
 use globset::{Glob, GlobSetBuilder};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
