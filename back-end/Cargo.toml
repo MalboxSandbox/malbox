@@ -10,6 +10,8 @@ exclude = [
     "examples/plugins/guest-exec-checker",
     "examples/plugins/host-event-reactor",
     "examples/plugins/host-string-extractor",
+    "examples/plugins/host-result-chain",
+    "examples/plugins/host-report-showcase",
     "xtask",
 ]
 [workspace.dependencies]

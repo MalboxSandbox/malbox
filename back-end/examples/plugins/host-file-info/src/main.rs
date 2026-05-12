@@ -16,22 +16,23 @@ struct FileInfo {
 impl FileInfoPlugin {
     #[malbox::on_start]
     fn init(&self) -> Result<()> {
-        info!("FileInfo plugin ready — waiting for tasks");
+        info!("FileInfo plugin ready");
         Ok(())
     }
 
     #[malbox::on_task]
-    fn process(&self, task: Task, ctx: &Context) -> Result<()> {
-        let sample = task.sample_bytes()?;
+    fn process(&self, ctx: &Context) -> Result<()> {
+        let sample = ctx.task().sample_bytes()?;
 
-        ctx.emit_progress(0.5, "computing hash")?;
+        ctx.progress(0.5, "computing hash")?;
 
         let hash = hex_sha256(&sample);
         let size = sample.len();
 
-        info!(task_id = task.id(), %hash, size, "Computed file info");
+        info!(task_id = ctx.task().id(), %hash, size, "Computed file info");
 
-        ctx.push_result(PluginResult::json("file_info", &FileInfo { hash, size })?)?;
+        ctx.results()
+            .push(PluginResult::json("file_info", &FileInfo { hash, size })?)?;
         Ok(())
     }
 }

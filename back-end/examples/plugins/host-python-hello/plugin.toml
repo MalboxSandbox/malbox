@@ -1,0 +1,11 @@
+[plugin]
+name = "host-python-hello"
+version = "0.1.0"
+description = "Example Python host plugin demonstrating the SDK"
+authors = ["Malbox Team"]
+type = "host"
+binary = "main.py"
+
+[runtime]
+state = "persistent"
+execution = "parallel"

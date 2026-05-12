@@ -1,0 +1,26 @@
+[plugin]
+name = "host-report-showcase"
+version = "0.1.0"
+description = "Exercises every report block type with rich data for visual testing"
+authors = ["Malbox Team"]
+type = "host"
+
+[runtime]
+state = "ephemeral"
+execution = "parallel"
+
+[results.report]
+description = "Comprehensive report showcasing all block types"
+user_visible = true
+display_name = "Report Showcase"
+render = "report"
+
+[results.screenshot]
+description = "Simulated screenshot artifact for image block"
+user_visible = true
+display_name = "Screenshot"
+
+[results.pcap]
+description = "Simulated pcap artifact for download block"
+user_visible = true
+display_name = "Network Capture"

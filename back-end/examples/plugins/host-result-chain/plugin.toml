@@ -1,0 +1,10 @@
+[plugin]
+name = "host-result-chain"
+version = "0.1.0"
+description = "Example host plugin demonstrating result chaining between plugins"
+authors = ["Malbox Team"]
+type = "host"
+
+[runtime]
+state = "persistent"
+execution = "parallel"

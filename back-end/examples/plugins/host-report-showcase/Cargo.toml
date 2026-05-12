@@ -1,0 +1,14 @@
+[package]
+name = "host-report-showcase"
+version = "0.1.0"
+edition = "2024"
+description = "Example host plugin exercising every report block type with rich data"
+authors = ["Malbox Team"]
+publish = false
+
+[dependencies]
+malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["host"] }
+malbox-plugin-transport = { path = "../../../crates/malbox-plugin-transport" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
