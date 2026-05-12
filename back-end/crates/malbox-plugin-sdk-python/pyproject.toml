@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.5"]
+build-backend = "maturin"
+
+[project]
+name = "malbox-plugin-sdk"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Malbox plugin SDK for Python - write host plugins in Python"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "malbox_plugin_sdk._native"

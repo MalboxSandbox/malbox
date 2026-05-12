@@ -1,0 +1,174 @@
+use malbox_plugin_sdk::context::Context;
+use malbox_plugin_sdk::result::PluginResult;
+use pyo3::prelude::*;
+use std::path::PathBuf;
+
+use super::event::PyEvent;
+use super::result::PyPluginResult;
+
+fn ctx_from_ptr(ptr: *const ()) -> PyResult<&'static Context> {
+    if ptr.is_null() {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Context is no longer valid (used outside handler scope)",
+        ));
+    }
+    // SAFETY: The pointer is valid for the duration of the handler call.
+    Ok(unsafe { &*(ptr as *const Context) })
+}
+
+// ─── TaskInfo ──────────────────────────────────────────────────────────────
+
+#[pyclass(name = "TaskInfo", module = "malbox_plugin_sdk")]
+pub struct PyTaskInfo {
+    ptr: *const (),
+}
+
+unsafe impl Send for PyTaskInfo {}
+unsafe impl Sync for PyTaskInfo {}
+
+#[pymethods]
+impl PyTaskInfo {
+    #[getter]
+    fn id(&self) -> PyResult<i32> {
+        Ok(ctx_from_ptr(self.ptr)?.task().id())
+    }
+
+    #[getter]
+    fn sample_path(&self) -> PyResult<PathBuf> {
+        Ok(ctx_from_ptr(self.ptr)?.task().sample_path().to_path_buf())
+    }
+
+    #[getter]
+    fn config(&self) -> PyResult<std::collections::HashMap<String, String>> {
+        Ok(ctx_from_ptr(self.ptr)?.task().config().clone())
+    }
+
+    fn sample_bytes(&self) -> PyResult<Vec<u8>> {
+        ctx_from_ptr(self.ptr)?
+            .task()
+            .sample_bytes()
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
+    }
+
+    fn config_value(&self, key: &str) -> PyResult<Option<String>> {
+        Ok(ctx_from_ptr(self.ptr)?
+            .task()
+            .config_value(key)
+            .map(String::from))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        let id = ctx_from_ptr(self.ptr)?.task().id();
+        Ok(format!("TaskInfo(id={id})"))
+    }
+}
+
+// ─── ResultSink ────────────────────────────────────────────────────────────
+
+#[pyclass(name = "ResultSink", module = "malbox_plugin_sdk")]
+pub struct PyResultSink {
+    ptr: *const (),
+}
+
+unsafe impl Send for PyResultSink {}
+unsafe impl Sync for PyResultSink {}
+
+#[pymethods]
+impl PyResultSink {
+    fn push(&self, result: Bound<'_, PyPluginResult>) -> PyResult<()> {
+        let inner = std::mem::replace(
+            &mut result.borrow_mut().inner,
+            PluginResult::bytes("", vec![]),
+        );
+        ctx_from_ptr(self.ptr)?
+            .results()
+            .push(inner)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn push_json(&self, name: &str, data: &[u8]) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .results()
+            .push_json(name, data)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn push_bytes(&self, name: &str, data: &[u8]) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .results()
+            .push_bytes(name, data)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn push_file(&self, name: &str, path: PathBuf) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .results()
+            .push_file(name, &path)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn push_all(&self, results: Vec<Bound<'_, PyPluginResult>>) -> PyResult<()> {
+        let inner: Vec<PluginResult> = results
+            .into_iter()
+            .map(|r| std::mem::replace(&mut r.borrow_mut().inner, PluginResult::bytes("", vec![])))
+            .collect();
+        ctx_from_ptr(self.ptr)?
+            .results()
+            .push_all(inner)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+}
+
+// ─── Context ───────────────────────────────────────────────────────────────
+
+#[pyclass(name = "Context", module = "malbox_plugin_sdk")]
+pub struct PyContext {
+    ptr: *const (),
+}
+
+unsafe impl Send for PyContext {}
+unsafe impl Sync for PyContext {}
+
+impl PyContext {
+    /// # Safety
+    /// The caller must ensure the Context outlives this PyContext.
+    pub(crate) unsafe fn from_ref(ctx: &Context) -> Self {
+        Self {
+            ptr: ctx as *const Context as *const (),
+        }
+    }
+}
+
+#[pymethods]
+impl PyContext {
+    fn task(&self) -> PyTaskInfo {
+        PyTaskInfo { ptr: self.ptr }
+    }
+
+    fn results(&self) -> PyResultSink {
+        PyResultSink { ptr: self.ptr }
+    }
+
+    fn progress(&self, pct: f64, message: &str) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .progress(pct, message)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn emit_event(&self, event: PyEvent) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .emit_event(event.inner)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn warn(&self, message: &str) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?
+            .warn(message)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn mark_collected(&self, path: PathBuf) -> PyResult<()> {
+        ctx_from_ptr(self.ptr)?.mark_collected(path);
+        Ok(())
+    }
+}
