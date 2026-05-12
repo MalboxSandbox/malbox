@@ -68,6 +68,8 @@ enum TaskOutcome {
     TimedOut { analysis_secs: u64 },
     /// The task was canceled because the worker received a shutdown signal.
     Cancelled,
+    /// One or more plugins failed during execution.
+    PluginsFailed,
 }
 
 /// Unique identifier for a worker instance.
@@ -279,6 +281,20 @@ impl Worker {
                         })
                         .await;
                 }
+                Ok(TaskOutcome::PluginsFailed) => {
+                    error!(worker_id = %self.id, task_id, duration = ?duration, "Task failed due to plugin errors");
+                    let _ = self
+                        .event_tx
+                        .send(WorkerEvent::JobCompleted {
+                            worker_id: self.id.clone(),
+                            job_result: Err(SchedulerError::Internal(format!(
+                                "Task {} failed: one or more plugins encountered errors",
+                                task_id
+                            ))),
+                            duration,
+                        })
+                        .await;
+                }
                 Ok(TaskOutcome::Cancelled) => {
                     info!(worker_id = %self.id, task_id, duration = ?duration, "Task cancelled due to shutdown");
                     let _ = self
@@ -359,6 +375,16 @@ impl Worker {
                         .await
                     {
                         error!(task_id, error = %e, "Failed to update task state to Failed after timeout");
+                    }
+                    self.emit_task_event(Event::TaskFailed { task_id });
+                }
+                Ok(TaskOutcome::PluginsFailed) => {
+                    if let Err(e) = self
+                        .task_store
+                        .update_task_state(task_id, TaskState::Failed)
+                        .await
+                    {
+                        error!(task_id, error = %e, "Failed to update task state to Failed after plugin errors");
                     }
                     self.emit_task_event(Event::TaskFailed { task_id });
                 }
@@ -485,6 +511,16 @@ impl Worker {
                     .await
                 {
                     error!(task_id, error = %e, "Failed to update task state to Failed after timeout");
+                }
+                self.emit_task_event(Event::TaskFailed { task_id });
+            }
+            Ok(TaskOutcome::PluginsFailed) => {
+                if let Err(e) = self
+                    .task_store
+                    .update_task_state(task_id, TaskState::Failed)
+                    .await
+                {
+                    error!(task_id, error = %e, "Failed to update task state to Failed after plugin errors");
                 }
                 self.emit_task_event(Event::TaskFailed { task_id });
             }
@@ -745,6 +781,7 @@ impl Worker {
         // always properly released.
         let analysis_timeout = Duration::from_secs(analysis_secs);
         let mut cancelled = false;
+        let mut has_plugin_failure = false;
 
         let timed_out = tokio::time::timeout(analysis_timeout, async {
             for entry in snapshot.list() {
@@ -754,7 +791,7 @@ impl Worker {
                 }
 
                 let plugin_id = &entry.id;
-                async {
+                let plugin_ok = async {
                     if entry.manifest.plugin.plugin_type
                         == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
                         && !snapshot_guest_plugins
@@ -766,7 +803,7 @@ impl Worker {
                             plugin = plugin_id.as_str(),
                             "Skipping guest plugin not in active snapshot"
                         );
-                        return;
+                        return true;
                     }
 
                     match self.plugin_manager.acquire(plugin_id).await {
@@ -778,7 +815,7 @@ impl Worker {
                                 "analysis_timeout".to_string(),
                                 plugin_timeout_secs.to_string(),
                             );
-                            match handle.execute_task(task_id, &task.target, config).await {
+                            let ok = match handle.execute_task(task_id, &task.target, config).await {
                                 Ok(outputs) => {
                                     info!(
                                         task_id,
@@ -852,20 +889,27 @@ impl Worker {
                                             }
                                         }
                                     }
+                                    true
                                 }
                                 Err(e) => {
                                     error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
+                                    false
                                 }
-                            }
+                            };
                             handle.release().await;
+                            ok
                         }
                         Err(e) => {
                             warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                            false
                         }
                     }
                 }
                 .instrument(debug_span!("plugin.execute", plugin = %plugin_id))
                 .await;
+                if !plugin_ok {
+                    has_plugin_failure = true;
+                }
             }
         })
         .await
@@ -879,6 +923,10 @@ impl Worker {
         if timed_out {
             warn!(task_id, analysis_secs, "Analysis phase timed out");
             return Ok(TaskOutcome::TimedOut { analysis_secs });
+        }
+
+        if has_plugin_failure {
+            return Ok(TaskOutcome::PluginsFailed);
         }
 
         Ok(TaskOutcome::Completed)
@@ -912,6 +960,24 @@ impl Worker {
             .update_task_state(task_id, TaskState::Running)
             .await?;
 
+        // Resolve the on-disk sample path so host plugins can read the file.
+        let sample_path = if let Some(sample_id) = task.sample_id {
+            let sample = fetch_sample_by_id(self.task_store.pool(), sample_id)
+                .await
+                .map_err(|e| {
+                    SchedulerError::Internal(format!("Failed to fetch sample {}: {}", sample_id, e))
+                })?
+                .ok_or_else(|| {
+                    SchedulerError::Internal(format!("Sample {} not found in database", sample_id))
+                })?;
+            let path = self.sample_store.path(&sample.sha256).map_err(|e| {
+                SchedulerError::Internal(format!("Failed to resolve sample path: {}", e))
+            })?;
+            path.to_string_lossy().to_string()
+        } else {
+            task.target.clone()
+        };
+
         let plugin_timeout_secs = if task.timeout > 0 {
             task.timeout as u64
         } else {
@@ -923,6 +989,7 @@ impl Worker {
         let snapshot = self.plugin_manager.registry().snapshot();
 
         let mut cancelled = false;
+        let mut has_plugin_failure = false;
 
         let timed_out = tokio::time::timeout(analysis_timeout, async {
             for plugin_name in &task.plugins {
@@ -934,7 +1001,7 @@ impl Worker {
                 let plugin_id =
                     malbox_plugin_internal::registry::types::PluginId::new(plugin_name);
 
-                async {
+                let plugin_ok = async {
                     let entry = match snapshot.get(&plugin_id) {
                         Some(e) => e,
                         None => {
@@ -943,7 +1010,7 @@ impl Worker {
                                 plugin = plugin_name.as_str(),
                                 "Plugin not found in registry, skipping"
                             );
-                            return;
+                            return false;
                         }
                     };
 
@@ -955,7 +1022,7 @@ impl Worker {
                             plugin = plugin_name.as_str(),
                             "Skipping guest plugin in host-only task"
                         );
-                        return;
+                        return true;
                     }
 
                     match self.plugin_manager.acquire(&plugin_id).await {
@@ -967,7 +1034,7 @@ impl Worker {
                                 "analysis_timeout".to_string(),
                                 plugin_budget.to_string(),
                             );
-                            match handle.execute_task(task_id, &task.target, config).await {
+                            let ok = match handle.execute_task(task_id, &sample_path, config).await {
                                 Ok(outputs) => {
                                     info!(
                                         task_id,
@@ -1041,20 +1108,27 @@ impl Worker {
                                             }
                                         }
                                     }
+                                    true
                                 }
                                 Err(e) => {
                                     error!(task_id, plugin = plugin_name.as_str(), error = %e, "Plugin execution failed");
+                                    false
                                 }
-                            }
+                            };
                             handle.release().await;
+                            ok
                         }
                         Err(e) => {
                             warn!(task_id, plugin = plugin_name.as_str(), error = %e, "Failed to acquire plugin");
+                            false
                         }
                     }
                 }
                 .instrument(debug_span!("plugin.execute", plugin = %plugin_name))
                 .await;
+                if !plugin_ok {
+                    has_plugin_failure = true;
+                }
             }
         })
         .await
@@ -1068,6 +1142,10 @@ impl Worker {
         if timed_out {
             warn!(task_id, analysis_secs, "Host-only analysis phase timed out");
             return Ok(TaskOutcome::TimedOut { analysis_secs });
+        }
+
+        if has_plugin_failure {
+            return Ok(TaskOutcome::PluginsFailed);
         }
 
         Ok(TaskOutcome::Completed)
