@@ -21,10 +21,15 @@ use serde::{Deserialize, Serialize};
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogLevel {
+    /// Verbose trace-level output (usually disabled in production).
     Trace = 0,
+    /// Diagnostic messages for development.
     Debug = 1,
+    /// Normal operational events.
     Info = 2,
+    /// Something unexpected but recoverable.
     Warn = 3,
+    /// A failure that needs attention.
     Error = 4,
 }
 
@@ -43,10 +48,15 @@ impl From<&tracing::Level> for LogLevel {
 /// A single captured log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
+    /// Nanosecond timestamp (monotonic clock, relative to process start).
     pub timestamp_ns: u64,
+    /// Severity level.
     pub level: LogLevel,
+    /// The tracing target (usually the module path).
     pub target: String,
+    /// The formatted log message.
     pub message: String,
+    /// Structured key-value fields attached to the tracing event.
     pub fields: HashMap<String, String>,
 }
 
@@ -104,13 +114,12 @@ impl LogBus {
     /// Push a log entry into the bus. Drops the oldest entry if at capacity.
     /// No-op if the bus is closed.
     pub fn push(&self, entry: LogEntry) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.closed {
             return;
         }
         if inner.buffer.len() >= inner.capacity {
-            // Evict the oldest entry. Spill to overflow file if configured;
-            // otherwise drop (legacy behavior).
+            // Evict the oldest entry. Spill to overflow file if configured.
             let evicted = inner.buffer.pop_front().unwrap();
             if inner.overflow_path.is_some()
                 && let Err(e) = write_overflow(&mut inner, &evicted)
@@ -128,7 +137,7 @@ impl LogBus {
 
     /// Drain all buffered entries and return them.
     pub fn drain(&self) -> Vec<LogEntry> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.buffer.drain(..).collect()
     }
 
@@ -136,7 +145,7 @@ impl LogBus {
     /// returning all entries in strict chronological order. The overflow
     /// file is truncated/removed after a successful drain.
     pub fn drain_atomic(&self) -> Vec<LogEntry> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         // 1. Flush the BufWriter so the file reflects the full producer state.
         if let Some(ref mut w) = inner.overflow_writer {
@@ -179,7 +188,7 @@ impl LogBus {
     pub async fn recv_atomic(&self) -> Vec<LogEntry> {
         loop {
             {
-                let inner = self.inner.lock().unwrap();
+                let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 let has_ring = !inner.buffer.is_empty();
                 let has_overflow = inner
                     .overflow_path
@@ -203,7 +212,7 @@ impl LogBus {
     pub async fn recv(&self) -> Option<LogEntry> {
         loop {
             {
-                let mut inner = self.inner.lock().unwrap();
+                let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(entry) = inner.buffer.pop_front() {
                     return Some(entry);
                 }
@@ -217,7 +226,7 @@ impl LogBus {
 
     /// Mark the bus as closed and wake all waiters.
     pub fn close(&self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.closed = true;
         drop(inner);
         self.notify.notify_waiters();
@@ -232,10 +241,10 @@ impl LogBus {
 fn write_overflow(inner: &mut LogBusInner, entry: &LogEntry) -> std::io::Result<()> {
     let path = inner
         .overflow_path
-        .clone()
+        .as_ref()
         .expect("overflow_path must be set");
     if inner.overflow_writer.is_none() {
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
         inner.overflow_writer = Some(BufWriter::new(file));
     }
     let writer = inner.overflow_writer.as_mut().unwrap();
@@ -367,8 +376,7 @@ mod tests {
 
     #[test]
     fn log_bus_without_overflow_path_drops_under_pressure() {
-        // Default constructor keeps legacy drop-oldest behavior, so existing
-        // callers are unaffected by the overflow refactor.
+        // Without overflow, the bus drops the oldest entries under pressure.
         let bus = LogBus::new(2);
         for i in 0..5 {
             bus.push(make_entry(&format!("msg-{i}"), LogLevel::Info));

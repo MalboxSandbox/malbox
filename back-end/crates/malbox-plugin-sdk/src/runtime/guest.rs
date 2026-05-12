@@ -17,8 +17,8 @@ mod stream;
 use collector::AutoCollectSection;
 
 use crate::error::{Result, SdkError};
-use crate::guest_plugin::GuestPlugin;
 use crate::log::LogBus;
+use crate::plugin::guest::GuestPlugin;
 use crate::stash::{ResultStash, StashConfig};
 
 use malbox_plugin_transport::grpc::proto;
@@ -36,33 +36,52 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
-/// Configuration for the guest plugin runtime.
+/// Auto-collection settings for a single directory (artifacts or external logs).
 ///
-/// Values are baked into the plugin binary at compile time (by the
-/// `#[guest_plugin]` macro, which reads them from `plugin.toml`). Paths are
-/// `&'static str` so a `const` can be constructed at macro expansion time.
-/// Compile-time auto-collection settings for a single directory.
+/// These values are baked into the plugin binary at compile time by the
+/// `#[guest_plugin]` macro, which reads them from `plugin.toml`.
 #[derive(Debug, Clone, Copy)]
 pub struct AutoCollectRuntimeConfig {
+    /// Whether auto-collection is enabled for this directory.
     pub enabled: bool,
+    /// Glob patterns for files to include (e.g. `["**/*.log"]`).
     pub include: &'static [&'static str],
+    /// Glob patterns for files to exclude.
     pub exclude: &'static [&'static str],
+    /// Skip files larger than this (bytes). Prevents collecting huge dumps.
     pub max_file_size: u64,
 }
 
+/// Configuration for the guest plugin runtime.
+///
+/// All values are baked into the plugin binary at compile time by the
+/// `#[guest_plugin]` macro (sourced from `plugin.toml`). Paths use
+/// `&'static str` so the config can be a `const`.
 #[derive(Debug, Clone, Copy)]
 pub struct GuestRuntimeConfig {
+    /// Address the gRPC server binds to (e.g. `0.0.0.0:50100`).
     pub listen_addr: SocketAddr,
+    /// Directory where the daemon pushes sample files.
     pub sample_dir: &'static str,
+    /// Directory where plugins write artifact files for collection.
     pub artifact_dir: &'static str,
+    /// Directory used for the disk-backed result stash.
     pub stash_dir: &'static str,
+    /// Directory for log overflow files when the ring buffer is full.
     pub log_dir: &'static str,
+    /// Directory for external log files collected after analysis.
     pub external_log_dir: &'static str,
+    /// Results larger than this (bytes) are stashed to disk instead of sent inline.
     pub stash_threshold_bytes: usize,
+    /// How long (seconds) a stashed result can remain un-pulled before cleanup.
     pub stash_ttl_secs: u64,
+    /// `tracing` filter directive (e.g. `"info"` or `"my_plugin=debug"`).
     pub log_filter: &'static str,
+    /// Default analysis timeout in seconds if the daemon does not specify one.
     pub analysis_timeout: u64,
+    /// Auto-collection settings for the artifact directory.
     pub auto_collect_artifacts: AutoCollectRuntimeConfig,
+    /// Auto-collection settings for the external log directory.
     pub auto_collect_external_logs: AutoCollectRuntimeConfig,
 }
 
@@ -144,7 +163,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let plugin = self.plugin.clone();
         let (ready, reason) = tokio::task::spawn_blocking(move || {
             let status = plugin.health_check();
-            (status.ready, status.reason)
+            (status.is_ready(), status.reason().to_owned())
         })
         .await
         .unwrap_or((false, "health check panicked".to_string()));
@@ -172,7 +191,10 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         request: Request<proto::TaskRequest>,
     ) -> std::result::Result<Response<Self::ExecuteTaskStream>, Status> {
         let req = request.into_inner();
-        let (tx, rx) = mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(32);
+        let (proto_tx, proto_rx) =
+            mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(32);
+        let (result_tx, mut result_rx) =
+            mpsc::channel::<crate::context::message::TaskResultMessage>(32);
 
         let plugin = self.plugin.clone();
         let full_sample_path = if std::path::Path::new(&req.sample_path).is_relative()
@@ -190,36 +212,39 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let auto_collect_external_logs = self.auto_collect_external_logs.clone();
         let default_timeout = self.default_timeout;
 
+        // Relay: convert internal messages to proto and forward to tonic stream
+        let relay_stash = Arc::clone(&stash);
+        let relay_tx = proto_tx.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = result_rx.recv().await {
+                let proto_msg = stream::message_to_proto(msg, &relay_stash);
+                if relay_tx.send(Ok(proto_msg)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
         tokio::task::spawn_blocking(move || {
             stream::guest_linear_task(
                 plugin,
-                req.task_id,
-                full_sample_path,
-                req.config,
-                tx,
-                stash,
-                artifact_dir,
-                external_log_dir,
-                auto_collect_artifacts,
-                auto_collect_external_logs,
-                default_timeout,
+                stream::TaskExecution {
+                    task_id: req.task_id,
+                    sample_path: full_sample_path,
+                    config: req.config,
+                    result_tx,
+                    proto_tx,
+                    stash,
+                    artifact_dir,
+                    external_log_dir,
+                    auto_collect_artifacts,
+                    auto_collect_external_logs,
+                    default_timeout,
+                },
             );
         });
 
-        let stream: TaskResultStream = Box::pin(ReceiverStream::new(rx));
+        let stream: TaskResultStream = Box::pin(ReceiverStream::new(proto_rx));
         Ok(Response::new(stream))
-    }
-
-    // -- Events -----------------------------------------------------------
-
-    async fn notify_event(
-        &self,
-        _request: Request<proto::EventNotification>,
-    ) -> std::result::Result<Response<proto::EventAck>, Status> {
-        Ok(Response::new(proto::EventAck {
-            success: true,
-            error_message: String::new(),
-        }))
     }
 
     // -- File transfer ----------------------------------------------------

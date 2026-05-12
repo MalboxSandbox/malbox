@@ -1,4 +1,4 @@
-//! The `Report` envelope — a structured, frontend-renderable result.
+//! The `Report` envelope - a structured, frontend-renderable result.
 //!
 //! Plugins produce one `PluginResult::Json { name: "report", ... }` per task
 //! containing a [`Report`]. The scheduler tags that row with `role='report'`
@@ -12,11 +12,10 @@
 //!   renders generically. Unknown block types degrade to a JSON tree view on
 //!   the client, so adding new variants is never a breaking change.
 //!
-//! See `crates/malbox-plugin-sdk/src/types/report/builder.rs` for the
-//! ergonomic [`ReportBuilder`] API.
+//! See [`builder`] for the ergonomic [`ReportBuilder`] API.
 
 use crate::error::Result;
-use crate::types::PluginResult;
+use crate::result::PluginResult;
 use serde::{Deserialize, Serialize};
 
 pub mod builder;
@@ -31,30 +30,44 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// so the SDK and scheduler share the same constant without a direct dep.
 pub use malbox_plugin_transport::REPORT_RESULT_NAME;
 
-/// A plugin's structured, renderable result for a single task.
+/// A plugin's structured analysis result for a single task.
+///
+/// Reports are the primary way plugins communicate findings to the
+/// frontend. Build one with [`ReportBuilder`], then call
+/// [`Report::into_plugin_result`] to turn it into a [`PluginResult`]
+/// ready for [`ResultSink::push`](crate::context::ResultSink::push).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
+    /// Schema version for forward-compatible deserialization.
     pub schema_version: u32,
+    /// Identity of the plugin that produced this report.
     pub plugin: PluginInfo,
 
+    /// Overall verdict (classification, score, confidence, labels).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<Verdict>,
 
+    /// Indicators of compromise extracted during analysis.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub indicators: Vec<Indicator>,
 
+    /// MITRE ATT&CK techniques observed during analysis.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ttps: Vec<Ttp>,
 
+    /// References to sibling [`PluginResult`]s (files, captures, etc.).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<ArtifactRef>,
 
+    /// Short human-readable summary of the analysis findings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 
+    /// Presentation sections rendered by the frontend.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sections: Vec<Section>,
 
+    /// Escape hatch for plugin-native JSON that doesn't fit the typed schema.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
 }
@@ -67,31 +80,48 @@ impl Report {
     }
 }
 
+/// Identity of the plugin that produced a report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginInfo {
+    /// Unique plugin identifier (usually the crate name).
     pub id: String,
+    /// SemVer version of the plugin binary.
     pub version: String,
+    /// Optional human-friendly name shown in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
 
+/// The plugin's overall assessment of the analyzed sample.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Verdict {
+    /// Threat classification (clean, suspicious, malicious, unknown).
     pub classification: Classification,
+    /// Optional numeric score (0-100). Not all plugins produce a score.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<u8>,
+    /// How confident the plugin is in its classification.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<Confidence>,
+    /// Free-form tags describing the threat (e.g. `"trojan"`, `"ransomware"`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
 }
 
+/// Threat classification assigned by a plugin's verdict.
+///
+/// When multiple plugins produce verdicts, the daemon aggregates them
+/// using [`Classification::severity`] - worst wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Classification {
+    /// The sample appears safe.
     Clean,
+    /// The sample shows potentially harmful behavior but is not conclusive.
     Suspicious,
+    /// The sample is confirmed malicious.
     Malicious,
+    /// The plugin could not determine a classification.
     Unknown,
 }
 
@@ -107,11 +137,15 @@ impl Classification {
     }
 }
 
+/// How confident a plugin is in its [`Classification`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
+    /// The classification is speculative or based on weak signals.
     Low,
+    /// The classification is likely correct but not certain.
     Medium,
+    /// The classification is highly reliable (strong signature match, etc.).
     High,
 }
 
@@ -121,10 +155,14 @@ pub enum Confidence {
 /// `email`, `mutex`, `registry`, `filepath`, `yara_rule`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Indicator {
+    /// IOC type (e.g. `"sha256"`, `"ipv4"`, `"domain"`, `"mutex"`).
     pub kind: String,
+    /// The indicator value itself (a hash, IP, URL, etc.).
     pub value: String,
+    /// Optional context describing where or how this IOC was observed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    /// Optional ISO-8601 timestamp of when the IOC was first seen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_seen: Option<String>,
 }
@@ -133,27 +171,38 @@ pub struct Indicator {
 /// (or `T####.###` for sub-techniques) form.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Ttp {
+    /// Technique ID in `T####` or `T####.###` form.
     pub id: String,
+    /// Human-readable technique name (e.g. `"Process Injection"`).
     pub name: String,
+    /// Optional free-text evidence supporting this observation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
 }
 
 /// A reference to a sibling `PluginResult` produced by the same plugin in
-/// the same task — used by `Block::Image` / `Block::Download` to resolve
+/// the same task - used by `Block::Image` / `Block::Download` to resolve
 /// artifact URLs on the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactRef {
+    /// Name of the sibling [`PluginResult`] this references.
     pub result_name: String,
+    /// Artifact type (e.g. `"pcap"`, `"screenshot"`, `"memdump"`).
     pub kind: String,
+    /// Optional human-readable description of the artifact.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
+/// A named section in the report's presentation layer. Each section
+/// has a title and a list of renderable [`Block`]s.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
+    /// Machine-readable section identifier (used for anchoring/linking).
     pub id: String,
+    /// Human-readable section title shown in the frontend.
     pub title: String,
+    /// Ordered list of content blocks rendered inside this section.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocks: Vec<Block>,
 }
@@ -163,21 +212,17 @@ pub struct Section {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Block {
-    Markdown {
-        text: String,
-    },
-    Callout {
-        level: CalloutLevel,
-        text: String,
-    },
-    Heading {
-        level: u8,
-        text: String,
-    },
+    /// Rendered markdown text.
+    Markdown { text: String },
+    /// Highlighted message box (info, success, warning, or error).
+    Callout { level: CalloutLevel, text: String },
+    /// Section heading. `level` maps to HTML heading levels (1-6).
+    Heading { level: u8, text: String },
+    /// Horizontal rule separating content.
     Divider,
-    Kv {
-        pairs: Vec<KvPair>,
-    },
+    /// Key-value pairs displayed as a definition list.
+    Kv { pairs: Vec<KvPair> },
+    /// Tabular data with typed columns and JSON rows.
     Table {
         columns: Vec<Column>,
         rows: Vec<serde_json::Value>,
@@ -186,69 +231,77 @@ pub enum Block {
         #[serde(default)]
         searchable: bool,
     },
-    Code {
-        language: String,
-        text: String,
-    },
+    /// Syntax-highlighted source code.
+    Code { language: String, text: String },
+    /// Interactive JSON tree viewer.
     Json {
         data: serde_json::Value,
         #[serde(default)]
         collapsed: bool,
     },
+    /// Hex dump of binary data. `bytes_b64` is base64-encoded.
     Hex {
         bytes_b64: String,
         #[serde(default)]
         offset: u64,
     },
+    /// Inline image resolved from a sibling artifact result.
     Image {
         artifact: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         caption: Option<String>,
     },
-    Download {
-        artifact: String,
-        label: String,
-    },
-    Iocs {
-        items: Vec<Indicator>,
-    },
-    Ttps {
-        items: Vec<Ttp>,
-    },
-    Tree {
-        nodes: Vec<TreeNode>,
-    },
-    Timeline {
-        events: Vec<TimelineEvent>,
-    },
+    /// Download link resolved from a sibling artifact result.
+    Download { artifact: String, label: String },
+    /// Formatted list of indicators of compromise.
+    Iocs { items: Vec<Indicator> },
+    /// Formatted list of MITRE ATT&CK techniques.
+    Ttps { items: Vec<Ttp> },
+    /// Collapsible tree structure (e.g. process trees, file hierarchies).
+    Tree { nodes: Vec<TreeNode> },
+    /// Chronological event timeline.
+    Timeline { events: Vec<TimelineEvent> },
+    /// Node-and-edge graph (e.g. network connections, call graphs).
     Graph {
         nodes: Vec<GraphNode>,
         edges: Vec<GraphEdge>,
     },
 }
 
+/// Severity level for a [`Block::Callout`], controlling its color and icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CalloutLevel {
+    /// Neutral informational message.
     Info,
+    /// Positive confirmation.
     Success,
+    /// Something that deserves attention but is not an error.
     Warn,
+    /// A problem that needs action.
     Error,
 }
 
+/// A single key-value pair for [`Block::Kv`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KvPair {
+    /// Label shown on the left.
     pub key: String,
+    /// Content shown on the right.
     pub value: String,
+    /// Render the value in a monospace font (useful for hashes, paths, etc.).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mono: bool,
 }
 
+/// Column definition for a [`Block::Table`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
+    /// JSON key used to look up this column's value in each row object.
     pub key: String,
+    /// Human-readable column header.
     pub label: String,
-    /// Hint for rendering: `"string"`, `"number"`, `"bool"`, `"datetime"`, ...
+    /// Rendering type hint: `"string"`, `"number"`, `"bool"`, `"datetime"`, etc.
     #[serde(default = "default_column_type")]
     pub r#type: String,
 }
@@ -257,37 +310,54 @@ fn default_column_type() -> String {
     "string".to_string()
 }
 
+/// A node in a [`Block::Tree`] (e.g. a process or directory entry).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeNode {
+    /// Display text for this node.
     pub label: String,
+    /// Child nodes rendered nested beneath this one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<TreeNode>,
+    /// Arbitrary metadata shown in a tooltip or detail pane.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub meta: serde_json::Value,
 }
 
+/// A single event on a [`Block::Timeline`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineEvent {
+    /// Timestamp string (ISO-8601 or relative offset).
     pub ts: String,
+    /// Short description of the event.
     pub label: String,
+    /// Optional severity hint for color-coding (e.g. `"high"`, `"low"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
+    /// Arbitrary metadata shown on click or hover.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub meta: serde_json::Value,
 }
 
+/// A node in a [`Block::Graph`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
+    /// Unique identifier referenced by [`GraphEdge::from`] and [`GraphEdge::to`].
     pub id: String,
+    /// Display label for this node.
     pub label: String,
+    /// Arbitrary metadata shown on click or hover.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub meta: serde_json::Value,
 }
 
+/// A directed edge in a [`Block::Graph`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphEdge {
+    /// Source [`GraphNode::id`].
     pub from: String,
+    /// Target [`GraphNode::id`].
     pub to: String,
+    /// Optional label shown on the edge (e.g. `"connects to"`, `"spawns"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }

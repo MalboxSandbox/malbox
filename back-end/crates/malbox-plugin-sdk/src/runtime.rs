@@ -3,12 +3,12 @@
 //!
 //! Two runtimes are provided:
 //!
-//! - [`guest`] — gRPC server runtime for plugins running inside a VM.
+//! - [`guest`] - gRPC server runtime for plugins running inside a VM.
 //!   Gated behind the `guest` feature.
-//! - [`host`] — iceoryx2 IPC runtime for plugins running on the daemon host.
+//! - [`host`] - iceoryx2 IPC runtime for plugins running on the daemon host.
 //!   Gated behind the `host` feature.
 //!
-//! Plugin authors don't usually need to import from this module — the
+//! Plugin authors don't usually need to import from this module - the
 //! `#[malbox::host_plugin]` and `#[malbox::guest_plugin]` macros generate
 //! a `fn main()` that constructs the appropriate runtime.
 

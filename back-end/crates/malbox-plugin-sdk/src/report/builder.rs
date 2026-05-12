@@ -1,7 +1,9 @@
-//! Ergonomic builder for the [`Report`] envelope.
+//! Fluent builder API for constructing [`Report`]s.
 //!
-//! See the module-level docs on `super` for the envelope semantics. This
-//! module is purely about a fluent construction API so `on_task` stays tight.
+//! Use [`ReportBuilder`] to assemble a report from its parts and
+//! [`SectionBuilder`] (via [`ReportBuilder::section`]) to add presentation
+//! blocks. See the parent [`report`](super) module for how the envelope
+//! is structured.
 
 use super::{
     ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, GraphEdge, GraphNode,
@@ -12,6 +14,7 @@ use super::{
 // ---------- Small constructors on the leaf types ----------
 
 impl Indicator {
+    /// Create an indicator with a type and value (e.g. `"sha256"`, `"abcd1234..."`).
     pub fn new(kind: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
@@ -20,10 +23,12 @@ impl Indicator {
             first_seen: None,
         }
     }
+    /// Attach context describing where this IOC was observed.
     pub fn context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
         self
     }
+    /// Set the timestamp when this IOC was first observed.
     pub fn first_seen(mut self, ts: impl Into<String>) -> Self {
         self.first_seen = Some(ts.into());
         self
@@ -31,6 +36,7 @@ impl Indicator {
 }
 
 impl Ttp {
+    /// Create a TTP with a MITRE ATT&CK ID and name.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -38,6 +44,7 @@ impl Ttp {
             evidence: None,
         }
     }
+    /// Attach free-text evidence supporting this observation.
     pub fn evidence(mut self, ev: impl Into<String>) -> Self {
         self.evidence = Some(ev.into());
         self
@@ -45,6 +52,7 @@ impl Ttp {
 }
 
 impl ArtifactRef {
+    /// Create a reference to a sibling result by name and artifact type.
     pub fn new(result_name: impl Into<String>, kind: impl Into<String>) -> Self {
         Self {
             result_name: result_name.into(),
@@ -52,6 +60,7 @@ impl ArtifactRef {
             description: None,
         }
     }
+    /// Add a human-readable description of the artifact.
     pub fn description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
         self
@@ -63,6 +72,7 @@ impl ArtifactRef {
 /// Fluent builder for a [`Report`]. Finalise with [`ReportBuilder::build`].
 pub struct ReportBuilder {
     report: Report,
+    pending_labels: Vec<String>,
 }
 
 impl ReportBuilder {
@@ -85,21 +95,24 @@ impl ReportBuilder {
                 sections: Vec::new(),
                 raw: None,
             },
+            pending_labels: Vec::new(),
         }
     }
 
+    /// Set a human-friendly plugin name for the frontend (e.g. `"YARA Scanner"`).
     pub fn display_name(mut self, name: impl Into<String>) -> Self {
         self.report.plugin.display_name = Some(name.into());
         self
     }
 
+    /// Set a short summary shown at the top of the report.
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
         self.report.summary = Some(summary.into());
         self
     }
 
     /// Set the verdict. `score` is optional (pass `None` when the plugin
-    /// has no numeric score).
+    /// has no numeric score). Can be called before or after [`labels`](Self::labels).
     pub fn verdict(
         mut self,
         classification: Classification,
@@ -110,48 +123,43 @@ impl ReportBuilder {
             classification,
             score,
             confidence,
-            labels: self.report.verdict.map(|v| v.labels).unwrap_or_default(),
+            labels: Vec::new(),
         });
         self
     }
 
+    /// Append labels to the verdict. Can be called before or after
+    /// [`verdict`](Self::verdict) - labels are merged at [`build`](Self::build) time.
     pub fn labels<I, S>(mut self, labels: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let labels: Vec<String> = labels.into_iter().map(Into::into).collect();
-        match &mut self.report.verdict {
-            Some(v) => v.labels.extend(labels),
-            None => {
-                self.report.verdict = Some(Verdict {
-                    classification: Classification::Unknown,
-                    score: None,
-                    confidence: None,
-                    labels,
-                });
-            }
-        }
+        self.pending_labels
+            .extend(labels.into_iter().map(Into::into));
         self
     }
 
+    /// Add an indicator of compromise to the report's semantic layer.
     pub fn indicator(mut self, ind: Indicator) -> Self {
         self.report.indicators.push(ind);
         self
     }
 
+    /// Add a MITRE ATT&CK technique observation.
     pub fn ttp(mut self, ttp: Ttp) -> Self {
         self.report.ttps.push(ttp);
         self
     }
 
+    /// Register a sibling [`PluginResult`](crate::result::PluginResult) as an artifact.
     pub fn artifact(mut self, artifact: ArtifactRef) -> Self {
         self.report.artifacts.push(artifact);
         self
     }
 
     /// Append a section. The closure receives a [`SectionBuilder`] and
-    /// returns it — the typical shape is `|s| s.heading(2, "...").table(...)`.
+    /// returns it - the typical shape is `|s| s.heading(2, "...").table(...)`.
     pub fn section<F>(mut self, id: impl Into<String>, title: impl Into<String>, build: F) -> Self
     where
         F: FnOnce(SectionBuilder) -> SectionBuilder,
@@ -161,17 +169,27 @@ impl ReportBuilder {
         self
     }
 
-    /// Attach the plugin's native JSON as an escape hatch. Rarely needed —
-    /// prefer blocks, but handy when wrapping a legacy pipeline.
+    /// Attach the plugin's native JSON as an escape hatch. Rarely needed -
+    /// prefer typed blocks.
     pub fn raw(mut self, value: impl serde::Serialize) -> Self {
-        // If serialization somehow fails, drop silently — `raw` is optional.
-        if let Ok(v) = serde_json::to_value(value) {
-            self.report.raw = Some(v);
+        match serde_json::to_value(value) {
+            Ok(v) => self.report.raw = Some(v),
+            Err(e) => tracing::warn!("ReportBuilder::raw: serialization failed: {e}"),
         }
         self
     }
 
-    pub fn build(self) -> Report {
+    /// Finalize and return the [`Report`]. Merges any pending labels into the verdict.
+    pub fn build(mut self) -> Report {
+        if !self.pending_labels.is_empty() {
+            let verdict = self.report.verdict.get_or_insert_with(|| Verdict {
+                classification: Classification::Unknown,
+                score: None,
+                confidence: None,
+                labels: Vec::new(),
+            });
+            verdict.labels.extend(self.pending_labels);
+        }
         self.report
     }
 }
@@ -195,16 +213,18 @@ impl SectionBuilder {
         }
     }
 
-    /// Escape hatch — push any [`Block`] directly.
+    /// Escape hatch - push any [`Block`] directly.
     pub fn block(mut self, block: Block) -> Self {
         self.section.blocks.push(block);
         self
     }
 
+    /// Add a markdown text block.
     pub fn markdown(self, text: impl Into<String>) -> Self {
         self.block(Block::Markdown { text: text.into() })
     }
 
+    /// Add a highlighted callout box with a severity level.
     pub fn callout(self, level: CalloutLevel, text: impl Into<String>) -> Self {
         self.block(Block::Callout {
             level,
@@ -212,6 +232,7 @@ impl SectionBuilder {
         })
     }
 
+    /// Add a heading (level 1-6, maps to HTML heading levels).
     pub fn heading(self, level: u8, text: impl Into<String>) -> Self {
         self.block(Block::Heading {
             level,
@@ -219,16 +240,19 @@ impl SectionBuilder {
         })
     }
 
+    /// Add a horizontal divider.
     pub fn divider(self) -> Self {
         self.block(Block::Divider)
     }
 
+    /// Add a key-value list.
     pub fn kv(self, pairs: impl IntoIterator<Item = KvPair>) -> Self {
         self.block(Block::Kv {
             pairs: pairs.into_iter().collect(),
         })
     }
 
+    /// Add a data table. Sortable by default, not searchable.
     pub fn table(
         self,
         columns: impl IntoIterator<Item = Column>,
@@ -242,6 +266,7 @@ impl SectionBuilder {
         })
     }
 
+    /// Add a syntax-highlighted code block.
     pub fn code(self, language: impl Into<String>, text: impl Into<String>) -> Self {
         self.block(Block::Code {
             language: language.into(),
@@ -249,14 +274,22 @@ impl SectionBuilder {
         })
     }
 
+    /// Add an interactive JSON tree viewer (collapsed by default).
     pub fn json(self, data: impl serde::Serialize) -> Self {
-        let v = serde_json::to_value(data).unwrap_or(serde_json::Value::Null);
+        let v = match serde_json::to_value(data) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("SectionBuilder::json: serialization failed: {e}");
+                serde_json::Value::Null
+            }
+        };
         self.block(Block::Json {
             data: v,
             collapsed: true,
         })
     }
 
+    /// Add a hex dump. `bytes_b64` is the data as base64, `offset` is the starting address.
     pub fn hex(self, bytes_b64: impl Into<String>, offset: u64) -> Self {
         self.block(Block::Hex {
             bytes_b64: bytes_b64.into(),
@@ -264,6 +297,7 @@ impl SectionBuilder {
         })
     }
 
+    /// Add an inline image resolved from a sibling artifact result.
     pub fn image(self, artifact: impl Into<String>, caption: Option<String>) -> Self {
         self.block(Block::Image {
             artifact: artifact.into(),
@@ -271,6 +305,7 @@ impl SectionBuilder {
         })
     }
 
+    /// Add a download link resolved from a sibling artifact result.
     pub fn download(self, artifact: impl Into<String>, label: impl Into<String>) -> Self {
         self.block(Block::Download {
             artifact: artifact.into(),
@@ -278,30 +313,35 @@ impl SectionBuilder {
         })
     }
 
+    /// Add a formatted IOC list.
     pub fn iocs(self, items: impl IntoIterator<Item = Indicator>) -> Self {
         self.block(Block::Iocs {
             items: items.into_iter().collect(),
         })
     }
 
+    /// Add a formatted MITRE ATT&CK technique list.
     pub fn ttps(self, items: impl IntoIterator<Item = Ttp>) -> Self {
         self.block(Block::Ttps {
             items: items.into_iter().collect(),
         })
     }
 
+    /// Add a collapsible tree (e.g. process tree, file hierarchy).
     pub fn tree(self, nodes: impl IntoIterator<Item = TreeNode>) -> Self {
         self.block(Block::Tree {
             nodes: nodes.into_iter().collect(),
         })
     }
 
+    /// Add a chronological event timeline.
     pub fn timeline(self, events: impl IntoIterator<Item = TimelineEvent>) -> Self {
         self.block(Block::Timeline {
             events: events.into_iter().collect(),
         })
     }
 
+    /// Add a node-and-edge graph (e.g. network map, call graph).
     pub fn graph(
         self,
         nodes: impl IntoIterator<Item = GraphNode>,

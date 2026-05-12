@@ -24,7 +24,7 @@ use malbox_database::repositories::{
     task_results::{ResultFormat, ResultRole, TaskResult, fetch_task_results},
     tasks::fetch_task,
 };
-use malbox_plugin_sdk::types::report::{
+use malbox_plugin_sdk::report::{
     ArtifactRef, Block, Classification, Indicator, PluginInfo, Report, SCHEMA_VERSION, Section,
     Ttp, Verdict,
 };
@@ -318,7 +318,7 @@ fn internal_error(msg: String) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use malbox_plugin_sdk::types::report::{Confidence, ReportBuilder};
+    use malbox_plugin_sdk::report::{Confidence, ReportBuilder};
     use serde_json::json;
 
     /// Helper: build a `PluginReportView` holding a pre-built report.

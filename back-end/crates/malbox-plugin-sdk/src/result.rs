@@ -1,4 +1,8 @@
-//! The PluginResult type returned by `HostPlugin::on_task`.
+//! Named results produced by plugin analysis.
+//!
+//! [`PluginResult`] represents a single output from a plugin. It can be
+//! JSON data, raw bytes, or a file on disk. Each result carries a name
+//! that identifies it in the task output (e.g. `"yara_matches"`).
 
 use crate::error::Result;
 use serde::Serialize;
@@ -14,12 +18,12 @@ pub enum PluginResult {
     Json { name: String, data: Vec<u8> },
     /// Arbitrary binary data.
     Bytes { name: String, data: Vec<u8> },
-    /// A file on disk — the runtime streams it back to the daemon.
+    /// A file on disk - the runtime streams it back to the daemon.
     File { name: String, path: PathBuf },
 }
 
 impl PluginResult {
-    /// Create a JSON result from any serializable value.
+    /// Serialize a value as JSON and wrap it as a named result.
     pub fn json(name: impl Into<String>, value: &impl Serialize) -> Result<Self> {
         let data = serde_json::to_vec(value)?;
         Ok(PluginResult::Json {
@@ -28,7 +32,7 @@ impl PluginResult {
         })
     }
 
-    /// Create a raw bytes result.
+    /// Wrap raw bytes as a named result.
     pub fn bytes(name: impl Into<String>, data: Vec<u8>) -> Self {
         PluginResult::Bytes {
             name: name.into(),
@@ -36,7 +40,8 @@ impl PluginResult {
         }
     }
 
-    /// Create a file result (the runtime will read and stream the file).
+    /// Reference a file on disk as a named result. The runtime reads and
+    /// streams the file contents back to the daemon.
     pub fn file(name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
         PluginResult::File {
             name: name.into(),
@@ -44,7 +49,7 @@ impl PluginResult {
         }
     }
 
-    /// Get the result name.
+    /// The name that identifies this result in the task output.
     pub fn name(&self) -> &str {
         match self {
             PluginResult::Json { name, .. } => name,
@@ -106,8 +111,6 @@ mod tests {
     #[test]
     fn plugin_result_constructors_accept_owned_string() {
         let owned = String::from("owned_name");
-        // Pass `owned` by value (move) rather than `&owned` — this is the
-        // case the old `&str` signature could not handle without extra allocation.
         let r = PluginResult::bytes(owned, vec![1, 2, 3]);
         assert_eq!(r.name(), "owned_name");
 

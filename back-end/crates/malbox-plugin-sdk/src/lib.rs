@@ -1,17 +1,25 @@
 //! Malbox Plugin SDK
 //!
-//! Macro-driven framework for building Malbox analysis plugins.
+//! This crate is the foundation for building plugins for Malbox.
 //!
-//! Plugin authors annotate a struct with [`#[malbox::host_plugin]`](macro@host_plugin)
-//! or [`#[malbox::guest_plugin]`](macro@guest_plugin) and add handler methods
-//! with [`#[malbox::on_task]`](macro@on_task),
+//! Plugins come in two flavors:
+//!
+//! - **Host plugins** run on the daemon and communicate over IPC. Mark your
+//!   struct with [`#[malbox::host_plugin]`](macro@host_plugin).
+//! - **Guest plugins** run inside a sandboxed environment and communicate over gRPC.
+//!   Mark your struct with [`#[malbox::guest_plugin]`](macro@guest_plugin).
+//!
+//! In both cases, you write handler methods and annotate them with
+//! [`#[malbox::on_task]`](macro@on_task),
 //! [`#[malbox::on_start]`](macro@on_start),
-//! [`#[malbox::on_stop]`](macro@on_stop), and
+//! [`#[malbox::on_stop]`](macro@on_stop), or
 //! [`#[malbox::on_event(...)]`](macro@on_event).
+//! The SDK generates the boilerplate: trait impls, `fn main`,
+//! runtime setup, and result transport.
 //!
 //! Package metadata (`name`, `version`, `description`, `authors`) is read
-//! automatically from the plugin's `Cargo.toml` -- only `state` and `execution`
-//! need to be specified in the `#[malbox(...)]` attribute.
+//! automatically from your `Cargo.toml`, so you only need to specify
+//! `state` and `execution` in the attribute.
 //!
 //! # Example
 //!
@@ -34,68 +42,51 @@
 
 pub mod context;
 pub mod error;
-pub mod guest_plugin;
-pub mod log;
+pub mod health;
+pub mod meta;
 pub mod plugin;
+pub mod report;
+pub mod result;
 pub mod runtime;
-pub mod stash;
-pub mod types;
 
 #[doc(hidden)]
 pub mod internal;
-
-pub mod build;
+#[doc(hidden)]
+pub mod log;
+#[cfg(feature = "guest")]
+pub(crate) mod stash;
 
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 
-/// Convenience re-exports for plugin authors.
+/// Everything a plugin needs in scope. Start with `use malbox::prelude::*;`.
 pub mod prelude {
     pub use crate::context::{Context, ResultSink, TaskInfo};
     pub use crate::error::{Result, SdkError};
-    pub use crate::guest_plugin::{GuestPlugin, LaunchResult};
-    pub use crate::plugin::{HostPlugin, Plugin};
-    pub use crate::types::{
-        ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, ExecutionContext,
-        GraphEdge, GraphNode, HealthStatus, Indicator, KvPair, PluginInfo, PluginMeta,
-        PluginResult, PluginState, REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION,
+    pub use crate::health::HealthStatus;
+    pub use crate::meta::{ExecutionContext, PluginMeta, PluginState};
+    pub use crate::plugin::{GuestPlugin, HostPlugin, LaunchResult, Plugin};
+    pub use crate::report::{
+        ArtifactRef, Block, CalloutLevel, Classification, Column, Confidence, GraphEdge, GraphNode,
+        Indicator, KvPair, PluginInfo, REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION,
         Section, SectionBuilder, TimelineEvent, TreeNode, Ttp, Verdict,
     };
+    pub use crate::result::PluginResult;
 
-    // Re-export common dependencies so plugin authors don't need them in Cargo.toml
     pub use serde::{Deserialize, Serialize};
     pub use tracing::{debug, error, info, warn};
 
-    // Re-export transport event type for on_event handlers
     pub use malbox_plugin_transport::messages::events::Event;
 }
 
-// Re-export macros so `malbox::host_plugin` works
 pub use malbox_plugin_macros::*;
 
-// Top-level re-exports
 pub use context::{Context, ResultSink, TaskInfo};
 pub use error::{Result, SdkError};
-pub use guest_plugin::{GuestPlugin, LaunchResult};
-pub use plugin::{HostPlugin, Plugin};
-pub use types::{
-    HealthStatus, PluginMeta, PluginResult, REPORT_RESULT_NAME, Report, ReportBuilder,
-    SCHEMA_VERSION,
+pub use health::HealthStatus;
+pub use meta::{ExecutionContext, PluginMeta, PluginState};
+pub use plugin::{GuestPlugin, HostPlugin, LaunchResult, Plugin};
+pub use report::{
+    REPORT_RESULT_NAME, Report, ReportBuilder, SCHEMA_VERSION, SectionBuilder, Verdict,
 };
-
-#[cfg(test)]
-mod prelude_tests {
-    #[test]
-    fn prelude_exports_serialize_and_deserialize() {
-        // This test only needs to compile. It verifies that both Serialize and
-        // Deserialize are reachable via `malbox_plugin_sdk::prelude::*`.
-        use crate::prelude::*;
-
-        #[derive(Serialize, Deserialize)]
-        struct Foo {
-            x: i32,
-        }
-
-        let _ = Foo { x: 1 };
-    }
-}
+pub use result::PluginResult;

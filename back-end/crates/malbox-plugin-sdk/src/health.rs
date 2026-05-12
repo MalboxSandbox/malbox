@@ -1,7 +1,14 @@
-//! Plugin health status, returned by `HostPlugin::health_check`.
+//! Plugin health status.
+//!
+//! The daemon polls [`HealthStatus`] via [`Plugin::health_check`](crate::plugin::Plugin::health_check)
+//! to decide whether a plugin is ready to receive tasks.
 
-/// Health status returned by optional health check handlers.
-#[derive(Debug, Clone)]
+/// Reports whether a plugin is ready to accept tasks.
+///
+/// Constructed via [`HealthStatus::ready`] or [`HealthStatus::not_ready`].
+/// The daemon polls this periodically and will not dispatch tasks to a
+/// plugin that reports not-ready.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct HealthStatus {
     pub(crate) ready: bool,

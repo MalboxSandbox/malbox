@@ -1,8 +1,12 @@
-//! The GuestPlugin trait for malbox guest (in-VM) plugins.
+//! The [`GuestPlugin`] trait for plugins that run inside an analysis VM.
+//!
+//! Guest plugins follow a linear lifecycle per task: `on_start` sets up
+//! monitoring, `execute_sample` launches the sample, the SDK waits for
+//! the analysis timeout, then `on_stop` flushes results and tears down.
 
+use super::Plugin;
 use crate::context::Context;
 use crate::error::Result;
-use crate::plugin::Plugin;
 use std::path::Path;
 
 /// Launch a sample using the platform-native process creation API.
@@ -71,9 +75,15 @@ pub fn default_launch(sample_path: &Path) -> LaunchResult {
     }
 }
 
+/// Outcome of [`GuestPlugin::execute_sample`].
+///
+/// Tells the SDK whether the plugin handled sample launch itself or
+/// wants the SDK to use the platform default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchResult {
+    /// The plugin did not launch the sample. The SDK should use [`default_launch`].
     UseDefault,
+    /// The plugin successfully launched the sample itself.
     Launched,
 }
 
@@ -107,7 +117,6 @@ pub trait GuestPlugin: Plugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::Plugin;
 
     struct MinimalGuestPlugin;
     impl Plugin for MinimalGuestPlugin {}
