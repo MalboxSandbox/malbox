@@ -1,4 +1,9 @@
 //! Error types for the plugin SDK.
+//!
+//! [`SdkError`] covers everything that can go wrong during plugin
+//! initialization, task execution, and result transport. It is
+//! `#[non_exhaustive]` so new variants can be added without breaking
+//! downstream code.
 
 use thiserror::Error;
 

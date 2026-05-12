@@ -5,28 +5,28 @@ edition = "2024"
 description = "SDK for building Malbox analysis plugins"
 
 [features]
-host = ["malbox-plugin-transport/ipc"]
-guest = []
+host = ["malbox-plugin-transport/ipc", "dep:postcard"]
+guest = ["malbox-plugin-transport/grpc", "dep:tonic", "dep:prost", "dep:async-stream", "dep:tokio-stream", "dep:uuid", "dep:globset"]
 testkit = []
 
 [dependencies]
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
 malbox-plugin-macros = { path = "../malbox-plugin-macros" }
 
+postcard = { version = "1", features = ["alloc"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 
-#iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
 tokio = { workspace = true }
-tonic = { version = "0.14" }
-prost = "0.14"
-async-stream = "0.3"
-tokio-stream = { workspace = true }
-uuid = { workspace = true }
-globset = "0.4"
+tonic = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+async-stream = { version = "0.3", optional = true }
+tokio-stream = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+globset = { version = "0.4", optional = true }
 
 [dev-dependencies]
 malbox-tracing = { path = "../malbox-tracing" }

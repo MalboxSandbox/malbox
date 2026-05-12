@@ -16,14 +16,15 @@ use std::time::{Duration, Instant};
 pub type Handle = String;
 
 /// On-wire format hint, kept in sync with `proto::ResultFormat`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StashFormat {
     Json,
     Bytes,
 }
 
-/// A single stash entry.
+/// Metadata for a single stashed result (path on disk, ownership, size).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StashEntry {
     pub path: PathBuf,
     pub result_name: String,
@@ -36,7 +37,7 @@ pub struct StashEntry {
     pub created_at: Instant,
 }
 
-/// Stash configuration.
+/// Controls when results are stashed to disk and how long they live.
 #[derive(Debug, Clone)]
 pub struct StashConfig {
     /// Results above this many bytes go to disk + ref. Below stays inline.
@@ -101,7 +102,10 @@ impl ResultStash {
             task_id,
             created_at: Instant::now(),
         };
-        self.entries.lock().unwrap().insert(handle.clone(), entry);
+        self.entries
+            .lock()
+            .map_err(|_| SdkError::Channel("stash mutex poisoned".into()))?
+            .insert(handle.clone(), entry);
         Ok(handle)
     }
 
@@ -125,24 +129,30 @@ impl ResultStash {
             task_id,
             created_at: Instant::now(),
         };
-        self.entries.lock().unwrap().insert(handle.clone(), entry);
+        self.entries
+            .lock()
+            .map_err(|_| SdkError::Channel("stash mutex poisoned".into()))?
+            .insert(handle.clone(), entry);
         Ok(handle)
     }
 
     /// Take the entry for `handle`, removing it from the map.
     ///
-    /// The returned entry's file has **not** been deleted — the caller
+    /// The returned entry's file has **not** been deleted - the caller
     /// (typically `on_pull_result`) reads it, then calls
     /// [`Self::cleanup_after_pull`] to delete SDK-owned files.
     pub fn take(&self, handle: &str) -> Option<StashEntry> {
-        self.entries.lock().unwrap().remove(handle)
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(handle)
     }
 
     /// Return `size_bytes` for `handle` without removing the entry.
     pub fn peek_size(&self, handle: &str) -> Option<u64> {
         self.entries
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .get(handle)
             .map(|e| e.size_bytes)
     }
@@ -158,27 +168,9 @@ impl ResultStash {
     /// Remove all entries for a finished task. SDK-owned files are deleted;
     /// plugin-owned files are left alone. Returns the number of entries
     /// reclaimed.
+    #[allow(dead_code)]
     pub fn sweep_task(&self, task_id: i32) -> usize {
-        let mut entries = self.entries.lock().unwrap();
-        let handles: Vec<Handle> = entries
-            .iter()
-            .filter_map(|(h, e)| {
-                if e.task_id == task_id {
-                    Some(h.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let n = handles.len();
-        for h in handles {
-            if let Some(entry) = entries.remove(&h)
-                && entry.sdk_owned
-            {
-                let _ = std::fs::remove_file(&entry.path);
-            }
-        }
-        n
+        self.sweep_where(|e| e.task_id == task_id)
     }
 
     /// Remove entries older than `self.config.ttl`. SDK-owned files deleted;
@@ -187,16 +179,14 @@ impl ResultStash {
     pub fn sweep_expired(&self) -> usize {
         let ttl = self.config.ttl;
         let now = Instant::now();
-        let mut entries = self.entries.lock().unwrap();
+        self.sweep_where(|e| now.saturating_duration_since(e.created_at) > ttl)
+    }
+
+    fn sweep_where(&self, predicate: impl Fn(&StashEntry) -> bool) -> usize {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let handles: Vec<Handle> = entries
             .iter()
-            .filter_map(|(h, e)| {
-                if now.saturating_duration_since(e.created_at) > ttl {
-                    Some(h.clone())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(h, e)| if predicate(e) { Some(h.clone()) } else { None })
             .collect();
         let n = handles.len();
         for h in handles {

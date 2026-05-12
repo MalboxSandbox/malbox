@@ -1,6 +1,8 @@
-//! Internal helpers used by generated macro code.
+//! Internal helpers consumed by macro-generated code.
 //!
-//! This module is `#[doc(hidden)]` -- plugin authors should never use it directly.
+//! This module is `#[doc(hidden)]` - plugin authors should never use it
+//! directly. It exists so the proc macros can reference stable functions
+//! without exposing them in the public API.
 
 use crate::error::Result;
 use std::collections::HashMap;
@@ -27,7 +29,7 @@ pub fn deserialize_config<T: serde::de::DeserializeOwned>(
 /// subscriber so that log events are captured and can be streamed back to the
 /// daemon via gRPC.
 ///
-/// `filter` is a `tracing_subscriber::EnvFilter` directive string — e.g.
+/// `filter` is a `tracing_subscriber::EnvFilter` directive string - e.g.
 /// "info", "info,hyper=warn". Callers pass this explicitly (it's baked into
 /// the plugin binary at compile time by the `#[guest_plugin]` macro).
 pub fn init_tracing(
