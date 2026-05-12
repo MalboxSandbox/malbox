@@ -1,6 +1,5 @@
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::grpc::proto;
-use malbox_plugin_internal::transport::messages::events::Event;
 use malbox_plugin_internal::transport::plugin::{
     FileChunkStream, GuestPluginService, GuestPluginServiceServer, LogEntryStream,
     ResultChunkStream, TaskResultStream,
@@ -150,16 +149,6 @@ impl GuestPluginService for TestHandler {
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Ok(Response::new(Box::pin(stream)))
-    }
-
-    async fn notify_event(
-        &self,
-        _request: Request<proto::EventNotification>,
-    ) -> Result<Response<proto::EventAck>, Status> {
-        Ok(Response::new(proto::EventAck {
-            success: true,
-            error_message: String::new(),
-        }))
     }
 
     async fn push_file(
@@ -370,24 +359,6 @@ async fn test_health_check() {
         .expect("health_check RPC should succeed");
 
     assert!(resp.ready, "expected ready=true");
-}
-
-#[tokio::test]
-async fn test_notify_event() {
-    let mut client = setup().await;
-
-    let event = Event::TaskCreated { task_id: 42 };
-
-    let resp = client
-        .notify_event(&event)
-        .await
-        .expect("notify_event RPC should succeed");
-
-    assert!(resp.success, "expected success=true");
-    assert!(
-        resp.error_message.is_empty(),
-        "expected empty error_message"
-    );
 }
 
 #[tokio::test]

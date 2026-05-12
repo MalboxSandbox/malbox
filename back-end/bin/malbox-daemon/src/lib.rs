@@ -3,9 +3,7 @@ use malbox_database::init_database;
 use malbox_http::http;
 use malbox_machinery::provider::{create_provider, list_providers};
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_plugin_internal::transport::ipc::{
-    EventEmitter, IpcService, NodeBuilder, daemon_channel,
-};
+use malbox_plugin_internal::transport::ipc::{DaemonEventPublisher, IpcService, NodeBuilder};
 use malbox_resources::{MachinePool, resolve_transport};
 use malbox_scheduler::init_scheduler;
 use malbox_utils::{ResultStore, SampleStore};
@@ -186,12 +184,9 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
                 .map_err(|e| DaemonError::Internal(format!("Failed to create IPC node: {}", e)))?,
         );
 
-        let emitter = Arc::new(
-            EventEmitter::new(&ipc_node, daemon_channel::EVENTS, daemon_channel::PAYLOADS)
-                .map_err(|e| {
-                    DaemonError::Internal(format!("Failed to create event emitter: {}", e))
-                })?,
-        );
+        let emitter = Arc::new(DaemonEventPublisher::new(&ipc_node).map_err(|e| {
+            DaemonError::Internal(format!("Failed to create event emitter: {}", e))
+        })?);
 
         // Create plugin manager (replaces the logging-only event listener)
         Arc::new(

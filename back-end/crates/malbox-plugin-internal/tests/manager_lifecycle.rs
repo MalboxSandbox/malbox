@@ -1,13 +1,13 @@
 //! Integration test template for the plugin manager lifecycle.
 //!
-//! The [`PluginManager`] requires an [`EventEmitter`] backed by iceoryx2, which
+//! The [`PluginManager`] requires an [`DaemonEventPublisher`] backed by iceoryx2, which
 //! needs a running IPC node. Until the test environment provides a mock IPC
 //! layer or a live iceoryx2 instance, the actual test logic is commented out.
 //! This file serves as a structural template that verifies imports compile and
 //! documents the intended test scenarios.
 
 // These imports are used in the commented-out test bodies. They verify that the
-// public API surface compiles and will be active once a mock EventEmitter is
+// public API surface compiles and will be active once a mock DaemonEventPublisher is
 // available.
 #[allow(unused_imports)]
 use malbox_plugin_internal::manager::PluginManager;
@@ -16,19 +16,19 @@ use malbox_plugin_internal::manager::error::ManagerError;
 use malbox_plugin_internal::registry::PluginRegistry;
 #[allow(unused_imports)]
 use malbox_plugin_internal::registry::types::PluginId;
-use malbox_plugin_internal::transport::ipc::EventEmitter;
+use malbox_plugin_internal::transport::ipc::DaemonEventPublisher;
 use std::sync::Arc;
 use tempfile::TempDir;
 #[allow(unused_imports)]
 use tokio::time::Duration;
 
-/// Helper to create a test [`EventEmitter`].
+/// Helper to create a test [`DaemonEventPublisher`].
 ///
-/// The [`EventEmitter`] requires an iceoryx2 [`Node`] which is not available in
+/// The [`DaemonEventPublisher`] requires an iceoryx2 [`Node`] which is not available in
 /// standard test environments. This function is a placeholder that will need a
 /// real or mocked IPC node to work.
 #[allow(dead_code)]
-fn create_test_emitter() -> Arc<EventEmitter> {
+fn create_test_emitter() -> Arc<DaemonEventPublisher> {
     // NOTE: iceoryx2 requires a running instance / node setup.
     // This helper should be filled in once mock IPC support is available.
     todo!("Create test IPC emitter -- requires iceoryx2 node setup")
@@ -44,7 +44,7 @@ async fn acquire_unknown_plugin_returns_not_found() {
     // Confirm the registry is empty before proceeding.
     assert!(_registry.snapshot().is_empty());
 
-    // TODO: Uncomment once a mock or real EventEmitter can be constructed.
+    // TODO: Uncomment once a mock or real DaemonEventPublisher can be constructed.
     //
     // let emitter = create_test_emitter();
     // let manager = PluginManager::new(registry, emitter, Duration::from_secs(60))
@@ -62,7 +62,7 @@ async fn create_with_empty_registry_and_shutdown() {
     let tmp = TempDir::new().unwrap();
     let _registry = Arc::new(PluginRegistry::new(tmp.path().to_path_buf()).unwrap());
 
-    // TODO: Uncomment once a mock or real EventEmitter can be constructed.
+    // TODO: Uncomment once a mock or real DaemonEventPublisher can be constructed.
     //
     // let emitter = create_test_emitter();
     // let manager = PluginManager::new(registry, emitter, Duration::from_secs(60))
@@ -81,7 +81,7 @@ async fn reconcile_empty_manager() {
     let tmp = TempDir::new().unwrap();
     let _registry = Arc::new(PluginRegistry::new(tmp.path().to_path_buf()).unwrap());
 
-    // TODO: Uncomment once a mock or real EventEmitter can be constructed.
+    // TODO: Uncomment once a mock or real DaemonEventPublisher can be constructed.
     //
     // let emitter = create_test_emitter();
     // let manager = PluginManager::new(registry, emitter, Duration::from_secs(60))

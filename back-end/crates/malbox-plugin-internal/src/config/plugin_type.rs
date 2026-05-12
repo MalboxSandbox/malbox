@@ -1,6 +1,6 @@
 //! Plugin type definitions and their associated transports.
 
-use crate::transport::ipc::{EventEmitter, EventReceiver};
+use crate::transport::ipc::DaemonEventPublisher;
 use crate::transport::plugin::{GrpcEmitter, GrpcReceiver};
 use crate::transport::traits::{TransportEmitter, TransportReceiver};
 
@@ -17,18 +17,18 @@ pub trait PluginType {
     type Receiver: TransportReceiver;
 }
 
-/// Host plugin type — uses iceoryx2 IPC.
+/// Host plugin type - uses iceoryx2 IPC.
 ///
 /// Host plugins run on the same machine as the daemon and communicate
 /// via zero-copy shared memory.
 pub enum Host {}
 
 impl PluginType for Host {
-    type Emitter = EventEmitter;
-    type Receiver = EventReceiver;
+    type Emitter = DaemonEventPublisher;
+    type Receiver = ();
 }
 
-/// Guest plugin type — will use gRPC.
+/// Guest plugin type - uses gRPC.
 ///
 /// Guest plugins run inside virtual machines and communicate
 /// via gRPC over the network.

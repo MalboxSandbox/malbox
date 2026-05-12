@@ -44,6 +44,18 @@ pub fn spawn_health_check_loop(
                 let instance_lock = entry.value();
                 let mut instance = instance_lock.lock().await;
 
+                // Promote Starting host plugins to Ready once their process is alive.
+                if instance.lifecycle.is_starting() {
+                    let plugin_type = instance.entry.manifest.plugin.plugin_type;
+                    if plugin_type == PluginTypeConfig::Host
+                        && check_host_health(&mut instance).await
+                    {
+                        debug!(plugin = %plugin_id, "host plugin process alive, promoting to Ready");
+                        instance.lifecycle = PluginLifecycle::Ready;
+                    }
+                    continue;
+                }
+
                 if !instance.lifecycle.is_running() {
                     continue;
                 }

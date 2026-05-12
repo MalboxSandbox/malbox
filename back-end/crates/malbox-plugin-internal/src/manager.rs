@@ -30,7 +30,7 @@ use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::registry::PluginRegistry;
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
-use crate::transport::ipc::EventEmitter;
+use crate::transport::ipc::DaemonEventPublisher;
 
 /// Central plugin lifecycle manager.
 ///
@@ -43,7 +43,7 @@ use crate::transport::ipc::EventEmitter;
 pub struct PluginManager {
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     registry: Arc<PluginRegistry>,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<DaemonEventPublisher>,
     ipc_node: Arc<Node<IpcService>>,
     /// Held to keep the background health-check task alive for the lifetime of the manager.
     #[allow(dead_code)]
@@ -57,7 +57,7 @@ impl PluginManager {
     #[instrument(skip_all, err)]
     pub async fn new(
         registry: Arc<PluginRegistry>,
-        emitter: Arc<EventEmitter>,
+        emitter: Arc<DaemonEventPublisher>,
         ipc_node: Arc<Node<IpcService>>,
         health_check_interval: Duration,
         token: CancellationToken,
@@ -364,7 +364,7 @@ impl PluginManager {
     }
 
     /// Returns a reference to the IPC event emitter.
-    pub fn emitter(&self) -> &Arc<EventEmitter> {
+    pub fn emitter(&self) -> &Arc<DaemonEventPublisher> {
         &self.emitter
     }
 
