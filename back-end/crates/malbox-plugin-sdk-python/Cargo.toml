@@ -6,7 +6,7 @@ description = "Python bindings for the malbox plugin SDK"
 publish = false
 
 [lib]
-name = "malbox_plugin_sdk"
+name = "malbox_plugin_sdk_python"
 crate-type = ["cdylib"]
 
 [features]
