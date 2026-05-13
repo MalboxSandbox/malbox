@@ -9,19 +9,19 @@ import type {
 } from './types';
 
 export async function listTasks(fetchFn: FetchLike): Promise<Task[]> {
-	return requestJson<Task[]>(fetchFn, '/api/tasks');
+	return requestJson<Task[]>(fetchFn, '/v1/tasks');
 }
 
 export async function getTask(fetchFn: FetchLike, id: number): Promise<Task> {
-	return requestJson<Task>(fetchFn, `/api/tasks/${id}`);
+	return requestJson<Task>(fetchFn, `/v1/tasks/${id}`);
 }
 
 export async function getTaskResults(fetchFn: FetchLike, id: number): Promise<TaskResult[]> {
-	return requestJson<TaskResult[]>(fetchFn, `/api/tasks/${id}/results`);
+	return requestJson<TaskResult[]>(fetchFn, `/v1/tasks/${id}/results`);
 }
 
 export async function getTaskReport(fetchFn: FetchLike, id: number): Promise<TaskReport> {
-	return requestJson<TaskReport>(fetchFn, `/api/tasks/${id}/report`);
+	return requestJson<TaskReport>(fetchFn, `/v1/tasks/${id}/report`);
 }
 
 /** Returns the raw Response so callers can choose JSON, blob, or download URL. */
@@ -30,14 +30,14 @@ export async function getResultContent(
 	taskId: number,
 	resultId: number
 ): Promise<Response> {
-	return request(fetchFn, `/api/tasks/${taskId}/results/${resultId}`);
+	return request(fetchFn, `/v1/tasks/${taskId}/results/${resultId}`);
 }
 
 export async function cancelTask(
 	fetchFn: FetchLike,
 	id: number
 ): Promise<{ status: string; task_id: number }> {
-	return requestJson(fetchFn, `/api/tasks/${id}/cancel`, { method: 'POST' });
+	return requestJson(fetchFn, `/v1/tasks/${id}/cancel`, { method: 'POST' });
 }
 
 export async function createTaskFromFile(
@@ -58,7 +58,7 @@ export async function createTaskFromFile(
 	if (req.plugins !== undefined) form.append('plugins', req.plugins);
 	if (req.snapshot_id !== undefined) form.append('snapshot_id', req.snapshot_id);
 
-	return requestJson<{ task_id: number }>(fetchFn, '/api/tasks/create/file', {
+	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/file', {
 		method: 'POST',
 		body: form
 	});
@@ -68,7 +68,7 @@ export async function createTaskFromUrl(
 	fetchFn: FetchLike,
 	req: CreateTaskFromUrlRequest
 ): Promise<{ task_id: number }> {
-	return requestJson<{ task_id: number }>(fetchFn, '/api/tasks/create/url', {
+	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/url', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(req)
@@ -79,7 +79,7 @@ export async function createTaskFromHash(
 	fetchFn: FetchLike,
 	req: CreateTaskFromHashRequest
 ): Promise<{ task_id: number }> {
-	return requestJson<{ task_id: number }>(fetchFn, '/api/tasks/create/hash', {
+	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/hash', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(req)

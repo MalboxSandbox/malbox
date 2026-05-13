@@ -7,6 +7,6 @@ export async function listSnapshotsForSubmission(
 ): Promise<SnapshotForSubmission[]> {
 	return requestJson<SnapshotForSubmission[]>(
 		fetchFn,
-		`/api/snapshots?platform=${encodeURIComponent(platform)}`
+		`/v1/snapshots?platform=${encodeURIComponent(platform)}`
 	);
 }
