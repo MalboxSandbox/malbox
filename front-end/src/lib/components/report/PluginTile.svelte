@@ -32,10 +32,7 @@
 		</div>
 		{#if report?.verdict?.score !== undefined}
 			<div class="shrink-0">
-				<ScoreBar
-					score={report.verdict.score}
-					classification={report.verdict.classification}
-				/>
+				<ScoreBar score={report.verdict.score} classification={report.verdict.classification} />
 			</div>
 		{/if}
 	</div>
@@ -44,14 +41,18 @@
 		<p class="line-clamp-2 text-xs text-[var(--color-text-secondary)]">{report.summary}</p>
 	{/if}
 
-	<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-secondary)]">
+	<div
+		class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-secondary)]"
+	>
 		<span>{iocCount} indicator{iocCount === 1 ? '' : 's'}</span>
 		<span>·</span>
 		<span>{ttpCount} TTP{ttpCount === 1 ? '' : 's'}</span>
 		<span>·</span>
 		<span>{artifactCount} artifact{artifactCount === 1 ? '' : 's'}</span>
 		{#if view.synthesized}
-			<span class="ml-auto rounded bg-[var(--color-bg-card)] px-1.5 py-0.5 text-[10px]">synthesized</span>
+			<span class="ml-auto rounded bg-[var(--color-bg-card)] px-1.5 py-0.5 text-[10px]"
+				>synthesized</span
+			>
 		{/if}
 	</div>
 </a>

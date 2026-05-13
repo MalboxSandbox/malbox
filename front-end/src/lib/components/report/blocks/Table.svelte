@@ -41,9 +41,7 @@
 				return time ? `${date} ${time}` : date;
 			}
 			case 'number':
-				return typeof value === 'number'
-					? new Intl.NumberFormat().format(value)
-					: String(value);
+				return typeof value === 'number' ? new Intl.NumberFormat().format(value) : String(value);
 			case 'bool':
 				return value ? '✓' : '✗';
 			default:
@@ -70,8 +68,7 @@
 		return [...filtered].sort((a, b) => compare(a[key], b[key]) * dir);
 	});
 
-	const cellAlign = (type: string | undefined) =>
-		type === 'number' ? 'text-right' : 'text-left';
+	const cellAlign = (type: string | undefined) => (type === 'number' ? 'text-right' : 'text-left');
 </script>
 
 <div class="max-w-full space-y-3 overflow-hidden">
@@ -103,9 +100,7 @@
 										fill="currentColor"
 										class="size-3 transition-transform {sortKey === c.key
 											? 'text-[var(--color-text-primary)]'
-											: 'opacity-0'} {sortKey === c.key && sortDir === 'desc'
-											? 'rotate-180'
-											: ''}"
+											: 'opacity-0'} {sortKey === c.key && sortDir === 'desc' ? 'rotate-180' : ''}"
 									>
 										<path
 											fill-rule="evenodd"
@@ -127,7 +122,11 @@
 						class="border-t border-[var(--color-border)]/30 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]/40"
 					>
 						{#each columns as c (c.key)}
-							<td class="px-4 py-2 {cellAlign(c.type)} {c.type === 'string' || !c.type ? 'break-all' : ''}">
+							<td
+								class="px-4 py-2 {cellAlign(c.type)} {c.type === 'string' || !c.type
+									? 'break-all'
+									: ''}"
+							>
 								{formatCell(row[c.key], c.type)}
 							</td>
 						{/each}

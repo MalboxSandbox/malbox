@@ -106,7 +106,7 @@
 				<div>
 					<div class="text-[var(--color-text-secondary)] text-sm mb-1">Review</div>
 					<div class="flex items-center gap-0.5">
-						{#each renderStars(plugin.rating) as filled}
+						{#each renderStars(plugin.rating) as filled, i (i)}
 							<svg
 								class="w-5 h-5 {filled ? 'text-[#FDB022]' : 'text-[#3D3F47]'}"
 								fill="currentColor"

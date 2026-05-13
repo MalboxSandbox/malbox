@@ -1,4 +1,5 @@
 <script lang="ts">
+	/* eslint-disable svelte/prefer-svelte-reactivity -- Maps used as local computation variables in $derived, not reactive state */
 	import type { GraphEdge, GraphNode } from '$lib/api/types';
 
 	interface Props {
@@ -92,7 +93,10 @@
 
 		const outEdges = new Map<string, string[]>();
 		const inEdges = new Map<string, string[]>();
-		for (const n of nodes) { outEdges.set(n.id, []); inEdges.set(n.id, []); }
+		for (const n of nodes) {
+			outEdges.set(n.id, []);
+			inEdges.set(n.id, []);
+		}
 		for (const e of edges) {
 			outEdges.get(e.from)?.push(e.to);
 			inEdges.get(e.to)?.push(e.from);
@@ -100,7 +104,7 @@
 
 		for (let iter = 0; iter < 80; iter++) {
 			const forward = iter % 2 === 0;
-			const layerOrder = [...layerGroups.keys()].sort((a, b) => forward ? a - b : b - a);
+			const layerOrder = [...layerGroups.keys()].sort((a, b) => (forward ? a - b : b - a));
 
 			for (const layer of layerOrder) {
 				const ids = layerGroups.get(layer)!;
@@ -114,7 +118,9 @@
 					if (targets.length === 0) continue;
 
 					let ty = 0;
-					for (const nid of targets) { ty += positions.get(nid)!.y; }
+					for (const nid of targets) {
+						ty += positions.get(nid)!.y;
+					}
 					p.y += (ty / targets.length - p.y) * 0.4;
 				}
 
@@ -128,9 +134,13 @@
 		}
 
 		let minY = Infinity;
-		for (const p of positions.values()) { if (p.y < minY) minY = p.y; }
+		for (const p of positions.values()) {
+			if (p.y < minY) minY = p.y;
+		}
 		const shiftY = PAD_Y - minY;
-		for (const p of positions.values()) { p.y += shiftY; }
+		for (const p of positions.values()) {
+			p.y += shiftY;
+		}
 
 		let maxX = 0;
 		let maxY = 0;
@@ -143,10 +153,17 @@
 	});
 
 	type EdgePath = {
-		from: string; to: string; label?: string;
-		path: string; idx: number;
-		sx: number; sy: number; ex: number; ey: number;
-		mx: number; my: number;
+		from: string;
+		to: string;
+		label?: string;
+		path: string;
+		idx: number;
+		sx: number;
+		sy: number;
+		ex: number;
+		ey: number;
+		mx: number;
+		my: number;
 	};
 
 	const edgePaths = $derived.by<EdgePath[]>(() => {
@@ -157,48 +174,51 @@
 			inPorts.set(n.id, { total: edges.filter((e) => e.to === n.id).length, idx: 0 });
 		}
 
-		return edges.map((e, idx) => {
-			const from = layout.positions.get(e.from);
-			const to = layout.positions.get(e.to);
-			if (!from || !to) return null;
+		return edges
+			.map((e, idx) => {
+				const from = layout.positions.get(e.from);
+				const to = layout.positions.get(e.to);
+				if (!from || !to) return null;
 
-			const op = outPorts.get(e.from)!;
-			const ip = inPorts.get(e.to)!;
-			const os = op.idx++;
-			const is_ = ip.idx++;
+				const op = outPorts.get(e.from)!;
+				const ip = inPorts.get(e.to)!;
+				const os = op.idx++;
+				const is_ = ip.idx++;
 
-			const oSpread = Math.min(NODE_H - 10, (op.total - 1) * 8);
-			const iSpread = Math.min(NODE_H - 10, (ip.total - 1) * 8);
-			const oOff = op.total <= 1 ? 0 : -oSpread / 2 + os * (oSpread / (op.total - 1));
-			const iOff = ip.total <= 1 ? 0 : -iSpread / 2 + is_ * (iSpread / (ip.total - 1));
+				const oSpread = Math.min(NODE_H - 10, (op.total - 1) * 8);
+				const iSpread = Math.min(NODE_H - 10, (ip.total - 1) * 8);
+				const oOff = op.total <= 1 ? 0 : -oSpread / 2 + os * (oSpread / (op.total - 1));
+				const iOff = ip.total <= 1 ? 0 : -iSpread / 2 + is_ * (iSpread / (ip.total - 1));
 
-			const sx = from.x + NODE_W;
-			const sy = from.y + NODE_H / 2 + oOff;
-			const ex = to.x;
-			const ey = to.y + NODE_H / 2 + iOff;
+				const sx = from.x + NODE_W;
+				const sy = from.y + NODE_H / 2 + oOff;
+				const ex = to.x;
+				const ey = to.y + NODE_H / 2 + iOff;
 
-			const dx = ex - sx;
-			const dy = Math.abs(ey - sy);
-			const cp = Math.max(60, Math.min(dx * 0.45, 150));
+				const dx = ex - sx;
+				const cp = Math.max(60, Math.min(dx * 0.45, 150));
 
-			const path = `M ${sx} ${sy} C ${sx + cp} ${sy}, ${ex - cp} ${ey}, ${ex} ${ey}`;
+				const path = `M ${sx} ${sy} C ${sx + cp} ${sy}, ${ex - cp} ${ey}, ${ex} ${ey}`;
 
-			const t = 0.5;
-			const mt = 1 - t;
-			const cx1 = sx + cp;
-			const cx2 = ex - cp;
-			const mx = mt * mt * mt * sx + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * ex;
-			const my = mt * mt * mt * sy + 3 * mt * mt * t * sy + 3 * mt * t * t * ey + t * t * t * ey;
+				const t = 0.5;
+				const mt = 1 - t;
+				const cx1 = sx + cp;
+				const cx2 = ex - cp;
+				const mx =
+					mt * mt * mt * sx + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * ex;
+				const my = mt * mt * mt * sy + 3 * mt * mt * t * sy + 3 * mt * t * t * ey + t * t * t * ey;
 
-			return { from: e.from, to: e.to, label: e.label, path, idx, sx, sy, ex, ey, mx, my };
-		}).filter(Boolean) as EdgePath[];
+				return { from: e.from, to: e.to, label: e.label, path, idx, sx, sy, ex, ey, mx, my };
+			})
+			.filter(Boolean) as EdgePath[];
 	});
 
 	function isNodeActive(nodeId: string): boolean {
 		if (!selectedNode) return true;
 		if (nodeId === selectedNode) return true;
 		return edges.some(
-			(e) => (e.from === selectedNode && e.to === nodeId) || (e.to === selectedNode && e.from === nodeId)
+			(e) =>
+				(e.from === selectedNode && e.to === nodeId) || (e.to === selectedNode && e.from === nodeId)
 		);
 	}
 
@@ -234,10 +254,7 @@
 				{@const hl = isEdgeActive(e)}
 				{@const hovered = hoveredEdge === e.idx}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<g
-					onmouseenter={() => (hoveredEdge = e.idx)}
-					onmouseleave={() => (hoveredEdge = null)}
-				>
+				<g onmouseenter={() => (hoveredEdge = e.idx)} onmouseleave={() => (hoveredEdge = null)}>
 					<path
 						d={e.path}
 						fill="none"
@@ -264,22 +281,43 @@
 				{#if p}
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<g
-						class="cursor-pointer"
-						opacity={active ? 1 : 0.15}
-						onclick={() => handleClick(n.id)}
-					>
-						<rect x={p.x} y={p.y} width={NODE_W} height={NODE_H} rx="6"
-							fill={sel ? 'var(--color-bg-card)' : 'var(--color-bg-tertiary)'} />
-						<rect x={p.x} y={p.y + 5} width={ACCENT_W} height={NODE_H - 10} rx="1.5"
-							fill={info.accent} />
+					<g class="cursor-pointer" opacity={active ? 1 : 0.15} onclick={() => handleClick(n.id)}>
+						<rect
+							x={p.x}
+							y={p.y}
+							width={NODE_W}
+							height={NODE_H}
+							rx="6"
+							fill={sel ? 'var(--color-bg-card)' : 'var(--color-bg-tertiary)'}
+						/>
+						<rect
+							x={p.x}
+							y={p.y + 5}
+							width={ACCENT_W}
+							height={NODE_H - 10}
+							rx="1.5"
+							fill={info.accent}
+						/>
 						{#if sel}
-							<rect x={p.x} y={p.y} width={NODE_W} height={NODE_H} rx="6"
-								fill="none" stroke={info.accent} stroke-width="1.5" opacity="0.4" />
+							<rect
+								x={p.x}
+								y={p.y}
+								width={NODE_W}
+								height={NODE_H}
+								rx="6"
+								fill="none"
+								stroke={info.accent}
+								stroke-width="1.5"
+								opacity="0.4"
+							/>
 						{/if}
-						<text x={p.x + ACCENT_W + 12} y={p.y + NODE_H / 2 + 1}
-							dominant-baseline="central" font-size="12"
-							fill="var(--color-text-primary)">{n.label}</text>
+						<text
+							x={p.x + ACCENT_W + 12}
+							y={p.y + NODE_H / 2 + 1}
+							dominant-baseline="central"
+							font-size="12"
+							fill="var(--color-text-primary)">{n.label}</text
+						>
 					</g>
 				{/if}
 			{/each}
@@ -303,8 +341,8 @@
 						text-anchor="middle"
 						dominant-baseline="central"
 						font-size="10"
-						fill="var(--color-text-primary)"
-					>{e.label}</text>
+						fill="var(--color-text-primary)">{e.label}</text
+					>
 				{/if}
 			{/each}
 		</svg>
@@ -334,7 +372,9 @@
 					</div>
 				{/if}
 				{#if outgoing.length > 0 || incoming.length > 0}
-					<div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-secondary)]">
+					<div
+						class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-secondary)]"
+					>
 						{#each outgoing as e (e.to)}
 							{@const t = nodes.find((nn) => nn.id === e.to)}
 							<span>

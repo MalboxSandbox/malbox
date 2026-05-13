@@ -12,7 +12,7 @@
 	<h1 class="text-3xl font-semibold text-[var(--color-text-primary)]">Settings</h1>
 
 	<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-		{#each sections as s}
+		{#each sections as s (s.href)}
 			<a
 				href={s.href}
 				class="block rounded-2xl bg-[var(--color-bg-secondary)] p-6 transition-colors hover:bg-[var(--color-bg-tertiary)]"

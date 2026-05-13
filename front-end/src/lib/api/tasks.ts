@@ -33,7 +33,10 @@ export async function getResultContent(
 	return request(fetchFn, `/api/tasks/${taskId}/results/${resultId}`);
 }
 
-export async function cancelTask(fetchFn: FetchLike, id: number): Promise<{ status: string; task_id: number }> {
+export async function cancelTask(
+	fetchFn: FetchLike,
+	id: number
+): Promise<{ status: string; task_id: number }> {
 	return requestJson(fetchFn, `/api/tasks/${id}/cancel`, { method: 'POST' });
 }
 

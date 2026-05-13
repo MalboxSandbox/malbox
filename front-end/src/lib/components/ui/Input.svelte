@@ -16,6 +16,7 @@
 		value?: string;
 		required?: boolean;
 		error?: string;
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rest props spread
 		[key: string]: any;
 	} = $props();
 
@@ -26,7 +27,7 @@
 
 <div class="space-y-2">
 	{#if label}
-		<label use:root class="block text-sm font-medium text-[var(--color-text-primary)]">
+		<label use:$root class="block text-sm font-medium text-[var(--color-text-primary)]">
 			{label}
 			{#if required}
 				<span class="text-[var(--color-accent)]">*</span>

@@ -59,11 +59,13 @@
 					</span>
 				</div>
 
-				<div class="text-sm text-[var(--color-text-primary)]"><PlatformLabel platform={task.platform} /></div>
+				<div class="text-sm text-[var(--color-text-primary)]">
+					<PlatformLabel platform={task.platform} />
+				</div>
 
 				<div class="flex flex-wrap items-center gap-1">
 					{#if task.tags && task.tags.length > 0}
-						{#each task.tags as tag}
+						{#each task.tags as tag (tag)}
 							<span
 								class="rounded bg-[var(--color-bg-tertiary)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]"
 								>{tag}</span

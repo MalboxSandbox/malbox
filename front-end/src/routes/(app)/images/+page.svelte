@@ -177,7 +177,9 @@
 					class="grid grid-cols-[1fr_120px_120px_120px_100px] items-center gap-4 border-b border-[var(--color-border)] px-6 py-4 text-sm last:border-b-0"
 				>
 					<div class="text-[var(--color-text-primary)]">{img.name}</div>
-					<div class="text-[var(--color-text-primary)]"><PlatformLabel platform={img.platform} /></div>
+					<div class="text-[var(--color-text-primary)]">
+						<PlatformLabel platform={img.platform} />
+					</div>
 					<div class="text-[var(--color-text-primary)]">{img.arch}</div>
 					<div class="text-[var(--color-text-primary)]">{img.format}</div>
 					<div>

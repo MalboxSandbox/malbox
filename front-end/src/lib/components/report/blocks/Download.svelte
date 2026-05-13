@@ -33,9 +33,7 @@
 		<span>{label}</span>
 	</a>
 {:else}
-	<div
-		class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200"
-	>
+	<div class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200">
 		Missing artifact: <span class="font-mono">{artifact}</span>
 	</div>
 {/if}

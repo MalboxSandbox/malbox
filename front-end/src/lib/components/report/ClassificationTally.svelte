@@ -9,9 +9,7 @@
 
 	const order = ['malicious', 'suspicious', 'unknown', 'clean'] as const;
 	const entries = $derived(
-		order
-			.map((k) => ({ k, n: classifications[k] ?? 0 }))
-			.filter((e) => e.n > 0)
+		order.map((k) => ({ k, n: classifications[k] ?? 0 })).filter((e) => e.n > 0)
 	);
 	const total = $derived(entries.reduce((s, e) => s + e.n, 0));
 </script>
@@ -21,7 +19,7 @@
 		<div class="flex h-2 overflow-hidden rounded-full bg-[var(--color-bg-tertiary)]">
 			{#each entries as e (e.k)}
 				<div
-					class="{classificationClasses(e.k).dot}"
+					class={classificationClasses(e.k).dot}
 					style="width: {(e.n / total) * 100}%"
 					title="{e.k}: {e.n}"
 				></div>

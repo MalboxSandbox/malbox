@@ -127,5 +127,6 @@
 </script>
 
 <div class="prose prose-invert max-w-none space-y-3 text-sm text-[var(--color-text-primary)]">
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- markdown renderer with escape() sanitization -->
 	{@html html}
 </div>

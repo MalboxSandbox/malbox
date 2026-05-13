@@ -74,7 +74,7 @@
 	<div class="relative">
 		<svg width={chartWidth} height={chartHeight} class="w-full">
 			<!-- Grid lines -->
-			{#each Array(5) as _, i}
+			{#each Array(5) as _, i (i)}
 				<line
 					x1={padding.left}
 					y1={padding.top + (i * (chartHeight - padding.top - padding.bottom)) / 4}
@@ -108,7 +108,7 @@
 			</defs>
 
 			<!-- X-axis labels -->
-			{#each data as day, i}
+			{#each data as day, i (i)}
 				<text
 					x={padding.left + (i / (data.length - 1)) * (chartWidth - padding.left - padding.right)}
 					y={chartHeight - 10}

@@ -16,19 +16,28 @@
 		fill?: string;
 		stroke?: string;
 		strokeWidth?: number;
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rest props spread
 		[key: string]: any;
 	} = $props();
 
 	const isConfig = $derived(
 		typeof path === 'object' && !Array.isArray(path) && 'd' in (path as object)
 	);
-	const config = $derived(isConfig ? (path as { d: string | readonly string[]; viewBox?: string; fillRule?: string }) : null);
+	const config = $derived(
+		isConfig
+			? (path as { d: string | readonly string[]; viewBox?: string; fillRule?: string })
+			: null
+	);
 	const resolvedViewBox = $derived(config?.viewBox ?? viewBox);
 	const fillRule = $derived(config?.fillRule as 'evenodd' | 'nonzero' | undefined);
 	const paths = $derived(
 		config
-			? Array.isArray(config.d) ? config.d : [config.d]
-			: Array.isArray(path) ? (path as readonly string[]) : [path as string]
+			? Array.isArray(config.d)
+				? config.d
+				: [config.d]
+			: Array.isArray(path)
+				? (path as readonly string[])
+				: [path as string]
 	);
 </script>
 
@@ -41,7 +50,7 @@
 	xmlns="http://www.w3.org/2000/svg"
 	{...restProps}
 >
-	{#each paths as p}
+	{#each paths as p, i (i)}
 		{#if fillRule}
 			<path d={p} fill-rule={fillRule} clip-rule={fillRule} />
 		{:else}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import { formatBytes } from '$lib/api/format';
 	import type { ArtifactLink } from '$lib/api/types';
 
@@ -57,16 +58,14 @@
 		[...tree.children.values()].filter((n) => n.children.size > 0 || !n.artifact)
 	);
 
-	let expandedFolders = $state<Set<string>>(new Set());
+	let expandedFolders = new SvelteSet<string>();
 
 	function toggleFolder(path: string) {
-		const next = new Set(expandedFolders);
-		if (next.has(path)) {
-			next.delete(path);
+		if (expandedFolders.has(path)) {
+			expandedFolders.delete(path);
 		} else {
-			next.add(path);
+			expandedFolders.add(path);
 		}
-		expandedFolders = next;
 	}
 
 	function collectFiles(node: ArtifactNode): ArtifactLink[] {
@@ -78,7 +77,10 @@
 		return files;
 	}
 
-	function flattenFolder(node: ArtifactNode, prefix: string): { path: string; files: ArtifactLink[] } {
+	function flattenFolder(
+		node: ArtifactNode,
+		prefix: string
+	): { path: string; files: ArtifactLink[] } {
 		let current = node;
 		let fullPath = prefix ? `${prefix}/${node.name}` : node.name;
 
@@ -129,7 +131,9 @@
 						xmlns="http://www.w3.org/2000/svg"
 						viewBox="0 0 20 20"
 						fill="currentColor"
-						class="size-4 shrink-0 text-[var(--color-text-secondary)] transition-transform duration-150 {expanded ? 'rotate-90' : ''}"
+						class="size-4 shrink-0 text-[var(--color-text-secondary)] transition-transform duration-150 {expanded
+							? 'rotate-90'
+							: ''}"
 					>
 						<path
 							fill-rule="evenodd"
@@ -168,7 +172,9 @@
 								<span class="truncate text-[var(--color-text-primary)]" title={a.result_name}>
 									{fileName(a.result_name)}
 								</span>
-								<span class="ml-auto flex shrink-0 items-center gap-2 text-[var(--color-text-secondary)]">
+								<span
+									class="ml-auto flex shrink-0 items-center gap-2 text-[var(--color-text-secondary)]"
+								>
 									<span class="uppercase">{a.format}</span>
 									<span>&middot;</span>
 									<span>{formatBytes(a.size_bytes)}</span>

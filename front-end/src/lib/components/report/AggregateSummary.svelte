@@ -7,7 +7,7 @@
 	import Ttps from './blocks/Ttps.svelte';
 	import CopyButton from '$lib/components/ui/CopyButton.svelte';
 	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
-	import type { TaskReport, Classification } from '$lib/api/types';
+	import type { TaskReport } from '$lib/api/types';
 
 	interface Props {
 		data: TaskReport;
@@ -40,9 +40,7 @@
 	const running = $derived(!isTerminalStatus(data.task.status));
 
 	const created = $derived(splitDateTime(data.task.created_on));
-	const completed = $derived(
-		data.task.completed_on ? splitDateTime(data.task.completed_on) : null
-	);
+	const completed = $derived(data.task.completed_on ? splitDateTime(data.task.completed_on) : null);
 
 	const durationText = $derived.by(() => {
 		if (!data.task.completed_on) return null;
@@ -91,16 +89,23 @@
 					onclick={handleCancel}
 					class="flex items-center gap-1 rounded bg-[var(--color-text-secondary)]/15 px-3 py-1 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-text-secondary)]/25 disabled:cursor-not-allowed disabled:opacity-50"
 				>
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-						<path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" />
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="size-3.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z"
+							clip-rule="evenodd"
+						/>
 					</svg>
 					{canceling ? 'Cancelling...' : 'Cancel'}
 				</button>
 			</div>
 		{:else if data.task.status === 'failed'}
-			<span class="rounded bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300">
-				Failed
-			</span>
+			<span class="rounded bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300"> Failed </span>
 		{:else if data.task.status === 'canceled'}
 			<span
 				class="rounded bg-[var(--color-text-secondary)]/20 px-3 py-1 text-xs font-medium text-[var(--color-text-secondary)]"
@@ -118,10 +123,7 @@
 				<dt class="text-[var(--color-text-secondary)]">Score</dt>
 				<dd class="text-[var(--color-text-primary)]">
 					{#if hasScore}
-						<ScoreBar
-							score={data.aggregate.score!}
-							classification={data.aggregate.verdict}
-						/>
+						<ScoreBar score={data.aggregate.score!} classification={data.aggregate.verdict} />
 					{:else}
 						<span class="text-[var(--color-text-secondary)]">Not available</span>
 					{/if}
@@ -163,7 +165,9 @@
 				<h2 class="text-sm font-medium text-[var(--color-text-secondary)]">Execution</h2>
 				<dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
 					<dt class="text-[var(--color-text-secondary)]">Platform</dt>
-					<dd class="text-[var(--color-text-primary)]"><PlatformLabel platform={data.task.platform} /></dd>
+					<dd class="text-[var(--color-text-primary)]">
+						<PlatformLabel platform={data.task.platform} />
+					</dd>
 					<dt class="text-[var(--color-text-secondary)]">Priority</dt>
 					<dd class="text-[var(--color-text-primary)]">{data.task.priority}</dd>
 					<dt class="text-[var(--color-text-secondary)]">Timeout</dt>
@@ -207,9 +211,7 @@
 	<!-- Plugins -->
 	{#if data.plugins.length > 0}
 		<div class="space-y-4">
-			<h2
-				class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
-			>
+			<h2 class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
 				Plugins
 			</h2>
 			<div class="grid gap-4 md:grid-cols-2">
@@ -232,9 +234,7 @@
 
 	{#if data.aggregate.indicators.length > 0}
 		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
-			<h2
-				class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
-			>
+			<h2 class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
 				Indicators ({data.aggregate.indicators.length})
 			</h2>
 			<Iocs items={data.aggregate.indicators} />
@@ -243,9 +243,7 @@
 
 	{#if data.aggregate.ttps.length > 0}
 		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
-			<h2
-				class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
-			>
+			<h2 class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
 				TTPs ({data.aggregate.ttps.length})
 			</h2>
 			<Ttps items={data.aggregate.ttps} />

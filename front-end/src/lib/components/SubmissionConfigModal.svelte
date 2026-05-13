@@ -22,6 +22,7 @@
 		onApply: (config: SubmissionConfig) => void;
 	}
 
+	// eslint-disable-next-line svelte/no-unused-props -- platform is output-only, derived from vmMode
 	let { config, onApply }: Props = $props();
 
 	let draftTimeout = $state<number | null>(null);
@@ -36,7 +37,6 @@
 	let availablePlugins = $state<AvailablePlugins | null>(null);
 	let machines = $state<Machine[]>([]);
 	let snapshots = $state<Snapshot[]>([]);
-	let loadingPlugins = $state(false);
 	let loadingMachines = $state(false);
 	let loadingSnapshots = $state(false);
 	let machineDropdownOpen = $state(false);
@@ -61,16 +61,12 @@
 		draftVmMode !== 'no-vm' ? machines.filter((m) => m.platform === draftVmMode) : []
 	);
 
-	const selectedMachine = $derived(
-		platformMachines.find((m) => m.id === draftMachineId) ?? null
-	);
+	const selectedMachine = $derived(platformMachines.find((m) => m.id === draftMachineId) ?? null);
 
 	const selectedSnapshot = $derived(snapshots.find((s) => s.id === draftSnapshotId) ?? null);
 
 	const snapshotGuestPluginNames = $derived<string[]>(
-		selectedSnapshot?.guest_plugins
-			? (selectedSnapshot.guest_plugins as string[])
-			: []
+		selectedSnapshot?.guest_plugins ? (selectedSnapshot.guest_plugins as string[]) : []
 	);
 
 	const visibleGuestPlugins = $derived(
@@ -112,13 +108,10 @@
 	});
 
 	async function loadPlugins() {
-		loadingPlugins = true;
 		try {
 			availablePlugins = await listAvailablePlugins(fetch);
 		} catch {
 			availablePlugins = null;
-		} finally {
-			loadingPlugins = false;
 		}
 	}
 
@@ -161,9 +154,7 @@
 
 	function selectSnapshot(snap: Snapshot) {
 		draftSnapshotId = snap.id;
-		const guestPluginNames: string[] = snap.guest_plugins
-			? (snap.guest_plugins as string[])
-			: [];
+		const guestPluginNames: string[] = snap.guest_plugins ? (snap.guest_plugins as string[]) : [];
 		if (availablePlugins) {
 			const hostNames = availablePlugins.host.map((p) => p.name);
 			const guestNames = availablePlugins.guest
@@ -234,7 +225,7 @@
 </script>
 
 <button
-	use:trigger
+	use:$trigger
 	type="button"
 	class="relative inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-2.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]"
 	title="Submission options"
@@ -245,11 +236,11 @@
 	{/if}
 </button>
 
-<div use:portalled>
+<div use:$portalled>
 	{#if $open}
-		<div use:overlay class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"></div>
+		<div use:$overlay class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"></div>
 		<div
-			use:content
+			use:$content
 			class="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-5 py-4 max-h-[85vh] overflow-y-auto"
 			onclick={(e) => {
 				const target = e.target as HTMLElement;
@@ -257,11 +248,11 @@
 			}}
 		>
 			<div class="mb-4 flex items-center justify-between">
-				<h3 use:title class="text-sm font-semibold text-[var(--color-text-primary)]">
+				<h3 use:$title class="text-sm font-semibold text-[var(--color-text-primary)]">
 					Submission Options
 				</h3>
 				<button
-					use:close
+					use:$close
 					aria-label="Close"
 					class="rounded-lg p-1 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]"
 				>
@@ -376,7 +367,7 @@
 									<div
 										class="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] py-1 shadow-lg"
 									>
-										{#each platformMachines as machine}
+										{#each platformMachines as machine (machine.id)}
 											<button
 												type="button"
 												onclick={() => {
@@ -466,7 +457,7 @@
 									<div
 										class="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] py-1 shadow-lg"
 									>
-										{#each snapshots as snap}
+										{#each snapshots as snap (snap.id)}
 											<button
 												type="button"
 												onclick={() => {
@@ -509,10 +500,15 @@
 						>
 							{#if availablePlugins.host.length > 0}
 								<div class="flex flex-wrap items-center gap-1.5">
-									<span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] mr-0.5">Host</span>
-									{#each availablePlugins.host as plugin}
+									<span
+										class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] mr-0.5"
+										>Host</span
+									>
+									{#each availablePlugins.host as plugin (plugin.name)}
 										<label
-											class="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors {draftPlugins.includes(plugin.name)
+											class="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors {draftPlugins.includes(
+												plugin.name
+											)
 												? 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)]'
 												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]'}"
 											title={plugin.description ?? plugin.name}
@@ -524,7 +520,9 @@
 												class="sr-only"
 											/>
 											<span
-												class="flex size-3.5 items-center justify-center rounded border {draftPlugins.includes(plugin.name)
+												class="flex size-3.5 items-center justify-center rounded border {draftPlugins.includes(
+													plugin.name
+												)
 													? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
 													: 'border-[var(--color-border)]'}"
 											>
@@ -550,10 +548,15 @@
 									<div class="border-t border-[var(--color-border)]"></div>
 								{/if}
 								<div class="flex flex-wrap items-center gap-1.5">
-									<span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] mr-0.5">Guest</span>
-									{#each visibleGuestPlugins as plugin}
+									<span
+										class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] mr-0.5"
+										>Guest</span
+									>
+									{#each visibleGuestPlugins as plugin (plugin.name)}
 										<label
-											class="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors {draftPlugins.includes(plugin.name)
+											class="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors {draftPlugins.includes(
+												plugin.name
+											)
 												? 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)]'
 												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)]'}"
 											title={plugin.description ?? plugin.name}
@@ -565,7 +568,9 @@
 												class="sr-only"
 											/>
 											<span
-												class="flex size-3.5 items-center justify-center rounded border {draftPlugins.includes(plugin.name)
+												class="flex size-3.5 items-center justify-center rounded border {draftPlugins.includes(
+													plugin.name
+												)
 													? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
 													: 'border-[var(--color-border)]'}"
 											>
@@ -596,7 +601,7 @@
 						>Priority</span
 					>
 					<div class="flex gap-1">
-						{#each priorityLabels as { value, label }}
+						{#each priorityLabels as { value, label } (value)}
 							<button
 								type="button"
 								onclick={() => (draftPriority = value)}
@@ -640,7 +645,7 @@
 					<div
 						class="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-2.5 py-1.5"
 					>
-						{#each draftTags as tag}
+						{#each draftTags as tag (tag)}
 							<span
 								class="inline-flex items-center gap-0.5 rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-xs font-medium text-[var(--color-text-primary)]"
 							>

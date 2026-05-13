@@ -12,7 +12,9 @@
 <div class="space-y-2 rounded-lg bg-[var(--color-bg-tertiary)] p-4">
 	<div class="text-xs text-[var(--color-text-secondary)]">
 		Unsupported block type:
-		<span class="font-mono text-[var(--color-text-primary)]">{(block as { type: string }).type}</span>
+		<span class="font-mono text-[var(--color-text-primary)]"
+			>{(block as { type: string }).type}</span
+		>
 	</div>
 	<Json data={block} collapsed />
 </div>

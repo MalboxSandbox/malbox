@@ -81,7 +81,7 @@
 
 				<button
 					type="button"
-					use:trigger
+					use:$trigger
 					class="text-sm text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
 				>
 					Forgot password?
@@ -159,19 +159,19 @@
 </div>
 
 <!-- Forgot Password Dialog -->
-<div use:portalled>
+<div use:$portalled>
 	{#if $open}
-		<div use:overlay class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"></div>
+		<div use:$overlay class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"></div>
 		<div
-			use:content
+			use:$content
 			class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
                    bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]
                    rounded-2xl p-6 w-full max-w-md z-50"
 		>
-			<h3 use:title class="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
+			<h3 use:$title class="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
 				Reset Password
 			</h3>
-			<p use:description class="text-[var(--color-text-secondary)] text-sm mb-6">
+			<p use:$description class="text-[var(--color-text-secondary)] text-sm mb-6">
 				Enter your email address and we'll send you a link to reset your password.
 			</p>
 
@@ -187,7 +187,7 @@
 				<div class="flex gap-3">
 					<button
 						type="button"
-						use:close
+						use:$close
 						class="flex-1 px-4 py-2 border border-[var(--color-border)]
                                text-[var(--color-text-primary)] rounded-lg
                                hover:bg-[var(--color-bg-card)] transition-colors"

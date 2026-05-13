@@ -35,7 +35,9 @@
 				>
 					<div class="text-[var(--color-text-secondary)]">{m.id != null ? `#${m.id}` : '—'}</div>
 					<div class="text-[var(--color-text-primary)]">{m.name}</div>
-					<div class="text-[var(--color-text-primary)]"><PlatformLabel platform={m.platform} /></div>
+					<div class="text-[var(--color-text-primary)]">
+						<PlatformLabel platform={m.platform} />
+					</div>
 					<div class="text-[var(--color-text-primary)]">{m.status}</div>
 					<div class="text-[var(--color-text-secondary)]">{m.ip ?? '—'}</div>
 				</a>

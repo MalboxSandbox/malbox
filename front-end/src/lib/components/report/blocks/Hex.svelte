@@ -53,6 +53,9 @@
 			hex · {bytes.length} bytes
 		</span>
 	</div>
-	<pre class="overflow-x-auto border-t border-[var(--color-border)]/30 px-4 py-3 font-mono text-xs leading-5 text-[var(--color-text-primary)]">{#each rows as r, i (i)}<span class="select-none text-[var(--color-text-secondary)]">{r.off}</span>  {r.hex}  <span class="text-[var(--color-accent)]/60">{r.ascii}</span>
-{/each}</pre>
+	<pre
+		class="overflow-x-auto border-t border-[var(--color-border)]/30 px-4 py-3 font-mono text-xs leading-5 text-[var(--color-text-primary)]">{#each rows as r, i (i)}<span
+				class="select-none text-[var(--color-text-secondary)]">{r.off}</span
+			>  {r.hex}  <span class="text-[var(--color-accent)]/60">{r.ascii}</span>
+		{/each}</pre>
 </div>

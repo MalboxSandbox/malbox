@@ -23,9 +23,7 @@
 	});
 
 	const label = $derived(
-		classification
-			? classification.charAt(0).toUpperCase() + classification.slice(1)
-			: 'Unknown'
+		classification ? classification.charAt(0).toUpperCase() + classification.slice(1) : 'Unknown'
 	);
 
 	const gray = 'oklch(0.35 0 0)';

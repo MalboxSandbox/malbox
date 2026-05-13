@@ -34,7 +34,7 @@
 	<h2 class="text-[var(--color-text-primary)] text-lg font-semibold mb-6">Recent Submissions</h2>
 
 	<div class="space-y-4">
-		{#each submissions as submission}
+		{#each submissions as submission, i (i)}
 			<div
 				class="flex items-center gap-6 py-4 border-b border-[var(--color-border)] last:border-b-0"
 			>
@@ -49,6 +49,7 @@
 					<div
 						class="w-8 h-8 rounded-lg bg-[var(--color-bg-tertiary)] flex items-center justify-center text-[var(--color-text-secondary)]"
 					>
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -- hardcoded SVG, no user input -->
 						{@html getTypeIcon(submission.type)}
 					</div>
 					<span class="text-[var(--color-text-primary)] text-sm truncate flex-1">

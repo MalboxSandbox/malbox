@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { TreeNode } from '$lib/api/types';
 	import Self from './Tree.svelte';
 
@@ -8,14 +9,12 @@
 	}
 	let { nodes, depth = 0 }: Props = $props();
 
-	let collapsed = $state<Set<number>>(new Set());
+	let collapsed = new SvelteSet<number>();
 	let inspecting = $state<number | null>(null);
 
 	function toggle(idx: number) {
-		const next = new Set(collapsed);
-		if (next.has(idx)) next.delete(idx);
-		else next.add(idx);
-		collapsed = next;
+		if (collapsed.has(idx)) collapsed.delete(idx);
+		else collapsed.add(idx);
 	}
 
 	function parseMeta(meta: unknown): Record<string, string> {
@@ -23,7 +22,11 @@
 		const out: Record<string, string> = {};
 		for (const [k, v] of Object.entries(meta as Record<string, unknown>)) {
 			if (v == null) continue;
-			out[k] = Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v);
+			out[k] = Array.isArray(v)
+				? v.join(', ')
+				: typeof v === 'object'
+					? JSON.stringify(v)
+					: String(v);
 		}
 		return out;
 	}
@@ -112,7 +115,9 @@
 				</span>
 			{/if}
 
-			<div class="flex items-center gap-1.5 rounded py-1 px-1.5 transition-colors hover:bg-[var(--color-bg-tertiary)]">
+			<div
+				class="flex items-center gap-1.5 rounded py-1 px-1.5 transition-colors hover:bg-[var(--color-bg-tertiary)]"
+			>
 				{#if hasProcessChildren}
 					<button
 						type="button"
@@ -121,9 +126,17 @@
 						onclick={() => toggle(i)}
 						aria-expanded={!isCollapsed}
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
-							class="size-3 transition-transform duration-100 {isCollapsed ? '' : 'rotate-90'}">
-							<path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z" clip-rule="evenodd" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							class="size-3 transition-transform duration-100 {isCollapsed ? '' : 'rotate-90'}"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+								clip-rule="evenodd"
+							/>
 						</svg>
 					</button>
 				{:else}
@@ -133,11 +146,15 @@
 				<span class="text-[13px] text-[var(--color-text-primary)]">{name}</span>
 
 				{#if pid}
-					<span class="shrink-0 font-mono text-[10px] text-[var(--color-text-secondary)]/60">{pid}</span>
+					<span class="shrink-0 font-mono text-[10px] text-[var(--color-text-secondary)]/60"
+						>{pid}</span
+					>
 				{/if}
 
 				{#each tags as t (t.label)}
-					<span class="flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)]">
+					<span
+						class="flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)]"
+					>
 						<span class="size-1.5 rounded-full {t.color}"></span>
 						{t.label}
 					</span>
@@ -156,7 +173,9 @@
 				{/if}
 
 				{#if meta.timestamp}
-					<span class="ml-auto shrink-0 font-mono text-[10px] text-[var(--color-text-secondary)]/50">
+					<span
+						class="ml-auto shrink-0 font-mono text-[10px] text-[var(--color-text-secondary)]/50"
+					>
 						{meta.timestamp}
 					</span>
 				{/if}
@@ -165,11 +184,22 @@
 					<button
 						type="button"
 						title="Inspect"
-						class="shrink-0 rounded p-0.5 text-[var(--color-text-secondary)]/40 transition-colors hover:text-[var(--color-text-primary)] {isInspecting ? '!text-[var(--color-text-primary)]' : ''}"
+						class="shrink-0 rounded p-0.5 text-[var(--color-text-secondary)]/40 transition-colors hover:text-[var(--color-text-primary)] {isInspecting
+							? '!text-[var(--color-text-primary)]'
+							: ''}"
 						onclick={() => (inspecting = isInspecting ? null : i)}
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3">
-							<path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.75 8a.75.75 0 0 0 0 1.5h.75v1.75a.75.75 0 0 0 1.5 0v-2.5A.75.75 0 0 0 8.25 8h-1.5Z" clip-rule="evenodd" />
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 16 16"
+							fill="currentColor"
+							class="size-3"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6-3a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6.75 8a.75.75 0 0 0 0 1.5h.75v1.75a.75.75 0 0 0 1.5 0v-2.5A.75.75 0 0 0 8.25 8h-1.5Z"
+								clip-rule="evenodd"
+							/>
 						</svg>
 					</button>
 				{/if}
@@ -188,11 +218,22 @@
 
 			{#if activities.length > 0}
 				<div class="ml-[1.625rem] flex flex-wrap gap-1.5 py-0.5">
-					{#each activities as act}
+					{#each activities as act, i (i)}
 						{@const actMeta = parseMeta(act.meta)}
-						{@const actLabel = act.label.replace(/\s*->.*$/, '').replace(/\s*\(PID\s+\d+\)/i, '').trim()}
-						{@const target = act.label.includes('->') ? act.label.split('->').pop()?.replace(/\s*\(PID\s+\d+\)/i, '').trim() : null}
-						<span class="group/act relative flex items-center gap-1.5 rounded-full bg-[var(--color-bg-tertiary)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]">
+						{@const actLabel = act.label
+							.replace(/\s*->.*$/, '')
+							.replace(/\s*\(PID\s+\d+\)/i, '')
+							.trim()}
+						{@const target = act.label.includes('->')
+							? act.label
+									.split('->')
+									.pop()
+									?.replace(/\s*\(PID\s+\d+\)/i, '')
+									.trim()
+							: null}
+						<span
+							class="group/act relative flex items-center gap-1.5 rounded-full bg-[var(--color-bg-tertiary)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)]"
+						>
 							<span class="size-1.5 shrink-0 rounded-full {activityColor(act.label)}"></span>
 							<span>{actLabel}</span>
 							{#if target}
@@ -205,10 +246,13 @@
 									target="_blank"
 									rel="noopener"
 									class="font-mono text-[10px] text-[var(--color-accent)] hover:underline"
-								>{actMeta.technique}</a>
+									>{actMeta.technique}</a
+								>
 							{/if}
 							{#if actMeta.timestamp}
-								<span class="font-mono text-[10px] text-[var(--color-text-secondary)]/40">{actMeta.timestamp}</span>
+								<span class="font-mono text-[10px] text-[var(--color-text-secondary)]/40"
+									>{actMeta.timestamp}</span
+								>
 							{/if}
 						</span>
 					{/each}

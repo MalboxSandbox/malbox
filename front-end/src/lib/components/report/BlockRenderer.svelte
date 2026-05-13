@@ -64,5 +64,5 @@
 {:else if block.type === 'graph'}
 	<Graph nodes={block.nodes} edges={block.edges} />
 {:else}
-	<Unknown block={block} />
+	<Unknown {block} />
 {/if}

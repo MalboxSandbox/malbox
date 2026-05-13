@@ -75,7 +75,9 @@
 			</div>
 			<div>
 				<dt class="text-[var(--color-text-secondary)]">Platform</dt>
-				<dd class="text-[var(--color-text-primary)]"><PlatformLabel platform={data.machine.platform} /></dd>
+				<dd class="text-[var(--color-text-primary)]">
+					<PlatformLabel platform={data.machine.platform} />
+				</dd>
 			</div>
 			<div>
 				<dt class="text-[var(--color-text-secondary)]">Arch</dt>
@@ -183,7 +185,7 @@
 					<p class="text-xs text-[var(--color-text-secondary)]">No guest plugins available.</p>
 				{:else}
 					<div class="flex flex-wrap gap-2">
-						{#each data.guestPlugins as p}
+						{#each data.guestPlugins as p (p.name)}
 							<label
 								class="flex items-center gap-1 rounded bg-[var(--color-bg-tertiary)] px-2 py-1 text-xs"
 							>

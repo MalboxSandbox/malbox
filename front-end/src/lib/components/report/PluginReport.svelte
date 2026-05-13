@@ -47,10 +47,7 @@
 				{/if}
 			</div>
 			{#if report?.verdict?.score !== undefined}
-				<ScoreBar
-					score={report.verdict.score}
-					classification={report.verdict.classification}
-				/>
+				<ScoreBar score={report.verdict.score} classification={report.verdict.classification} />
 			{/if}
 		</div>
 
@@ -78,7 +75,9 @@
 		</div>
 
 		{#if schemaWarning}
-			<div class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200">
+			<div
+				class="rounded-lg border-l-2 border-amber-500 bg-amber-500/10 p-3 text-xs text-amber-200"
+			>
 				This report uses schema version {report?.schema_version}; some fields may not render.
 			</div>
 		{/if}
@@ -92,7 +91,9 @@
 	{/if}
 
 	{#if !report}
-		<div class="rounded-2xl bg-[var(--color-bg-secondary)] p-8 text-sm text-[var(--color-text-secondary)]">
+		<div
+			class="rounded-2xl bg-[var(--color-bg-secondary)] p-8 text-sm text-[var(--color-text-secondary)]"
+		>
 			This plugin did not produce a readable report.
 		</div>
 	{:else if contentSections.length > 0}

@@ -60,7 +60,7 @@
 
 		<!-- Rating -->
 		<div class="flex items-center gap-0.5 pt-1">
-			{#each renderStars(item.rating) as filled}
+			{#each renderStars(item.rating) as filled, i (i)}
 				<svg
 					class="w-5 h-5 {filled ? 'text-[#FDB022]' : 'text-[#3D3F47]'}"
 					fill="currentColor"

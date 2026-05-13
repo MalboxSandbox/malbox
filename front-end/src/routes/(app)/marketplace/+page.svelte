@@ -203,7 +203,7 @@
 			</div>
 
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-				{#each filteredOfficial() as item}
+				{#each filteredOfficial() as item (item.id)}
 					<PluginCard {item} />
 				{/each}
 			</div>
@@ -219,7 +219,7 @@
 			</div>
 
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-				{#each filteredCommunity() as item}
+				{#each filteredCommunity() as item (item.id)}
 					<PluginCard {item} />
 				{/each}
 			</div>

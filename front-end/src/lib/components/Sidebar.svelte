@@ -32,9 +32,7 @@
 		const m = $page.url.pathname.match(/^\/submissions\/\d+\/p\/([^/]+)/);
 		return m ? decodeURIComponent(m[1]) : null;
 	});
-	const onSummary = $derived(
-		summaryHref !== null && $page.url.pathname === summaryHref
-	);
+	const onSummary = $derived(summaryHref !== null && $page.url.pathname === summaryHref);
 </script>
 
 <aside
@@ -70,7 +68,9 @@
 			xmlns="http://www.w3.org/2000/svg"
 			viewBox="0 0 20 20"
 			fill="currentColor"
-			class="relative size-3 transition-transform duration-300 ease-out {sidebar.collapsed ? 'rotate-180' : ''}"
+			class="relative size-3 transition-transform duration-300 ease-out {sidebar.collapsed
+				? 'rotate-180'
+				: ''}"
 		>
 			<path
 				fill-rule="evenodd"
@@ -81,7 +81,11 @@
 	</button>
 
 	<!-- Logo -->
-	<div class="p-6 border-b border-[var(--color-border)] shrink-0 {sidebar.collapsed ? 'flex justify-center' : ''}">
+	<div
+		class="p-6 border-b border-[var(--color-border)] shrink-0 {sidebar.collapsed
+			? 'flex justify-center'
+			: ''}"
+	>
 		<Logo iconSize="w-8 h-8" showText={!sidebar.collapsed} />
 	</div>
 
@@ -102,9 +106,7 @@
 				>
 					<div
 						class="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-colors
-						       {isActive(item.href)
-							? 'bg-[#1D2342] text-[#516CF9]'
-							: 'bg-[#25272C] text-[#8A8F94]'}"
+						       {isActive(item.href) ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
 					>
 						<Icon path={icons[item.icon]} />
 					</div>
@@ -133,16 +135,17 @@
 				>
 					<div
 						class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors shrink-0
-						       {onSummary
-							? 'bg-[#1D2342] text-[#516CF9]'
-							: 'bg-[#25272C] text-[#8A8F94]'}"
+						       {onSummary ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
 					>
 						<Icon path={icons.summary} />
 					</div>
 					{#if !sidebar.collapsed}
 						<div class="min-w-0">
 							<span class="text-sm font-medium">Summary</span>
-							<div class="truncate text-xs text-[var(--color-text-secondary)]" title={report.task.target}>
+							<div
+								class="truncate text-xs text-[var(--color-text-secondary)]"
+								title={report.task.target}
+							>
 								{report.task.target}
 							</div>
 						</div>
@@ -163,9 +166,7 @@
 						>
 							<div
 								class="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-colors
-								       {active
-									? 'bg-[#1D2342] text-[#516CF9]'
-									: 'bg-[#25272C] text-[#8A8F94]'}"
+								       {active ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
 							>
 								<Icon path={icons.plugin} />
 							</div>
@@ -181,9 +182,7 @@
 									<a
 										href={secHref}
 										class="block py-1.5 rounded text-sm truncate transition-colors
-										       {secActive
-											? 'text-[var(--color-text-primary)]'
-											: 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
+										       {secActive ? 'text-[var(--color-text-primary)]' : 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
 										title={s.title}
 									>
 										{s.title}

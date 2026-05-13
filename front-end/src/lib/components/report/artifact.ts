@@ -5,9 +5,6 @@ import type { ArtifactLink } from '$lib/api/types';
  * blocks or `ArtifactRef`) to its download URL in the current task context.
  * Returns null when the plugin references an artifact that wasn't produced.
  */
-export function resolveArtifactUrl(
-	name: string,
-	artifacts: ArtifactLink[]
-): string | null {
+export function resolveArtifactUrl(name: string, artifacts: ArtifactLink[]): string | null {
 	return artifacts.find((a) => a.result_name === name)?.url ?? null;
 }
