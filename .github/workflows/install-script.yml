@@ -2,10 +2,12 @@ name: Install Script - Validate
 
 on:
   push:
+    branches: ["main", "dev*"]
     paths:
       - "back-end/scripts/install.ab"
       - ".github/workflows/install-script.yml"
   pull_request:
+    branches: ["main", "dev*"]
     paths:
       - "back-end/scripts/install.ab"
       - ".github/workflows/install-script.yml"
