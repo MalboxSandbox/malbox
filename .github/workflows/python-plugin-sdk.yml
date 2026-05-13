@@ -46,11 +46,18 @@ jobs:
     - name: Lint Python
       run: nix develop ..#backend --command ruff check crates/malbox-plugin-sdk-python/
 
+    - name: Create virtualenv
+      run: nix develop ..#backend --command python -m venv .venv
+
     - name: Build native extension
       run: >
         nix develop ..#backend --command
+        bash -c 'source .venv/bin/activate &&
         maturin develop
-        --manifest-path crates/malbox-plugin-sdk-python/Cargo.toml
+        --manifest-path crates/malbox-plugin-sdk-python/Cargo.toml'
 
     - name: Run tests
-      run: nix develop ..#backend --command pytest crates/malbox-plugin-sdk-python/tests/ -v
+      run: >
+        nix develop ..#backend --command
+        bash -c 'source .venv/bin/activate &&
+        pytest crates/malbox-plugin-sdk-python/tests/ -v'
