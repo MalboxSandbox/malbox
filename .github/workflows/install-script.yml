@@ -1,4 +1,4 @@
-name: Install Script
+name: Install Script - Validate
 
 on:
   push:

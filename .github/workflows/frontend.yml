@@ -1,0 +1,50 @@
+name: Frontend - Build & Lint
+
+on:
+  push:
+    branches: ["main", "dev*"]
+    paths:
+      - 'front-end/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    branches: ["main", "dev*"]
+    paths:
+      - 'front-end/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/frontend.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front-end
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+    - name: Install dependencies
+      run: nix develop ..#frontend --command pnpm install --frozen-lockfile
+
+    - name: Lint
+      run: nix develop ..#frontend --command pnpm lint
+
+    - name: Type check
+      run: nix develop ..#frontend --command pnpm check
+
+    - name: Build
+      run: nix develop ..#frontend --command pnpm build

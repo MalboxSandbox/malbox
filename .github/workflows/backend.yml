@@ -1,0 +1,55 @@
+name: Backend - Build & Test
+
+on:
+  push:
+    branches: ["main", "dev*"]
+    paths:
+      - 'back-end/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: ["main", "dev*"]
+    paths:
+      - 'back-end/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/backend.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - uses: DeterminateSystems/magic-nix-cache-action@v8
+
+    - name: Check formatting
+      run: nix develop .#backend --command cargo fmt --manifest-path back-end/Cargo.toml --all -- --check
+
+    - name: Lint
+      run: nix develop .#backend --command cargo clippy --manifest-path back-end/Cargo.toml --all-targets --all -- -D warnings
+
+    - name: Build
+      run: nix develop .#backend --command cargo build --manifest-path back-end/Cargo.toml --verbose
+
+    - name: Run tests
+      run: nix develop .#backend --command cargo nextest run --manifest-path back-end/Cargo.toml --all --no-tests pass
+
+    - name: Run doctests
+      run: nix develop .#backend --command cargo test --manifest-path back-end/Cargo.toml --doc
+
+    - name: Generate documentation
+      run: nix develop .#backend --command cargo doc --manifest-path back-end/Cargo.toml --no-deps --document-private-items
