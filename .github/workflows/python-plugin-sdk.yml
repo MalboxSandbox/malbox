@@ -47,7 +47,7 @@ jobs:
       run: nix develop ..#backend --command ruff check crates/malbox-plugin-sdk-python/
 
     - name: Create virtualenv
-      run: nix develop ..#backend --command python -m venv .venv
+      run: nix develop ..#backend --command python -m venv --system-site-packages .venv
 
     - name: Build native extension
       run: >
@@ -60,4 +60,4 @@ jobs:
       run: >
         nix develop ..#backend --command
         bash -c 'source .venv/bin/activate &&
-        pytest crates/malbox-plugin-sdk-python/tests/ -v'
+        python -m pytest crates/malbox-plugin-sdk-python/tests/ -v'

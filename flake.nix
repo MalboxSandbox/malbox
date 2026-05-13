@@ -105,12 +105,12 @@
           maturin
 
           # Languages
-          python3
+          (python3.withPackages (ps: [
+            ps.pywinrm
+            ps.pytest
+          ]))
           perl
 
-          # Python packages
-          python3Packages.pywinrm
-          python3Packages.pytest
           ruff
 
           # Infrastructure
