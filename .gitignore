@@ -26,6 +26,9 @@ devenv.local.nix
 result
 result-*
 
+# process-compose data
+.data/
+
 # pre-commit
 .pre-commit-config.yaml
 

@@ -1,0 +1,33 @@
+version: "0.5"
+
+processes:
+  postgres:
+    command: |
+      PGDATA=".data/postgres"
+      if [ ! -f "$PGDATA/PG_VERSION" ]; then
+        echo "Initializing PostgreSQL database..."
+        initdb -D "$PGDATA" --username=postgres --auth=trust
+        echo "listen_addresses = '127.0.0.1'" >> "$PGDATA/postgresql.conf"
+        echo "unix_socket_directories = ''" >> "$PGDATA/postgresql.conf"
+        echo "max_connections = 100" >> "$PGDATA/postgresql.conf"
+      fi
+      exec postgres -D "$PGDATA"
+    readiness_probe:
+      exec:
+        command: pg_isready -h 127.0.0.1 -p 5432 -U postgres
+      initial_delay_seconds: 2
+      period_seconds: 1
+    shutdown:
+      command: pg_ctl -D .data/postgres stop -m fast
+    availability:
+      restart: on_failure
+
+  postgres-setup:
+    command: |
+      createdb -h 127.0.0.1 -U postgres malbox_db 2>/dev/null || true
+      psql -h 127.0.0.1 -U postgres -c "ALTER ROLE postgres WITH SUPERUSER PASSWORD 'password';" 2>/dev/null || true
+    depends_on:
+      postgres:
+        condition: process_healthy
+    availability:
+      restart: "no"
