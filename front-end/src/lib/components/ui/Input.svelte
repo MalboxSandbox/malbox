@@ -27,7 +27,7 @@
 
 <div class="space-y-2">
 	{#if label}
-		<label use:$root class="block text-sm font-medium text-[var(--color-text-primary)]">
+		<label use:root class="block text-sm font-medium text-[var(--color-text-primary)]">
 			{label}
 			{#if required}
 				<span class="text-[var(--color-accent)]">*</span>

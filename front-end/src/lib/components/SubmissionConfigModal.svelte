@@ -225,7 +225,7 @@
 </script>
 
 <button
-	use:$trigger
+	use:trigger
 	type="button"
 	class="relative inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-2.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]"
 	title="Submission options"
@@ -236,11 +236,11 @@
 	{/if}
 </button>
 
-<div use:$portalled>
+<div use:portalled>
 	{#if $open}
-		<div use:$overlay class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"></div>
+		<div use:overlay class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"></div>
 		<div
-			use:$content
+			use:content
 			class="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-5 py-4 max-h-[85vh] overflow-y-auto"
 			onclick={(e) => {
 				const target = e.target as HTMLElement;
@@ -248,11 +248,11 @@
 			}}
 		>
 			<div class="mb-4 flex items-center justify-between">
-				<h3 use:$title class="text-sm font-semibold text-[var(--color-text-primary)]">
+				<h3 use:title class="text-sm font-semibold text-[var(--color-text-primary)]">
 					Submission Options
 				</h3>
 				<button
-					use:$close
+					use:close
 					aria-label="Close"
 					class="rounded-lg p-1 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]"
 				>
