@@ -1,0 +1,9 @@
+For structured analysis output with verdicts, indicators, TTPs, and frontend-renderable sections, use the `ReportBuilder` to construct a `Report` and push it as a result. Reports support:
+
+- **Verdicts** with classification (clean/suspicious/malicious/unknown), confidence, and score
+- **Indicators** (IOCs) with open-vocabulary types like `sha256`, `ipv4`, `domain`
+- **TTPs** referencing MITRE ATT&CK techniques
+- **Artifact references** linking to sibling `PluginResult` entries
+- **Presentation sections** with typed blocks (markdown, tables, code, hex dumps, graphs, timelines, and more)
+
+See the [SDK Reference](/reference/plugin-sdk/sdk) for the full report API.

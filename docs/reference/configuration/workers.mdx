@@ -3,4 +3,82 @@ title: "Workers"
 description: "Worker configuration reference"
 ---
 
+This page documents all worker configuration options. For conceptual information, see [Workers](/task-management/workers).
 
+## Daemon-Level Settings
+
+Worker pool settings are configured in the `[general]` section of `malbox.toml`:
+
+```toml
+[general]
+max_workers = 4
+min_workers = 1
+idle_timeout_ms = 60000
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_workers` | `integer` | `4` | Maximum number of concurrent workers. The pool auto-scales up to this limit when all active workers are busy. |
+| `min_workers` | `integer` | `1` | Baseline workers that are always running. These never idle-exit. |
+| `idle_timeout_ms` | `integer` | `60000` | How long a demand worker (beyond `min_workers`) waits without work before exiting. In milliseconds. |
+
+Baseline workers (`min_workers`) have no idle timeout and run until the daemon shuts down. Demand workers are spawned when all active workers are busy and exit automatically after `idle_timeout_ms` of inactivity.
+
+## Worker Configuration
+
+Individual worker behavior is controlled through `WorkerConfig`:
+
+```toml
+[[workers]]
+name = "default"
+execution_mode = "Single"
+batch_processing = false
+max_batch_size = 1
+batch_timeout_ms = 500
+idle_timeout_ms = 500
+max_concurrent_tasks = 1
+priority = 5
+
+[workers.resource_limits]
+memory_mb = 4096
+cpu_cores = 2
+
+[workers.plugin_restrictions]
+allow = ["string-extractor", "yara-scanner"]
+deny = []
+```
+
+### Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Unique name for this worker configuration. |
+| `compatible_tasks` | `string[]` | No | all types | Task types this worker can handle. Omit or set to `null` to accept all task types. |
+| `execution_mode` | `string` | Yes | - | `"Single"` (one task at a time) or `"Batch"` (batch processing). |
+| `batch_processing` | `bool` | Yes | - | Whether this worker supports batch processing. |
+| `max_batch_size` | `integer` | No | `1` | Maximum tasks in a single batch. |
+| `batch_timeout_ms` | `integer` | No | `500` | Maximum time to wait for batch collection (milliseconds). |
+| `idle_timeout_ms` | `integer` | No | `500` | Maximum idle time before the worker exits (milliseconds). |
+| `max_concurrent_tasks` | `integer` | No | `1` | Maximum concurrent tasks this worker can handle. |
+| `priority` | `integer` | No | `5` | Worker priority for task assignment (higher = preferred). Range: 0-255. |
+| `compatible_platforms` | `string[]` | No | all | Machine platforms this worker can handle (`"windows"`, `"linux"`). |
+
+### `[workers.resource_limits]`
+
+Optional resource constraints for the worker.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `memory_mb` | `integer` | unlimited | Memory limit in megabytes. |
+| `cpu_cores` | `integer` | unlimited | CPU core limit. |
+| `disk_mb` | `integer` | unlimited | Disk space limit in megabytes. |
+| `network_kbps` | `integer` | unlimited | Network bandwidth limit in KB/s. |
+
+### `[workers.plugin_restrictions]`
+
+Control which plugins a worker is allowed to execute.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allow` | `string[]` | `[]` (all allowed) | Plugins this worker is allowed to use. Empty means all plugins are allowed. |
+| `deny` | `string[]` | `[]` | Plugins this worker must not use. Takes precedence over `allow`. |

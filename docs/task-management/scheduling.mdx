@@ -7,37 +7,39 @@ description: "How the Malbox scheduler coordinates task execution and resource a
 
 The Malbox scheduler is a multi-tier asynchronous scheduling system that coordinates task queuing, worker pool allocation, resource provisioning, and plugin execution lifecycle.
 
-Think of the scheduler as the central event loop that orchestrates the entire task management system.
+Think of the scheduler as the central coordinator that orchestrates the entire task management system.
 
 ## Architecture
 
-The scheduler implements an event-driven architecture built on Tokio's asynchronous runtime. At its core is a `tokio::select!` loop that multiplexes four distinct event streams:
+The scheduler implements an event-driven architecture built on Tokio's asynchronous runtime. Rather than a single event loop, it uses a spawn-based fan-out pattern with three concurrent tasks:
 
-- New task submission notifications
-- Worker completion events
-- Queued task signals
-- Shutdown requests
+- **Task ingestion** - a spawned task that receives new submissions from the HTTP layer via an mpsc channel, caches them in the task store, and enqueues them for processing
+- **Worker event listener** - a spawned task that receives completion and error events from workers via an mpsc channel
+- **Shutdown coordinator** - the main task awaits a `CancellationToken`, then triggers graceful shutdown of the worker pool and aborts the ingestion/event tasks
+
+On startup, the scheduler also recovers orphaned tasks from the database (tasks left in transient states from a prior daemon crash) and loads any pending tasks back into the queue.
 
 The scheduler maintains references to three subsystems: the task store, task queue, and worker pool.
 
 ### Task Store
 
-The task store provides persistent database storage combined with an in-memory cache for efficient retrieval of recent submissions.
+The task store provides persistent database storage combined with an in-memory cache for efficient retrieval of tasks loaded during the daemon's lifetime.
 
 ### Task Queue
 
 The task queue implements priority-based ordering using a [binary heap](https://doc.rust-lang.org/std/collections/struct.BinaryHeap.html). Task priority determines processing order when resources become available.
 
-<Note>The task queue stores only task IDs, actual task contents are retrieved from the task store.</Note>
+<Note>The task queue stores only task IDs. Actual task contents are retrieved from the task store.</Note>
 
 ### Worker Pool
 
-The worker pool manages the lifecycle of worker instances, tracking which workers are idle and available for new tasks. See [Workers](/task-management/workers) for more details.
+The worker pool manages the lifecycle of worker instances. It maintains a baseline of `min_workers` that never idle out, and spawns additional workers (up to `max_workers`) when all active workers are busy. Additional workers have an idle timeout and exit automatically when work dries up. See [Workers](/task-management/workers) for more details.
 
 ### Communication
 
-Components communicate exclusively through typed channels:
+Components communicate through typed channels and coordination primitives:
 
-- **Task submissions** - External systems submit tasks via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Worker events** - Workers report status through a dedicated [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Shutdown coordination** - A [oneshot channel](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html) enables graceful termination of the scheduler event loop
+- **Task submissions** - external systems submit tasks via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Worker events** - workers report completion and errors through a dedicated [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
+- **Task availability** - workers are notified of new tasks via a shared [`Notify`](https://docs.rs/tokio/latest/tokio/sync/struct.Notify.html)
+- **Shutdown coordination** - a [`CancellationToken`](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) propagates shutdown signals from the scheduler to all workers via child tokens

@@ -1,0 +1,18 @@
+Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
+
+<Tree>
+  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
+    <Tree.File name="my-guest-plugin-bin" />
+    <Tree.File name="plugin.toml" />
+  </Tree.Folder>
+</Tree>
+
+Provision into the VM using the deploy playbook:
+
+```bash
+cargo run -p malbox-cli machine provision <machine_id> \
+  --provisioner ansible \
+  --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
+  --snapshot <snapshot_name> \
+  --plugins my-guest-plugin
+```

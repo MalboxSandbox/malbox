@@ -7,30 +7,47 @@ description: "Infrastructure providers for creating and managing machines"
 
 Providers are the foundation of Malbox's machinery system. They handle the creation and allocation of compute infrastructure where analysis takes place.
 
-Technically, a provider is a component that implements the `Provider` interface to interact with different infrastructure platforms. Providers abstract away the complexity of different technologies, giving you a consistent interface regardless of your underlying infrastructure. 
+A provider is a component that implements a set of capability traits to interact with different infrastructure platforms. Providers abstract away the complexity of different technologies, giving you a consistent interface regardless of your underlying infrastructure.
 
-The `Provider` and related interfaces are generic enough so that users can develop providers independently of Malbox's code-base. Resulting in a more-or-less "provider-agnostic" platform.
+Providers register themselves at compile time using the `inventory` crate, so new providers can be developed independently of Malbox's codebase.
 
 ## Architecture
 
-Malbox's provider system is built on two core traits/interfaces:
+Malbox's provider system is built on a capability-based architecture:
 
-- The `Provider` trait, defines the contract that all infrastructure providers must implement.
-- The `Machine` trait, which providers must implement in the machines that they return.
+- **`ProviderHandle`** - a struct that wraps trait objects for each capability a provider supports. Created by the `#[derive(RegisterProvider)]` macro.
+- **`ProviderMetadata`** - registered at compile time via the `inventory` crate. Contains the provider name and a factory function that creates a `ProviderHandle` from provider-specific TOML configuration.
 
-### Provider Extensions
+Providers are looked up by name at runtime using `create_provider(name, config)`, which finds the registered metadata and calls the factory function.
 
-TODO
+### Capabilities
+
+Providers declare which capabilities they support. One capability is mandatory; the rest are optional:
+
+| Capability | Required | Description |
+|------------|----------|-------------|
+| **Allocate** | Yes | Create and destroy machines. All providers must implement this. |
+| **Snapshot** | No | Create, restore, and manage machine snapshots. |
+| **Clone** | No | Clone existing machines to create new instances. |
+| **Migrate** | No | Move machines between hosts. |
+| **GuestAccess** | No | Transfer files and execute commands inside guest VMs. |
+
+You can query a provider's capabilities at runtime via `has_capability("snapshot")` or `list_capabilities()`.
 
 ## Supported Providers
 
-TODO
+### libvirt
+
+The built-in libvirt provider supports the **Allocate**, **Snapshot**, and **Clone** capabilities. It manages VMs through libvirt's API and is enabled via the `provider-libvirt` feature flag on the daemon.
+
+Configuration in `malbox.toml`:
+
+```toml
+[providers.libvirt]
+uri = "qemu:///system"
+```
 
 ## Next Steps
 
-- Take a look at the [Provider SDK Reference](/api-reference/provider-sdk)
-- Read a guide on how to [Implement your own Provider](/guides/development/provider-creation)
-- Read about [Provisioners](/machinery/provisioners)
-
-
-
+- Read about [Provisioners](/machinery/provisioners) for configuring machines after creation
+- Read about [Packer](/machinery/packer) for building machine images

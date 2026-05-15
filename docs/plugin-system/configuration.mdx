@@ -3,30 +3,83 @@ title: "Configuration"
 description: "How to configure plugin behavior and execution"
 ---
 
-Malbox provides extensive configuration options for controlling how plugins operate. Both the plugin system itself and individual plugins can be configured to fit specific use cases and requirements.
+Malbox provides configuration options for controlling how plugins operate. Both the plugin system itself and individual plugins can be configured to fit specific use cases and requirements. All plugin configuration lives in `plugin.toml`, a manifest file that sits alongside the plugin binary.
 
 ## Plugin Types
 
-Plugins can run either on the host system or inside a sandboxed (guest) environment. This choice affects isolation, performance, and what resources the plugin can access.
+Plugins can run either on the host system or inside a sandboxed (guest) environment:
+
+| Type | Transport | Lifecycle | Use case |
+|------|-----------|-----------|----------|
+| **Host** | iceoryx2 IPC (shared memory) | Can persist across tasks | Analysis that needs host-level access or long-lived state (ML models, signature databases) |
+| **Guest** | gRPC | Terminated with sandbox after each task | Analysis inside a VM that monitors the sample at runtime (ETW, syscall tracing) |
+
+Host plugins implement the `HostPlugin` trait with `on_task`, `on_start`, `on_stop`, `on_event`, and `health_check` handlers. Guest plugins implement the `GuestPlugin` trait with `on_start`, `on_stop`, `execute_sample`, and `health_check` handlers.
 
 ## Execution Contexts
 
-Execution contexts define how plugins coordinate with each other during task execution. Some plugins need exclusive access to resources, others can run alongside compatible plugins, and some have no coordination requirements at all. Choosing the right execution context balances isolation needs against throughput.
+Execution contexts define how plugins coordinate with each other during task execution:
+
+| Context | Description |
+|---------|-------------|
+| `exclusive` | Only one instance runs at a time across the entire daemon. Use when the plugin holds a global lock or exclusive resource. |
+| `sequential` | Tasks are dispatched one at a time, in order. The plugin processes tasks serially but the daemon can run other plugins concurrently. |
+| `parallel` | Multiple tasks may run concurrently within this plugin. Your handlers must be thread-safe (`Mutex`, `RwLock`, atomics). |
+| `unrestricted` | No constraints on concurrency or ordering. Use when the plugin is fully stateless. |
+
+Set via `execution` in the `[runtime]` section of `plugin.toml`:
+
+```toml
+[runtime]
+execution = "parallel"
+```
 
 ## State Management
 
-State management controls how plugins maintain data across their lifecycle. Plugins can be completely isolated between tasks, share state globally, or selectively share context with specific plugins or tasks. The right choice depends on whether your plugin benefits from persistence (like keeping ML models loaded) or requires clean state for each execution.
+State management controls how plugins maintain data across their lifecycle:
+
+| Mode | Description |
+|------|-------------|
+| `persistent` | Stays running between tasks. The process is started once and reused. Host plugins only. Good for keeping ML models or signature databases loaded in memory. |
+| `ephemeral` | Spun up per task and torn down immediately after. Each task gets a clean plugin process. The default for guest plugins. |
+| `scoped` | Lives for the duration of an analysis scope (e.g. a batch of related tasks). Requires a `[scope]` section defining which plugins and task types share the scope. |
+
+<Warning>
+`scoped` state is not yet implemented. Plugins configured with `state = "scoped"` will fail to start.
+</Warning>
+
+Set via `state` in the `[runtime]` section of `plugin.toml`:
+
+```toml
+[runtime]
+state = "persistent"
+```
 
 ## Runtime Configuration
 
-Guest plugins carry their runtime settings in the `[runtime]` section of their `plugin.toml`. The SDK bakes these values into the plugin binary at build time.
+Guest plugins carry their runtime settings in the `[runtime]` section of their `plugin.toml`. The SDK bakes these values into the plugin binary at build time. Host plugins have the same `[runtime]` section, but the daemon reads it at registry scan time rather than baking it into the binary.
 
-To change a runtime setting, edit `plugin.toml` and rebuild the plugin. See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full field list and defaults.
+Key runtime settings include paths (sample directory, artifact directory, stash directory), stash behavior (threshold and TTL), analysis timeout, log filter, and auto-collection configuration for artifacts and external logs.
+
+To change a runtime setting, edit `plugin.toml` and rebuild the plugin (guest) or restart the daemon (host). See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full field list, defaults, and validation rules.
 
 ## Custom Plugin Settings
 
-Beyond system-level configuration, plugin developers can expose custom settings specific to their plugins. Users can adjust these settings to customize plugin behavior without modifying the plugin itself.
+Beyond system-level configuration, plugin developers can expose custom settings. The daemon passes a `HashMap<String, String>` config map to the plugin's `on_start` handler. In Rust host plugins, the `#[malbox::handlers]` macro can automatically deserialize this map into a typed struct if your `on_start` method takes a typed parameter.
+
+## Event Subscriptions
+
+Host plugins can subscribe to other plugins' event channels via the `[events]` section in `plugin.toml`. This enables reactive analysis pipelines where plugins chain off each other's output. See [Event Hooks](/plugin-system/event-hooks) for details.
+
+```toml
+[events]
+subscribe = ["string-extractor"]
+```
+
+<Note>
+Guest plugins do not support event subscriptions.
+</Note>
 
 ## Reference
 
-For complete specifications and all available options, see the [Plugin Configuration Reference](/reference/configuration/plugins).
+For complete specifications, all available options, and validation rules, see the [Plugin Configuration Reference](/reference/configuration/plugins).

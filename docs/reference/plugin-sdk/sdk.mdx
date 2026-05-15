@@ -1,0 +1,895 @@
+---
+title: "SDK Reference"
+description: "API reference for the Malbox Plugin SDK"
+---
+
+import DeployHost from "/snippets/deploy-host.mdx"
+import DeployGuest from "/snippets/deploy-guest.mdx"
+
+<View title="Rust" icon="rust">
+
+The full API reference for the `malbox-plugin-sdk` crate is hosted on our crate documentation site:
+
+<Card title="malbox_plugin_sdk API Reference" icon="rust" href="https://crates.malbox.app/malbox_plugin_sdk/index.html">
+  Browse the complete Rust API documentation - structs, traits, enums, and macros.
+</Card>
+
+For a step-by-step walkthrough on building a plugin, see the [Creating a Rust Plugin](/plugin-guides/creating-a-rust-plugin) guide.
+
+</View>
+
+<View title="C++" icon="C">
+
+Complete API reference for the Malbox C++20 Plugin SDK. For a step-by-step walkthrough, see the [Creating a C++ Plugin](/plugin-guides/creating-a-cpp-plugin) guide.
+
+## Plugin Classes
+
+<Tabs>
+  <Tab title="Host">
+    Every host plugin subclasses `malbox::HostPlugin` and overrides `on_task` at minimum. All methods have default no-op implementations.
+
+    ```cpp
+    #include <malbox/plugin.hpp>
+
+    class MyPlugin final : public malbox::HostPlugin {
+        void on_task(const malbox::Context& ctx) override;
+    };
+    ```
+
+    ### Lifecycle Methods
+
+    #### `on_task`
+
+    Called for each assigned analysis task. Push results via `ctx.results().push()` during execution.
+
+    ```cpp
+    virtual void on_task(const Context& ctx);
+    ```
+
+    <ResponseField name="ctx" type="const Context&" required>
+      Runtime context for the current task. Provides access to task metadata via `ctx.task()` and a result sink via `ctx.results()`. Copyable and thread-safe.
+    </ResponseField>
+
+    #### `on_start`
+
+    Called once before the plugin begins accepting tasks.
+
+    ```cpp
+    virtual void on_start(const std::unordered_map<std::string, std::string>& config);
+    ```
+
+    <ResponseField name="config" type="const std::unordered_map<std::string, std::string>&">
+      Key-value configuration map from the daemon and `plugin.toml` settings.
+    </ResponseField>
+
+    #### `on_stop`
+
+    Called once after the plugin finishes accepting tasks.
+
+    ```cpp
+    virtual void on_stop();
+    ```
+
+    #### `on_event`
+
+    Triggered by system-wide or plugin lifecycle events. Does not receive a `Context` - events are system-wide notifications not tied to a specific task. See the [Events Reference](/reference/plugin-sdk/events) for the full list.
+
+    ```cpp
+    virtual void on_event(const Event& event);
+    ```
+
+    <ResponseField name="event" type="const Event&" required>
+      The event that occurred. Use `event.tag()` for the event type, `event.id()` for the context-dependent identifier, and convenience accessors `event.task_id()`, `event.plugin_id()`, or `event.sample_id()`. For `PluginResultAvailable` events, `event.source()` and `event.result_name()` identify the originating plugin and result.
+    </ResponseField>
+  </Tab>
+  <Tab title="Guest">
+    Guest plugins run inside a sandbox VM and communicate via gRPC. Subclass `malbox::GuestPlugin` and implement the required methods.
+
+    ```cpp
+    #include <malbox/plugin.hpp>
+
+    class MyGuestPlugin final : public malbox::GuestPlugin {
+        void on_start(const malbox::Context& ctx) override;
+        void on_stop(const malbox::Context& ctx) override;
+    };
+    ```
+
+    ### Lifecycle Methods
+
+    #### `on_start` (required)
+
+    Called when a new task is assigned to this guest plugin.
+
+    ```cpp
+    virtual void on_start(const Context& ctx) = 0;
+    ```
+
+    #### `on_stop` (required)
+
+    Called when the current task ends.
+
+    ```cpp
+    virtual void on_stop(const Context& ctx) = 0;
+    ```
+
+    #### `execute_sample`
+
+    Launch the sample. Return `LaunchResult::UseDefault` to use the SDK's built-in launcher, or `LaunchResult::Launched` if the plugin handled it.
+
+    ```cpp
+    virtual LaunchResult execute_sample(const std::filesystem::path& sample_path);
+    ```
+  </Tab>
+</Tabs>
+
+#### `health_check`
+
+Called periodically by the runtime to check plugin health. The default implementation always reports healthy.
+
+```cpp
+virtual HealthStatus health_check();
+```
+
+## Context
+
+Ref-counted handle to the runtime context for the current task. Copyable and thread-safe - clone it to share with background threads.
+
+### `task()`
+
+Returns a non-owning view into task metadata.
+
+```cpp
+TaskInfo task() const;
+```
+
+### `results()`
+
+Returns a handle for pushing results.
+
+```cpp
+ResultSink results() const;
+```
+
+### `progress()`
+
+Reports task progress to the runtime.
+
+```cpp
+void progress(double pct, const char* message) const;
+```
+
+<ResponseField name="pct" type="double" required>
+  Progress value from `0.0` to `1.0`.
+</ResponseField>
+<ResponseField name="message" type="const char*" required>
+  Human-readable status message (e.g. `"scanning signatures"`).
+</ResponseField>
+
+### `warn()`
+
+Logs a warning that will be attached to the task report.
+
+```cpp
+void warn(const char* message) const;
+```
+
+### `emit_event()`
+
+Emits a system event back to the daemon.
+
+```cpp
+void emit_event(const Event& event) const;
+```
+
+### `mark_collected()`
+
+Marks a file as already handled, preventing artifact auto-collection from sending it again.
+
+```cpp
+void mark_collected(const char* path) const;
+void mark_collected(const std::filesystem::path& path) const;
+```
+
+## TaskInfo
+
+Non-owning view into task metadata. Obtained via `ctx.task()`. Must not outlive the `Context` it was created from.
+
+### `id()`
+
+```cpp
+int32_t id() const;
+```
+
+### `sample_path()`
+
+```cpp
+std::string sample_path() const;
+```
+
+### `sample_bytes()`
+
+Reads the entire sample file into memory. Throws `malbox::Error` on I/O failure.
+
+```cpp
+std::vector<uint8_t> sample_bytes() const;
+```
+
+### `config()`
+
+```cpp
+std::unordered_map<std::string, std::string> config() const;
+```
+
+### `config_value()`
+
+```cpp
+std::optional<std::string> config_value(const char* key) const;
+```
+
+## ResultSink
+
+Non-owning handle for pushing results via the `Context`. Obtained via `ctx.results()`.
+
+| Method | Description |
+|--------|-------------|
+| `push(const PluginResult&)` | Push a single `PluginResult` |
+| `push_json(name, span)` | Push JSON-encoded result from raw bytes |
+| `push_bytes(name, span)` | Push a raw-bytes result |
+| `push_file(name, path)` | Push a file-reference result |
+| `flush(span<PluginResult>)` | Push a batch of results |
+
+## PluginResult
+
+Represents a single analysis result. Construct via static factory methods.
+
+```cpp
+static PluginResult json(std::string name, std::span<const uint8_t> data);
+static PluginResult bytes(std::string name, std::span<const uint8_t> data);
+static PluginResult file(std::string name, std::string path);
+```
+
+| Accessor | Return Type | Description |
+|----------|-------------|-------------|
+| `name()` | `const std::string&` | Result identifier |
+| `tag()` | `Tag` | `Tag::Json`, `Tag::Bytes`, or `Tag::File` |
+| `data()` | `const std::vector<uint8_t>&` | Raw data (Json/Bytes) |
+| `path()` | `const std::string&` | File path (File) |
+
+## Event
+
+A system-wide event. Each event carries a tag and at most one integer identifier.
+
+### EventTag
+
+```cpp
+enum class EventTag : int32_t {
+    // Task events (id = task_id)
+    TaskCreated, TaskStarting, TaskCompleted, TaskFailed, TaskCanceled,
+    // Plugin events (id = plugin_id)
+    PluginStarted, PluginStopped, PluginResultAvailable,
+    // Sample events (id = sample_id)
+    SampleStarted, SampleStopped, SampleResultProduced,
+    // Daemon events (id unused)
+    DaemonShutdown, ConfigReloaded,
+};
+```
+
+### Accessors
+
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `tag()` | `EventTag` | The event type |
+| `id()` | `int32_t` | Context-dependent entity ID |
+| `task_id()` | `int32_t` | Alias for `id()` (task events) |
+| `plugin_id()` | `int32_t` | Alias for `id()` (plugin events) |
+| `sample_id()` | `int32_t` | Alias for `id()` (sample events) |
+| `source()` | `const std::string&` | Source plugin (`PluginResultAvailable` only) |
+| `result_name()` | `const std::string&` | Result name (`PluginResultAvailable` only) |
+
+### Factory Methods
+
+```cpp
+Event::task_created(int32_t task_id)
+Event::task_starting(int32_t task_id)
+Event::task_completed(int32_t task_id)
+Event::task_failed(int32_t task_id)
+Event::task_canceled(int32_t task_id)
+Event::plugin_started(int32_t plugin_id)
+Event::plugin_stopped(int32_t plugin_id)
+Event::plugin_result_available(std::string source, std::string result_name)
+Event::sample_started(int32_t sample_id)
+Event::sample_stopped(int32_t sample_id)
+Event::sample_result_produced(int32_t sample_id)
+Event::daemon_shutdown()
+Event::config_reloaded()
+```
+
+## Report
+
+`#include <malbox/report.hpp>`
+
+A structured result envelope with semantic metadata and a presentation layer for frontend rendering. All report types live in the `malbox::report` namespace.
+
+### Semantic Types
+
+```cpp
+enum class Classification { Clean, Suspicious, Malicious, Unknown };
+enum class Confidence { Low, Medium, High };
+enum class CalloutLevel { Info, Success, Warn, Error };
+```
+
+```cpp
+struct Verdict {
+    Classification classification = Classification::Unknown;
+    std::optional<uint8_t> score;       // 0-100
+    std::optional<Confidence> confidence;
+    std::vector<std::string> labels;
+};
+
+struct Indicator {
+    std::string kind;
+    std::string value;
+    std::optional<std::string> context;
+    std::optional<std::string> first_seen;  // ISO 8601
+
+    Indicator(std::string kind, std::string value);
+    Indicator& with_context(std::string ctx);
+    Indicator& with_first_seen(std::string ts);
+};
+
+struct Ttp {
+    std::string id;                     // e.g. "T1055"
+    std::string name;                   // e.g. "Process Injection"
+    std::optional<std::string> evidence;
+
+    Ttp(std::string id, std::string name);
+    Ttp& with_evidence(std::string ev);
+};
+
+struct ArtifactRef {
+    std::string result_name;
+    std::string kind;                   // e.g. "yara", "pcap", "json"
+    std::optional<std::string> description;
+
+    ArtifactRef(std::string result_name, std::string kind);
+    ArtifactRef& with_description(std::string desc);
+};
+```
+
+### Presentation Blocks
+
+```cpp
+using Block = std::variant<
+    BlockMarkdown, BlockCallout, BlockHeading, BlockDivider,
+    BlockKv, BlockTable, BlockCode, BlockJson, BlockHex,
+    BlockImage, BlockDownload, BlockIocs, BlockTtps,
+    BlockTree, BlockTimeline, BlockGraph
+>;
+```
+
+| Type | Fields |
+|------|--------|
+| `BlockMarkdown` | `text` |
+| `BlockCallout` | `level` (`CalloutLevel`), `text` |
+| `BlockHeading` | `level` (1-6), `text` |
+| `BlockDivider` | (none) |
+| `BlockKv` | `pairs` (`std::vector<KvPair>`) |
+| `BlockTable` | `columns`, `rows_json`, `sortable`, `searchable` |
+| `BlockCode` | `language`, `text` |
+| `BlockJson` | `data_json` (pre-encoded), `collapsed` |
+| `BlockHex` | `bytes_b64`, `offset` |
+| `BlockImage` | `artifact`, `caption` |
+| `BlockDownload` | `artifact`, `label` |
+| `BlockIocs` | `items` (`std::vector<Indicator>`) |
+| `BlockTtps` | `items` (`std::vector<Ttp>`) |
+| `BlockTree` | `nodes` (`std::vector<TreeNode>`) |
+| `BlockTimeline` | `events` (`std::vector<TimelineEvent>`) |
+| `BlockGraph` | `nodes`, `edges` |
+
+### Helper Structs
+
+```cpp
+struct KvPair { std::string key; std::string value; bool mono = false; };
+struct Column { std::string key; std::string label; std::string type = "string"; };
+struct TreeNode { std::string label; std::vector<TreeNode> children; std::string meta_json; };
+struct TimelineEvent { std::string ts; std::string label; std::optional<std::string> severity; std::string meta_json; };
+struct GraphNode { std::string id; std::string label; std::string meta_json; };
+struct GraphEdge { std::string from; std::string to; std::optional<std::string> label; };
+```
+
+### ReportBuilder
+
+```cpp
+class ReportBuilder {
+public:
+    ReportBuilder(std::string plugin_id, std::string plugin_version);
+
+    ReportBuilder& display_name(std::string name);
+    ReportBuilder& summary(std::string s);
+    ReportBuilder& verdict(Classification c,
+        std::optional<uint8_t> score = {},
+        std::optional<Confidence> conf = {});
+    ReportBuilder& labels(std::vector<std::string> ls);
+    ReportBuilder& indicator(Indicator i);
+    ReportBuilder& ttp(Ttp t);
+    ReportBuilder& artifact(ArtifactRef a);
+    ReportBuilder& raw(std::string pre_encoded_json);
+    ReportBuilder& section(SectionBuilder sb);
+
+    template <typename F>
+    ReportBuilder& section(std::string id, std::string title, F&& fn);
+
+    Report build();
+};
+```
+
+### SectionBuilder
+
+```cpp
+class SectionBuilder {
+public:
+    SectionBuilder(std::string id, std::string title);
+
+    SectionBuilder& block(Block b);
+    SectionBuilder& markdown(std::string text);
+    SectionBuilder& callout(CalloutLevel level, std::string text);
+    SectionBuilder& heading(uint8_t level, std::string text);
+    SectionBuilder& divider();
+    SectionBuilder& kv(std::vector<KvPair> pairs);
+    SectionBuilder& table(std::vector<Column> cols,
+        std::vector<std::string> rows_json,
+        bool sortable = true, bool searchable = false);
+    SectionBuilder& code(std::string language, std::string text);
+    SectionBuilder& json(std::string data_json, bool collapsed = true);
+    SectionBuilder& hex(std::string bytes_b64, uint64_t offset = 0);
+    SectionBuilder& image(std::string artifact, std::optional<std::string> caption = {});
+    SectionBuilder& download(std::string artifact, std::string label);
+    SectionBuilder& iocs(std::vector<Indicator> items);
+    SectionBuilder& ttps(std::vector<Ttp> items);
+    SectionBuilder& tree(std::vector<TreeNode> nodes);
+    SectionBuilder& timeline(std::vector<TimelineEvent> events);
+    SectionBuilder& graph(std::vector<GraphNode> nodes, std::vector<GraphEdge> edges);
+
+    Section build();
+};
+```
+
+### Constants
+
+```cpp
+constexpr uint32_t SCHEMA_VERSION = 1;
+constexpr const char* REPORT_RESULT_NAME = "report";
+```
+
+## PluginMeta
+
+```cpp
+struct PluginMeta {
+    std::string     name;
+    std::string     version;
+    std::string     description;
+    std::string     authors;
+    PluginState     state         = PluginState::Ephemeral;
+    ExecutionContext execution    = ExecutionContext::Exclusive;
+};
+```
+
+## Enums
+
+<Tabs>
+  <Tab title="PluginState">
+    | Value | Description |
+    |-------|-------------|
+    | `PluginState::Persistent` | Stays running between tasks |
+    | `PluginState::Ephemeral` | Spawned per task, torn down after |
+    | `PluginState::Scoped` | Lives for a batch of related tasks |
+  </Tab>
+  <Tab title="ExecutionContext">
+    | Value | Description |
+    |-------|-------------|
+    | `ExecutionContext::Exclusive` | Only one instance runs across the entire daemon |
+    | `ExecutionContext::Sequential` | Tasks dispatched one at a time, in order |
+    | `ExecutionContext::Parallel` | Multiple tasks may run concurrently |
+    | `ExecutionContext::Unrestricted` | No constraints on concurrency or ordering |
+  </Tab>
+  <Tab title="LaunchResult">
+    | Value | Description |
+    |-------|-------------|
+    | `LaunchResult::UseDefault` | Use the SDK's built-in sample launcher |
+    | `LaunchResult::Launched` | The plugin launched the sample itself |
+  </Tab>
+</Tabs>
+
+## HealthStatus
+
+```cpp
+struct HealthStatus {
+    bool        ready;
+    std::string reason;
+
+    static HealthStatus ok();
+    static HealthStatus not_ready(const char* reason);
+};
+```
+
+## RuntimeConfig
+
+Runtime configuration baked into the plugin binary at build time. Used by guest plugins.
+
+```cpp
+struct RuntimeConfig {
+    std::uint16_t port;
+    std::string   sample_dir;
+    std::string   artifact_dir;
+    std::string   stash_dir;
+    std::string   log_dir;
+    std::string   external_log_dir;
+    std::size_t   stash_threshold_bytes;
+    std::uint64_t stash_ttl_secs;
+    std::string   log_filter;
+    std::uint64_t analysis_timeout;
+    AutoCollectConfig auto_collect_artifacts;
+    AutoCollectConfig auto_collect_external_logs;
+};
+
+struct AutoCollectConfig {
+    bool                         enabled = false;
+    std::vector<std::string>     include;
+    std::vector<std::string>     exclude;
+    std::uint64_t                max_file_size = 0;
+};
+```
+
+## Runtime Entry Points
+
+<Tabs>
+  <Tab title="Host">
+    ```cpp
+    malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
+    ```
+  </Tab>
+  <Tab title="Guest">
+    ```cpp
+    malbox::run_guest_plugin(
+        std::make_unique<MyGuestPlugin>(),
+        meta,
+        config);
+    ```
+  </Tab>
+</Tabs>
+
+```cpp
+// Test harness (no transport, useful for unit tests)
+malbox::test_run_plugin(
+    std::make_unique<MyPlugin>(),
+    task_id,
+    "/path/to/sample",
+    config_map);
+```
+
+All functions block until the runtime shuts down. They throw `malbox::Error` on failure.
+
+## Logging
+
+`#include <malbox/log.hpp>`
+
+```cpp
+malbox::log::trace(const std::string& target, const std::string& message);
+malbox::log::debug(const std::string& target, const std::string& message);
+malbox::log::info(const std::string& target, const std::string& message);
+malbox::log::warn(const std::string& target, const std::string& message);
+malbox::log::error(const std::string& target, const std::string& message);
+```
+
+Convenience macros that auto-fill the target from the source location:
+
+```cpp
+MALBOX_LOG_TRACE("message");
+MALBOX_LOG_DEBUG("message");
+MALBOX_LOG_INFO("message");
+MALBOX_LOG_WARN("message");
+MALBOX_LOG_ERROR("message");
+```
+
+## Error Handling
+
+```cpp
+enum class ErrorKind : int32_t {
+    Unknown        = -1,
+    InvalidContext = -2,
+    ChannelClosed  = -3,
+    Io             = -4,
+    Transport      = -5,
+};
+
+class Error : public std::runtime_error {
+public:
+    Error(ErrorKind kind, const std::string& message);
+    ErrorKind kind() const noexcept;
+    int32_t code() const noexcept;
+};
+```
+
+## Thread Safety
+
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. The runtime guarantees that only one callback is active at a time unless `ExecutionContext::Parallel` is chosen.
+
+## Headers
+
+| Header | Contents |
+|--------|----------|
+| `malbox/plugin.hpp` | Umbrella header (include this one) |
+| `malbox/error.hpp` | `malbox::Error` and `malbox::ErrorKind` |
+| `malbox/types.hpp` | Enums, `PluginMeta`, `HealthStatus` |
+| `malbox/events.hpp` | `Event` class with `EventTag` and factory methods |
+| `malbox/context.hpp` | `Context`, `TaskInfo`, `ResultSink` |
+| `malbox/result.hpp` | `malbox::PluginResult` |
+| `malbox/report.hpp` | Report types, builders, semantic types, blocks |
+| `malbox/handlers.hpp` | `malbox::HostPlugin` base class |
+| `malbox/guest_plugin.hpp` | `malbox::GuestPlugin` base class |
+| `malbox/runtime.hpp` | Entry points, `RuntimeConfig`, `AutoCollectConfig` |
+| `malbox/log.hpp` | Logging functions and macros |
+
+</View>
+
+<View title="Python" icon="python">
+
+Complete API reference for the Malbox Python Plugin SDK. For a step-by-step walkthrough, see the [Creating a Python Plugin](/plugin-guides/creating-a-python-plugin) guide.
+
+## Plugin Base Class
+
+Every plugin subclasses `malbox_plugin_sdk.Plugin` and overrides `on_task` at minimum. All other methods have default no-op implementations. Handlers can be `def` (synchronous) or `async def` (asynchronous) - the runtime detects coroutines automatically.
+
+```python
+import malbox_plugin_sdk as malbox
+
+class MyPlugin(malbox.Plugin):
+    def on_task(self, ctx: malbox.Context):
+        ...
+```
+
+### Lifecycle Methods
+
+#### `on_task`
+
+```python
+def on_task(self, ctx: Context) -> None
+```
+
+<ResponseField name="ctx" type="Context" required>
+  Runtime context for the current task. Access task metadata via `ctx.task()` and the result sink via `ctx.results()`.
+</ResponseField>
+
+#### `on_start`
+
+```python
+def on_start(self, config: dict[str, str]) -> None
+```
+
+#### `on_stop`
+
+```python
+def on_stop(self) -> None
+```
+
+#### `health_check`
+
+```python
+def health_check(self) -> HealthStatus
+```
+
+### Event Handler
+
+#### `on_event`
+
+Does not receive a `Context` - events are system-wide notifications not tied to a specific task.
+
+```python
+def on_event(self, event: Event) -> None
+```
+
+<ResponseField name="event" type="Event" required>
+  The system event. Access `event.kind` for the type, `event.id` for the entity ID. For `PluginResultAvailable` events, `event.source` and `event.result_name` identify the originating plugin and result.
+</ResponseField>
+
+## Context
+
+Used to communicate with the runtime during task execution. Only valid during handler callbacks.
+
+| Method | Description |
+|--------|-------------|
+| `task() -> TaskInfo` | Access task metadata |
+| `results() -> ResultSink` | Access the result sink |
+| `progress(pct, message)` | Report progress (0.0 to 1.0) |
+| `emit_event(event)` | Emit a system event |
+| `warn(message)` | Log a warning attached to the task report |
+| `mark_collected(path)` | Prevent auto-collection of a file |
+
+## TaskInfo
+
+Obtained via `ctx.task()`. Only valid during the handler scope.
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `int` | Unique task identifier |
+| `sample_path` | `Path` | Absolute path to the sample on disk |
+| `config` | `dict[str, str]` | Task configuration key-value pairs |
+
+### Methods
+
+| Method | Return Type | Description |
+|--------|-------------|-------------|
+| `sample_bytes()` | `bytes` | Read the entire sample into memory |
+| `config_value(key)` | `str \| None` | Look up a single config value |
+
+## ResultSink
+
+Obtained via `ctx.results()`.
+
+| Method | Description |
+|--------|-------------|
+| `push(result: PluginResult)` | Push a single result |
+| `push_json(name, data: bytes)` | Push JSON from raw bytes |
+| `push_bytes(name, data: bytes)` | Push raw bytes |
+| `push_file(name, path)` | Push a file reference |
+| `push_all(results: list)` | Push a batch of results |
+
+## PluginResult
+
+```python
+malbox.PluginResult.json(name: str, data: Any) -> PluginResult
+malbox.PluginResult.bytes(name: str, data: bytes) -> PluginResult
+malbox.PluginResult.file(name: str, path: str | Path) -> PluginResult
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `str` | Result identifier |
+
+## Event
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `kind` | `str` | Event type (e.g. `"TaskCompleted"`, `"DaemonShutdown"`) |
+| `id` | `int \| None` | Associated entity ID (task_id, plugin_id, or sample_id) |
+| `source` | `str \| None` | Source plugin name (`PluginResultAvailable` only) |
+| `result_name` | `str \| None` | Result name (`PluginResultAvailable` only) |
+
+### Constructors
+
+```python
+malbox.Event.task_created(task_id: int) -> Event
+malbox.Event.task_starting(task_id: int) -> Event
+malbox.Event.task_completed(task_id: int) -> Event
+malbox.Event.task_failed(task_id: int) -> Event
+malbox.Event.task_canceled(task_id: int) -> Event
+malbox.Event.plugin_started(plugin_id: int) -> Event
+malbox.Event.plugin_stopped(plugin_id: int) -> Event
+malbox.Event.plugin_result_available(source: str, result_name: str) -> Event
+malbox.Event.sample_started(sample_id: int) -> Event
+malbox.Event.sample_stopped(sample_id: int) -> Event
+malbox.Event.sample_result_produced(sample_id: int) -> Event
+malbox.Event.daemon_shutdown() -> Event
+malbox.Event.config_reloaded() -> Event
+```
+
+## HealthStatus
+
+```python
+malbox.HealthStatus.Healthy() -> HealthStatus
+malbox.HealthStatus.Degraded(reason: str) -> HealthStatus
+malbox.HealthStatus.Unhealthy(reason: str) -> HealthStatus
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `is_ready` | `bool` | Whether the plugin is healthy |
+| `reason` | `str` | Reason for degraded/unhealthy state |
+
+## Report
+
+### ReportBuilder
+
+```python
+report = malbox.ReportBuilder(plugin_id: str, plugin_version: str)
+```
+
+| Method | Description |
+|--------|-------------|
+| `display_name(name)` | Human-readable plugin name |
+| `summary(text)` | Brief analysis summary |
+| `verdict(classification, score?, confidence?)` | Analysis verdict |
+| `labels(labels: list[str])` | Free-form classification tags |
+| `indicator(ind: Indicator)` | Add an IOC |
+| `ttp(ttp: Ttp)` | Add a MITRE ATT&CK technique |
+| `artifact(art: ArtifactRef)` | Reference a sibling result |
+| `section(id, title, blocks: list[Block])` | Add a presentation section |
+| `raw(value: Any)` | Attach raw JSON data |
+| `build() -> PluginResult` | Finalize and return as a pushable result |
+
+### Classification & Confidence
+
+```python
+malbox.Classification.Clean / .Suspicious / .Malicious / .Unknown
+malbox.Confidence.Low / .Medium / .High
+```
+
+### Indicator
+
+```python
+malbox.Indicator(kind: str, value: str, context: str | None = None, first_seen: str | None = None)
+```
+
+### Ttp
+
+```python
+malbox.Ttp(id: str, name: str, evidence: str | None = None)
+```
+
+### ArtifactRef
+
+```python
+malbox.ArtifactRef(result_name: str, kind: str, description: str | None = None)
+```
+
+### Block Types
+
+| Constructor | Description |
+|-------------|-------------|
+| `Block.markdown(text)` | Markdown-rendered text |
+| `Block.callout(level, text)` | Callout box (`"info"`, `"success"`, `"warn"`, `"error"`) |
+| `Block.heading(level, text)` | Heading (level 1-6) |
+| `Block.divider()` | Horizontal rule |
+| `Block.kv(pairs: list[KvPair])` | Key-value pairs |
+| `Block.table(columns, rows, sortable?, searchable?)` | Data table |
+| `Block.code(language, text)` | Code block with syntax highlighting |
+| `Block.json(data, collapsed?)` | Collapsible JSON viewer |
+| `Block.hex(bytes_b64, offset)` | Hex dump |
+| `Block.image(artifact, caption?)` | Image from artifact |
+| `Block.download(artifact, label)` | Download link for artifact |
+| `Block.iocs(items: list[Indicator])` | IOC display |
+| `Block.ttps(items: list[Ttp])` | TTP display |
+| `Block.tree(nodes: list[TreeNode])` | Tree view |
+| `Block.timeline(events: list[TimelineEvent])` | Timeline |
+| `Block.graph(nodes, edges)` | Graph visualization |
+
+### Helper Types
+
+```python
+malbox.KvPair(key: str, value: str, mono: bool = False)
+malbox.Column(key: str, label: str, type: str = "string")
+malbox.TreeNode(label: str, children: list[TreeNode] | None = None, meta: Any = None)
+malbox.TimelineEvent(ts: str, label: str, severity: str | None = None, meta: Any = None)
+malbox.GraphNode(id: str, label: str, meta: Any = None)
+malbox.GraphEdge(from_node: str, to_node: str, label: str | None = None)
+```
+
+## Logging
+
+```python
+malbox.trace(message: str) -> None
+malbox.debug(message: str) -> None
+malbox.info(message: str) -> None
+malbox.warn(message: str) -> None
+malbox.error(message: str) -> None
+```
+
+## Entry Point
+
+```python
+malbox.run(
+    plugin: Plugin,
+    name: str | None = None,     # defaults to MALBOX_PLUGIN_NAME env or "python-plugin"
+    version: str | None = None,  # defaults to "0.1.0"
+) -> None
+```
+
+## Thread Safety
+
+When using `execution = "parallel"` in `plugin.toml`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `threading.Lock` or similar. The GIL is released during IPC operations, so Python code in handlers runs without contention from the runtime's event loop.
+
+</View>

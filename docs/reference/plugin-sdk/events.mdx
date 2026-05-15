@@ -7,7 +7,7 @@ This page documents all events that plugins can subscribe to through the hook sy
 
 ## Task Events
 
-Events fired during the task lifecycle.
+Events fired during the task lifecycle. The `id` field carries the `task_id`.
 
 | Event | Description |
 |-------|-------------|
@@ -15,31 +15,33 @@ Events fired during the task lifecycle.
 | TaskStarting | A task is about to begin execution |
 | TaskCompleted | A task finished successfully |
 | TaskFailed | A task failed during execution |
+| TaskCanceled | A task was canceled (timeout or manual) |
 
 ## Plugin Events
 
-Events related to plugin process lifecycle and output.
+Events related to plugin process lifecycle and output. The `id` field carries the `plugin_id` (except for `PluginResultAvailable`, which carries `source` and `result_name` instead). These events are published on per-plugin event channels that other plugins can subscribe to.
 
 | Event | Description |
 |-------|-------------|
-| PluginStarted | A plugin process has started |
+| PluginStarted | A plugin process has started and is ready |
 | PluginStopped | A plugin process has stopped |
-| PluginResultAvailable | A plugin produced an analysis result |
+| PluginResultAvailable | A plugin produced an analysis result. The `source` field identifies the originating plugin and `result_name` identifies the result. Handle via `on_event` |
 
 ## Sample Events
 
-Events fired during sample processing.
+Events fired during sample processing. The `id` field carries the `sample_id`.
 
 | Event | Description |
 |-------|-------------|
-| SampleReceived | A new sample has been received for analysis |
-| SampleProcessed | Sample processing is complete |
+| SampleStarted | A sample analysis session has started |
+| SampleStopped | A sample analysis session has stopped |
+| SampleResultProduced | A sample produced an analysis result |
 
 ## System Events
 
-Events for system-wide occurrences.
+Events for system-wide occurrences. Broadcast on the shared daemon event channel to all plugins.
 
 | Event | Description |
 |-------|-------------|
-| SystemShutdown | The daemon is shutting down |
+| DaemonShutdown | The daemon is shutting down |
 | ConfigReloaded | System configuration has been reloaded |

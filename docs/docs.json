@@ -8,7 +8,7 @@
         "dark": "#516cf9"
     },
     "banner": {
-        "content": "Documentation is still a work-in-progress! Some parts may be missing or uncomplete.",
+        "content": "Documentation is still a work-in-progress! Some parts may be missing or incomplete.",
         "dismissible": true
     },
     "icons": { "library": "lucide" },
@@ -68,7 +68,8 @@
                         "group": "Plugin Development",
                         "pages": [
                             "plugin-guides/creating-a-rust-plugin",
-                            "plugin-guides/creating-a-cpp-plugin"
+                            "plugin-guides/creating-a-cpp-plugin",
+                            "plugin-guides/creating-a-python-plugin"
                         ]
                     }
                 ]
@@ -86,8 +87,7 @@
                     {
                         "group": "Plugin SDK",
                         "pages": [
-                        "reference/plugin-sdk/rust",
-                        "reference/plugin-sdk/cpp",
+                        "reference/plugin-sdk/sdk",
                         "reference/plugin-sdk/events"
                     ]
                     }

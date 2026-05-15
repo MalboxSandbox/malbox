@@ -3,6 +3,15 @@ title: "Creating a Rust Plugin"
 description: "Step-by-step guide to building analysis plugins in Rust using the Malbox Plugin SDK"
 ---
 
+import PluginToml from "/snippets/plugin-toml.mdx"
+import DeployHost from "/snippets/deploy-host.mdx"
+import DeployGuest from "/snippets/deploy-guest.mdx"
+import ReportsGuide from "/snippets/reports-guide.mdx"
+import BuildLinux from "/snippets/build-linux.mdx"
+import BuildWindows from "/snippets/build-windows.mdx"
+
+<View title="Host Plugin" icon="laptop">
+
 ## Getting started
 
 Create a new repository from the [Rust plugin template](https://github.com/DualHorizon/malbox-plugin-template-rust) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `Cargo.toml` and `plugin.toml` to match your plugin name.
@@ -12,15 +21,10 @@ The template gives you a working plugin with Cargo configuration, a `plugin.toml
 ## Prerequisites
 
 - Rust toolchain (stable, 2024 edition)
-- For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
 
 ## Project structure
 
 ### `Cargo.toml`
-
-The SDK is declared as a dependency with either the `host` or `guest` feature enabled depending on your plugin type.
-
-For a **guest** plugin:
 
 ```toml
 [package]
@@ -29,53 +33,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["guest"] }
-serde = { version = "1", features = ["derive"] }
-```
-
-For a **host** plugin, swap the feature:
-
-```toml
 malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["host"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 ### `plugin.toml`
 
-Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin, and its `[runtime]` section is baked into the plugin binary at compile time by the SDK's proc-macro.
-
-```toml
-[plugin]
-name = "my-plugin"
-version = "0.1.0"
-description = "My analysis plugin"
-authors = ["Your Name"]
-type = "guest"                    # or "host"
-
-[runtime]
-state = "ephemeral"               # or "persistent", "scoped"
-execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
-port = 50051                      # gRPC listen port (default: 50051)
-log_filter = "info"               # tracing filter (default: "info")
-
-[runtime.paths]
-sample_dir       = "/tmp/malbox/samples"      # where daemon pushes the sample
-artifact_dir     = "/tmp/malbox/artifacts"    # where plugin writes output (auto-collected)
-stash_dir        = "/tmp/malbox/stash"        # internal result stash spillover
-log_dir          = "/tmp/malbox/logs"         # SDK-internal log overflow files
-external_log_dir = "/tmp/malbox/ext-logs"     # external tool/driver logs (auto-collected)
-
-[runtime.stash]
-threshold_bytes = 1048576
-ttl_secs = 120
-
-[results.my_result]
-description = "What this result contains"
-user_visible = true
-display_name = "My Result"
-render = "json"
-```
-
-All `[runtime]` fields are optional and have sensible defaults. See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full list and defaults.
+<PluginToml />
 
 ### `build.rs`
 
@@ -87,8 +51,6 @@ fn main() {
 }
 ```
 
-See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
-
 ### `src/main.rs`
 
 The SDK uses attribute macros to wire your plugin into the runtime. You annotate your struct and impl block instead of manually implementing traits.
@@ -98,7 +60,7 @@ extern crate malbox_plugin_sdk as malbox;
 
 use malbox::prelude::*;
 
-#[malbox::guest_plugin]
+#[malbox::host_plugin]
 struct MyPlugin;
 
 #[malbox::handlers]
@@ -110,13 +72,13 @@ impl MyPlugin {
     }
 
     #[malbox::on_task]
-    fn process(&self, task: Task, ctx: &Context) -> Result<()> {
-        let sample = task.sample_bytes()?;
-        ctx.emit_progress(0.5, "analyzing")?;
+    fn process(&self, ctx: &Context) -> Result<()> {
+        let sample = ctx.task().sample_bytes()?;
+        ctx.progress(0.5, "analyzing")?;
 
         // ... perform analysis ...
 
-        ctx.push_result(PluginResult::json("my_result", &serde_json::json!({
+        ctx.results().push(PluginResult::json("my_result", &serde_json::json!({
             "status": "clean"
         }))?)?;
         Ok(())
@@ -132,44 +94,35 @@ impl MyPlugin {
 
 The `#[malbox::handlers]` macro scans your impl block for annotated methods and generates the necessary trait implementations. Your method names can be anything you like - the attributes determine their role.
 
-## Plugin struct macros
-
-Use one of these on your struct to declare the plugin type:
-
-| Macro | Description |
-|-------|-------------|
-| `#[malbox::host_plugin]` | Host plugin - runs on the daemon machine via IPC |
-| `#[malbox::guest_plugin]` | Guest plugin - runs inside a VM/container via gRPC |
-
-State and execution settings are read from `plugin.toml`'s `[runtime]` section at compile time - no attribute configuration is needed on the struct.
-
 ## Handler methods
-
-Annotate methods inside a `#[malbox::handlers]` impl block:
 
 | Attribute | Signature | Required |
 |-----------|-----------|----------|
-| `#[malbox::on_task]` | `fn(&self, Task, &Context) -> Result<()>` | Yes |
-| `#[malbox::on_start]` | `fn(&self) -> Result<()>` | No |
+| `#[malbox::on_task]` | `fn(&self, ctx: &Context) -> Result<()>` | No (default no-op) |
+| `#[malbox::on_start]` | `fn(&self) -> Result<()>` or `fn(&self, config: T) -> Result<()>` | No |
 | `#[malbox::on_stop]` | `fn(&self) -> Result<()>` | No |
 | `#[malbox::health_check]` | `fn(&self) -> HealthStatus` | No |
-| `#[malbox::on_event(...)]` | Varies (see [Subscribing to events](#subscribing-to-events)) | No |
+| `#[malbox::on_event(EventVariant)]` | `fn(&self) -> Result<()>` or `fn(&self)` | No |
 
-Only `#[malbox::on_task]` is required. All other handlers are optional and default to no-ops.
+When `on_start` takes a typed parameter, the macro deserializes the raw `HashMap<String, String>` config into that type automatically.
 
 ## Pushing results
 
-Results are pushed to the daemon during `on_task` via `ctx.push_result()`. You can call it multiple times to stream results incrementally. There are three result types:
+Results are pushed to the daemon via `ctx.results()`. You can call push methods multiple times to stream results incrementally. There are three result types:
 
 ```rust
-ctx.push_result(PluginResult::json("name", &my_struct)?)?;
-ctx.push_result(PluginResult::bytes("name", raw_data))?;
-ctx.push_result(PluginResult::file("name", "/path/to/file"))?;
+ctx.results().push(PluginResult::json("name", &my_struct)?)?;
+ctx.results().push(PluginResult::bytes("name", raw_data))?;
+ctx.results().push(PluginResult::file("name", "/path/to/file"))?;
 ```
+
+`json()` returns `Result<PluginResult>` (serialization can fail), while `bytes()` and `file()` return `PluginResult` directly.
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
 
-For structured analysis output with verdicts, indicators, TTPs, and frontend-renderable sections, use the `ReportBuilder` to construct a `Report` and push it as a result:
+## Reports
+
+<ReportsGuide />
 
 ```rust
 use malbox::types::report::{ReportBuilder, Classification, Confidence, Indicator};
@@ -183,10 +136,8 @@ let report = ReportBuilder::new("my-plugin", "0.1.0")
     })
     .build();
 
-ctx.push_result(report.into_plugin_result()?)?;
+ctx.results().push(report.into_plugin_result()?)?;
 ```
-
-See the [Rust SDK Reference](/reference/plugin-sdk/rust) for the full report API.
 
 ## Handling errors
 
@@ -194,50 +145,46 @@ The SDK uses its own `Result<T>` type aliased to `std::result::Result<T, SdkErro
 
 ```rust
 #[malbox::on_task]
-fn process(&self, task: Task, ctx: &Context) -> Result<()> {
-    let sample = task.sample_bytes()?;
+fn process(&self, ctx: &Context) -> Result<()> {
+    let sample = ctx.task().sample_bytes()?;
 
     if sample.is_empty() {
-        return Err(SdkError::Plugin(anyhow::anyhow!("empty sample")));
+        return Err(SdkError::Plugin("empty sample".into()));
     }
 
-    ctx.push_result(PluginResult::json("result", &"ok")?)?;
+    ctx.results().push(PluginResult::json("result", &"ok")?)?;
     Ok(())
 }
 ```
 
 ## Subscribing to events
 
-Use `#[malbox::on_event(...)]` to react to system events. Specify the event variant as the argument:
+Declare subscriptions in the `[events]` section of your `plugin.toml`, then use `#[malbox::on_event(...)]` in your handler impl to react to specific event variants:
+
+```toml
+# plugin.toml
+[events]
+subscribe = ["string-extractor", "network-analyzer"]
+```
 
 ```rust
 #[malbox::handlers]
 impl MyPlugin {
-    #[malbox::on_event(TaskEvent::TaskCompleted)]
-    fn on_task_done(&self, payload: TaskEventPayload, ctx: &Context) -> Result<()> {
-        info!(task_id = payload.task_id, "Task completed");
+    #[malbox::on_event(TaskCompleted)]
+    fn on_task_done(&self) -> Result<()> {
+        info!("A task completed");
         Ok(())
     }
 
-    #[malbox::on_event(DaemonEvent::ConfigReloaded)]
-    fn on_config_reload(&self) {
-        info!("Configuration reloaded");
-    }
-
-    #[malbox::on_event(PluginEvent::PluginResultProduced, from = ["host-file-info"])]
-    fn on_result(&self, payload: PluginEventPayload, _ctx: &Context) -> Result<()> {
-        info!(plugin_id = payload.plugin_id, "Got result from watched plugin");
+    #[malbox::on_event(PluginResultAvailable)]
+    fn on_upstream_result(&self) -> Result<()> {
+        info!("An upstream plugin produced a result");
         Ok(())
     }
 }
 ```
 
-The `from` filter narrows plugin events to results from specific named plugins. You can also declare event subscriptions in `plugin.toml`:
-
-```toml
-[events]
-subscribe = ["TaskCreated", "TaskStarting"]
-```
+Event handlers are called with no arguments (the event metadata is matched internally by the macro). Handlers can optionally return `Result<()>`.
 
 See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
 
@@ -254,13 +201,229 @@ struct MyPlugin {
 
 ## Thread safety
 
-When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. The SDK requires `Send + Sync` for guest plugins. Protect shared mutable state with `Mutex`, `RwLock`, or atomic types. Health checks may also arrive on a different thread regardless of execution context.
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `Mutex`, `RwLock`, or atomic types. Health checks may also arrive on a different thread regardless of execution context.
+
+## Testing
+
+The SDK provides a `testkit` feature for writing unit tests without a running daemon. Enable it in your `Cargo.toml`:
+
+```toml
+[dev-dependencies]
+malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["host", "testkit"] }
+```
+
+This gives you `Context::test_new()` to create a mock context for testing handler logic.
 
 ## Build
 
 ### Linux
 
-Host plugins always target Linux (they run on the daemon machine). Guest plugins targeting a Linux guest VM also use this:
+<BuildLinux />
+
+```bash
+cargo build --release
+```
+
+## Deploy
+
+<DeployHost />
+
+## Examples
+
+See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).
+
+</View>
+
+<View title="Guest Plugin" icon="container">
+
+## Getting started
+
+Create a new repository from the [Rust plugin template](https://github.com/DualHorizon/malbox-plugin-template-rust) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `Cargo.toml` and `plugin.toml` to match your plugin name.
+
+The template gives you a working plugin with Cargo configuration, a `plugin.toml` manifest, a `build.rs`, example source code, and CI already set up.
+
+## Prerequisites
+
+- Rust toolchain (stable, 2024 edition)
+- For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox Nix flake)
+
+## Project structure
+
+### `Cargo.toml`
+
+```toml
+[package]
+name = "my-plugin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+malbox-plugin-sdk = { path = "path/to/malbox-plugin-sdk", features = ["guest"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+### `plugin.toml`
+
+<PluginToml />
+
+### `build.rs`
+
+The `build.rs` ensures cargo re-runs the proc-macro when `plugin.toml` changes:
+
+```rust
+fn main() {
+    println!("cargo:rerun-if-changed=plugin.toml");
+}
+```
+
+### `src/main.rs`
+
+The SDK uses attribute macros to wire your plugin into the runtime. You annotate your struct and impl block instead of manually implementing traits.
+
+```rust
+extern crate malbox_plugin_sdk as malbox;
+
+use malbox::prelude::*;
+
+#[malbox::guest_plugin]
+struct MyPlugin;
+
+#[malbox::handlers]
+impl MyPlugin {
+    #[malbox::on_start]
+    fn init(&self, ctx: &Context) -> Result<()> {
+        info!("Plugin ready - starting task");
+        let sample = ctx.task().sample_bytes()?;
+        ctx.progress(0.5, "analyzing")?;
+
+        // ... perform analysis ...
+
+        ctx.results().push(PluginResult::json("my_result", &serde_json::json!({
+            "status": "clean"
+        }))?)?;
+        Ok(())
+    }
+
+    #[malbox::on_stop]
+    fn shutdown(&self, ctx: &Context) -> Result<()> {
+        info!("Task ending");
+        Ok(())
+    }
+}
+```
+
+The `#[malbox::handlers]` macro scans your impl block for annotated methods and generates the necessary trait implementations. Your method names can be anything you like - the attributes determine their role.
+
+## Handler methods
+
+| Attribute | Signature | Required |
+|-----------|-----------|----------|
+| `#[malbox::on_start]` | `fn(&self, ctx: &Context) -> Result<()>` or `fn(&self) -> Result<()>` | No |
+| `#[malbox::on_stop]` | `fn(&self, ctx: &Context) -> Result<()>` or `fn(&self) -> Result<()>` | No |
+| `#[malbox::health_check]` | `fn(&self) -> HealthStatus` | No |
+
+Guest plugin `on_start` and `on_stop` optionally receive `&Context` for the current task.
+
+## Custom sample launching
+
+By default, the SDK launches the sample using the platform's native process creation API. Override `execute_sample` to customize this for non-EXE scenarios (DLL loading, COM dispatch, etc.):
+
+```rust
+#[malbox::handlers]
+impl MyPlugin {
+    #[malbox::on_start]
+    fn init(&self, ctx: &Context) -> Result<()> {
+        // Set up monitoring before sample launch
+        Ok(())
+    }
+
+    fn execute_sample(&self, sample_path: &std::path::Path) -> Result<LaunchResult> {
+        // Custom launch logic (e.g. rundll32 for DLLs)
+        info!("Launching sample: {}", sample_path.display());
+        Ok(LaunchResult::Launched)
+    }
+
+    #[malbox::on_stop]
+    fn shutdown(&self, ctx: &Context) -> Result<()> {
+        // Flush results after analysis timeout
+        Ok(())
+    }
+}
+```
+
+Return `LaunchResult::Launched` if your plugin handled the launch, or `LaunchResult::UseDefault` to fall back to the SDK's built-in launcher.
+
+## Pushing results
+
+Results are pushed to the daemon via `ctx.results()`. You can call push methods multiple times to stream results incrementally. There are three result types:
+
+```rust
+ctx.results().push(PluginResult::json("name", &my_struct)?)?;
+ctx.results().push(PluginResult::bytes("name", raw_data))?;
+ctx.results().push(PluginResult::file("name", "/path/to/file"))?;
+```
+
+`json()` returns `Result<PluginResult>` (serialization can fail), while `bytes()` and `file()` return `PluginResult` directly.
+
+Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Reports
+
+<ReportsGuide />
+
+```rust
+use malbox::types::report::{ReportBuilder, Classification, Confidence, Indicator};
+
+let report = ReportBuilder::new("my-plugin", "0.1.0")
+    .summary("Analysis complete")
+    .verdict(Classification::Malicious, Some(85), Some(Confidence::High))
+    .indicator(Indicator::new("sha256", "abc123..."))
+    .section("overview", "Overview", |s| {
+        s.markdown("Found malicious indicators")
+    })
+    .build();
+
+ctx.results().push(report.into_plugin_result()?)?;
+```
+
+## Handling errors
+
+The SDK uses its own `Result<T>` type aliased to `std::result::Result<T, SdkError>`. Handler methods return `Result<()>` and can use `?` to propagate errors naturally.
+
+```rust
+#[malbox::on_start]
+fn init(&self, ctx: &Context) -> Result<()> {
+    let sample = ctx.task().sample_bytes()?;
+
+    if sample.is_empty() {
+        return Err(SdkError::Plugin("empty sample".into()));
+    }
+
+    ctx.results().push(PluginResult::json("result", &"ok")?)?;
+    Ok(())
+}
+```
+
+## Holding state
+
+Your plugin struct can hold fields. For concurrent access, wrap mutable state in `Mutex` or similar:
+
+```rust
+#[malbox::guest_plugin]
+struct MyPlugin {
+    cache: Mutex<HashMap<String, String>>,
+}
+```
+
+## Thread safety
+
+The SDK requires `Send + Sync` for guest plugins. Protect shared mutable state with `Mutex`, `RwLock`, or atomic types. Health checks may arrive on a different thread.
+
+## Build
+
+### Linux
+
+<BuildLinux />
 
 ```bash
 cargo build --release
@@ -268,50 +431,18 @@ cargo build --release
 
 ### Windows (cross-compile)
 
-Guest plugins that run inside a Windows analysis VM need to be cross-compiled:
+<BuildWindows />
 
 ```bash
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-<Note>
-The Malbox devenv automatically configures the MinGW linker and library paths for the `x86_64-pc-windows-gnu` target. No additional setup is needed if you're using `devenv shell`.
-</Note>
-
 ## Deploy
 
-### Host plugins
-
-Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
-
-<Tree>
-  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
-    <Tree.File name="my-host-plugin-bin" />
-    <Tree.File name="plugin.toml" />
-  </Tree.Folder>
-</Tree>
-
-### Guest plugins
-
-Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
-
-<Tree>
-  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
-    <Tree.File name="my-guest-plugin-bin" />
-    <Tree.File name="plugin.toml" />
-  </Tree.Folder>
-</Tree>
-
-Provision into the VM using the deploy playbook:
-
-```bash
-cargo run -p malbox-cli machine provision <machine_id> \
-  --provisioner ansible \
-  --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
-  --snapshot <snapshot_name> \
-  --plugins my-guest-plugin
-```
+<DeployGuest />
 
 ## Examples
 
 See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).
+
+</View>

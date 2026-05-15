@@ -1,0 +1,40 @@
+Every plugin needs a `plugin.toml` manifest alongside its binary. This tells the daemon how to manage your plugin.
+
+```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "My analysis plugin"
+authors = ["Your Name"]
+type = "guest"                    # or "host"
+
+[runtime]
+state = "ephemeral"               # or "persistent", "scoped"
+execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
+port = 50051                      # gRPC listen port (default: 50051)
+log_filter = "info"               # tracing filter (default: "info")
+analysis_timeout = 300            # max analysis time in seconds (default: 300)
+
+[runtime.paths]
+sample_dir       = "C:\\malbox\\samples"      # where daemon pushes the sample
+artifact_dir     = "C:\\malbox\\artifacts"    # where plugin writes output (auto-collected)
+stash_dir        = "C:\\malbox\\stash"        # internal result stash spillover
+log_dir          = "C:\\malbox\\logs"         # SDK-internal log overflow files
+external_log_dir = "C:\\malbox\\ext-logs"     # external tool/driver logs (auto-collected)
+
+[runtime.stash]
+threshold_bytes = 1048576
+ttl_secs = 120
+
+# Event subscriptions (host plugins only)
+[events]
+subscribe = ["other-plugin"]
+
+[results.my_result]
+description = "What this result contains"
+user_visible = true
+display_name = "My Result"
+render = "json"
+```
+
+See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full field list, defaults, and validation rules.

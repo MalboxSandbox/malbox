@@ -3,53 +3,36 @@ title: "Plugins"
 description: "Plugin configuration reference"
 ---
 
-This page documents all plugin configuration options. For conceptual information, see [Plugin Configuration](/plugin-system/configuration).
+This page documents the complete `plugin.toml` manifest schema. For conceptual information, see [Plugin Configuration](/plugin-system/configuration).
 
-## Plugin Types
-
-| Type | Description |
-|------|-------------|
-| Guest | Executes within sandboxed environments (VMs, containers). Terminated with sandbox after task completion. |
-| Host | Executes directly on the host system with full resource access. Can persist across multiple tasks. |
-
-## Execution Contexts
-
-| Context | Description |
-|---------|-------------|
-| Exclusive | Plugin runs alone, no other plugins execute simultaneously |
-| Sequential | Plugins run one at a time in defined order |
-| Parallel | Compatible plugins run concurrently |
-| Unrestricted | No coordination required, can run alongside any plugin |
-
-## State Management
-
-| Mode | Description |
-|------|-------------|
-| Persistent | Persists across tasks, host plugins only |
-| Ephemeral | Fresh state per task, no persistence |
-| Scoped | Selective sharing with specific plugins or tasks |
-
-## Runtime Configuration
-
-The `[runtime]` section in `plugin.toml` controls how the guest plugin runtime behaves. All values are baked into the plugin binary at compile time.
+## Full Example
 
 ```toml
+[plugin]
+name = "my-plugin"
+version = "0.1.0"
+description = "My analysis plugin"
+authors = ["Your Name"]
+type = "guest"                        # or "host"
+binary = "my-plugin.exe"              # optional, defaults to directory name
+
 [runtime]
-state      = "ephemeral"              # or "persistent", "scoped"
-execution  = "exclusive"              # or "sequential", "parallel", "unrestricted"
-port       = 50051
-log_filter = "info"
+state = "ephemeral"                   # or "persistent", "scoped"
+execution = "exclusive"               # or "sequential", "parallel", "unrestricted"
+port = 50051                          # gRPC listen port (default: 50051)
+log_filter = "info"                   # tracing filter (default: "info")
+analysis_timeout = 300                # max analysis time in seconds (default: 300)
 
 [runtime.paths]
-sample_dir       = "/tmp/malbox/samples"
-artifact_dir     = "/tmp/malbox/artifacts"
-stash_dir        = "/tmp/malbox/stash"
-log_dir          = "/tmp/malbox/logs"
-external_log_dir = "/tmp/malbox/ext-logs"
+sample_dir       = "C:\\malbox\\samples"
+artifact_dir     = "C:\\malbox\\artifacts"
+stash_dir        = "C:\\malbox\\stash"
+log_dir          = "C:\\malbox\\logs"
+external_log_dir = "C:\\malbox\\ext-logs"
 
 [runtime.stash]
 threshold_bytes = 1048576
-ttl_secs        = 120
+ttl_secs = 120
 
 [runtime.auto_collect.artifacts]
 enabled  = true
@@ -62,9 +45,40 @@ enabled  = true
 include  = ["**/*"]
 exclude  = []
 max_file_size = 52428800
+
+[events]
+subscribe = ["string-extractor", "network-analyzer"]
+
+[events.filters.PluginResultAvailable]
+from_plugins = ["string-extractor"]
+
+[scope]
+plugins = ["related-plugin"]
+task_types = ["full-analysis"]
+
+[results.my_result]
+description = "What this result contains"
+user_visible = true
+display_name = "My Result"
+render = "json"
 ```
 
-`state` and `execution` are required. All other fields are optional with sensible defaults.
+## `[plugin]`
+
+Core plugin identity. This section is required.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Unique plugin name. Must be alphanumeric, `-`, or `_` only. |
+| `version` | `string` | Yes | Semantic version (e.g. `"0.1.0"`). Must be valid [semver](https://semver.org/). |
+| `description` | `string` | No | Human-readable description. |
+| `authors` | `string[]` | No | List of author names. |
+| `type` | `string` | Yes | Plugin type: `"host"` or `"guest"`. |
+| `binary` | `string` | No | Executable filename. Defaults to the plugin directory name. Relevant for Python plugins (`"main.py"`). |
+
+## `[runtime]`
+
+Controls how the plugin runtime behaves. For guest plugins, these values are baked into the plugin binary at build time. For host plugins, they are read by the daemon at registry scan time.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -72,8 +86,39 @@ max_file_size = 52428800
 | `execution` | `string` | Yes | - | Execution context (`"exclusive"`, `"sequential"`, `"parallel"`, or `"unrestricted"`). |
 | `port` | `u16` | No | `50051` | gRPC listen port. Must be >= 1024. Guest plugins only. |
 | `log_filter` | `string` | No | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. |
+| `analysis_timeout` | `integer` | No | `300` | Maximum analysis time in seconds. Must be >= 1. The daemon wraps this with an additional grace period for result flushing. |
+
+### Plugin Types
+
+| Type | Description |
+|------|-------------|
+| `"guest"` | Executes inside a sandboxed VM. Communicates via gRPC. Terminated with the sandbox after task completion. |
+| `"host"` | Executes directly on the host system via iceoryx2 IPC. Can persist across multiple tasks. |
+
+### Execution Contexts
+
+| Value | Description |
+|-------|-------------|
+| `"exclusive"` | Only one instance runs at a time across the entire daemon. |
+| `"sequential"` | Tasks are dispatched one at a time, in order. |
+| `"parallel"` | Multiple tasks may run concurrently. |
+| `"unrestricted"` | No constraints on concurrency or ordering. |
+
+### State Management
+
+| Value | Description |
+|-------|-------------|
+| `"persistent"` | Stays running between tasks. Host plugins only. |
+| `"ephemeral"` | Spun up per task and torn down immediately after. |
+| `"scoped"` | Lives for the duration of an analysis scope (e.g. a batch). Requires a `[scope]` section. |
+
+<Warning>
+`"scoped"` state is not yet implemented. Plugins configured with `state = "scoped"` will fail to start.
+</Warning>
 
 ### `[runtime.paths]`
+
+All paths must be absolute. Guest plugins may use Windows-style absolute paths (e.g. `C:\malbox\samples`).
 
 | Field | Type | Default (unix) | Default (windows) | Description |
 |-------|------|-----------------|--------------------|----|
@@ -92,10 +137,10 @@ max_file_size = 52428800
 
 ### `[runtime.auto_collect]`
 
-Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. Files in these directories are streamed back to the daemon as results without the plugin needing to send them explicitly via `push_result`.
+Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. Files in these directories are streamed back to the daemon as results without the plugin needing to send them explicitly.
 
 <Note>
-For artifacts, files that were already sent explicitly (via `ctx.push_result(PluginResult::file(...))`) or marked via `ctx.mark_collected()` are skipped to avoid duplicates. External logs are always collected without dedup.
+For artifacts, files that were already sent explicitly (via `ctx.results().push(PluginResult::file(...))`) or marked via `ctx.mark_collected()` are skipped to avoid duplicates. External logs are always collected without dedup.
 </Note>
 
 #### `[runtime.auto_collect.artifacts]`
@@ -116,11 +161,58 @@ For artifacts, files that were already sent explicitly (via `ctx.push_result(Plu
 | `exclude` | `string[]` | `[]` | Glob patterns for files to exclude. |
 | `max_file_size` | `integer` | `52428800` (50 MiB) | Files larger than this are skipped. |
 
+## `[events]`
+
+Configures event subscriptions for host plugins. Guest plugins do not support event hooks.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `subscribe` | `string[]` | No | List of plugin names to subscribe to. Your plugin will receive events from these plugins' event channels. |
+
+### `[events.filters.<EventName>]`
+
+Per-event-type filters. `<EventName>` is the event variant name (e.g. `PluginResultAvailable`).
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from_plugins` | `string[]` | No | Only deliver this event type when it originates from one of these plugins. |
+
+## `[scope]`
+
+Required when `state = "scoped"`. Defines the scope boundary for the plugin's lifetime.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `plugins` | `string[]` | No | Plugins that share this scope. |
+| `task_types` | `string[]` | No | Task types that share this scope. |
+
+## `[results.<name>]`
+
+Declares result entries that this plugin may produce. Each key under `[results]` is a result name that matches what you pass to `PluginResult::json("name", ...)`, `PluginResult::bytes("name", ...)`, or `PluginResult::file("name", ...)`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `description` | `string` | No | What this result contains. |
+| `user_visible` | `bool` | No | Whether this result should be shown in the frontend UI. |
+| `display_name` | `string` | No | Human-readable name for display in the UI. |
+| `render` | `string` | No | Rendering hint for the frontend (e.g. `"json"`). |
+
+## Validation
+
+The daemon validates the manifest when scanning plugin directories. Plugins with invalid manifests are marked `Invalid` in the registry and will not be started. The following constraints are enforced:
+
+| Constraint | Rule |
+|------------|------|
+| Plugin name | Must be non-empty. Only alphanumeric characters, `-`, and `_` allowed. |
+| Version | Must be valid [semver](https://semver.org/). |
+| Port | Must be >= 1024. |
+| All paths | Must be absolute (unix-style or Windows-style for guest plugins). |
+| `threshold_bytes` | Must be >= 4096. |
+| `ttl_secs` | Must be >= 1. |
+| `analysis_timeout` | Must be >= 1. |
+| `log_filter` | Must be a valid `tracing_subscriber::EnvFilter` directive. |
+| Scoped state | Requires a `[scope]` section. |
+
 <Note>
-Changing any runtime setting requires rebuilding the plugin.
-
-The daemon validates the `[runtime]` section when scanning plugin manifests.
-
-Plugins with invalid values (e.g., a relative `sample_dir` or a port below 1024) are marked `Invalid` in the registry and will not be started.
+Changing any runtime setting requires rebuilding the plugin (for guest plugins) or restarting the daemon (for host plugins).
 </Note>
-

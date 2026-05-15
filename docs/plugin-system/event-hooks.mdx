@@ -7,7 +7,12 @@ Malbox's plugin system is event-driven. Rather than polling for changes or runni
 
 ## How Event Hooks Work
 
-When you register a plugin with Malbox, you declare which events your plugin should respond to. The system then notifies your plugin whenever those events fire, passing along relevant context and data.
+When you register a plugin with Malbox, you declare which events your plugin should respond to. The system uses two types of event channels:
+
+- **Per-plugin channels** - each plugin publishes events on its own channel (`malbox/events/plugin/{id}`). Other plugins can subscribe to these to react to lifecycle and result events.
+- **Daemon broadcast channel** - a shared channel (`malbox/events/daemon`) that delivers system-wide events (like `DaemonShutdown` and `ConfigReloaded`) to all plugins simultaneously.
+
+The runtime uses a WaitSet-based reactor pattern - your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler if one exists, or to a catch-all `on_event` method.
 
 ## Event Categories
 
@@ -22,10 +27,35 @@ Events are grouped into four categories based on what triggers them:
 
 ## Subscribing to Events
 
-Plugins can subscribe to multiple events simultaneously. The subscription model is declarative, you specify which events matter to your plugin, and the system handles routing.
+Plugins declare subscriptions in the `[events]` section of their `plugin.toml`. The subscription model is declarative - you specify which plugins to subscribe to, and the SDK runtime handles the IPC channel setup and routing.
+
+```toml
+[events]
+subscribe = ["string-extractor", "network-analyzer"]
+
+[events.filters.PluginResultAvailable]
+from_plugins = ["string-extractor"]
+```
+
+In your plugin code, use `#[malbox::on_event(...)]` handlers inside `#[malbox::handlers]` to react to specific event variants:
+
+```rust
+#[malbox::handlers]
+impl MyPlugin {
+    #[malbox::on_event(PluginResultAvailable)]
+    fn on_upstream_result(&self) -> Result<()> {
+        info!("An upstream plugin produced a result");
+        Ok(())
+    }
+}
+```
+
+## Plugin Result Chaining
+
+Beyond reacting to lifecycle events, plugins can subscribe to other plugins' event channels. When a subscribed plugin produces a result, a `PluginResultAvailable` event fires with the source plugin name and result name. Your plugin's `on_event` handler receives this event, enabling reactive analysis pipelines where plugins chain off each other's output.
 
 <Note>
-Event hooks execute asynchronously. If your plugin needs to ensure ordering between events, use the task context to coordinate.
+Events are lightweight signals - they carry minimal metadata (source plugin name and result name). Handle `PluginResultAvailable` events in your `on_event` handler to build analysis pipelines. Event hooks are only available to host plugins - guest plugins do not support event subscriptions.
 </Note>
 
 ## Reference

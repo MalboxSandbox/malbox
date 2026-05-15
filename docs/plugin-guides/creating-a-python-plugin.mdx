@@ -1,0 +1,276 @@
+---
+title: "Creating a Python Plugin"
+description: "Step-by-step guide to building analysis plugins in Python using the Malbox Plugin SDK"
+---
+
+import PluginToml from "/snippets/plugin-toml.mdx"
+import DeployHost from "/snippets/deploy-host.mdx"
+import ReportsGuide from "/snippets/reports-guide.mdx"
+
+## Getting started
+
+Install the Python SDK into your environment:
+
+```bash
+pip install malbox-plugin-sdk
+```
+
+Create a plugin directory with a `plugin.toml` manifest and a `main.py` entry script. That's it - no Rust toolchain, no compilation step per plugin.
+
+## Prerequisites
+
+- Python 3.10+
+- `malbox-plugin-sdk` package installed (provides the native extension module)
+
+## Project structure
+
+<Tree>
+  <Tree.Folder name="my-python-plugin/" defaultOpen>
+    <Tree.File name="plugin.toml" />
+    <Tree.File name="main.py" />
+    <Tree.File name="requirements.txt" />
+  </Tree.Folder>
+</Tree>
+
+### `plugin.toml`
+
+Every plugin needs a manifest alongside its entry script. This tells the daemon how to manage your plugin.
+
+```toml
+[plugin]
+name = "my-python-plugin"
+version = "0.1.0"
+description = "My Python analysis plugin"
+authors = ["Your Name"]
+type = "host"
+binary = "main.py"
+
+[runtime]
+state = "persistent"
+execution = "parallel"
+```
+
+The `binary` field tells the daemon which file to execute. For Python plugins this points to your entry script (which must be executable with a `#!/usr/bin/env python3` shebang).
+
+<Warning>
+Python plugins are always host plugins - they run on the daemon machine and communicate via shared-memory IPC.
+</Warning>
+
+### `main.py`
+
+Make this file executable with a shebang line. The daemon spawns it as a child process.
+
+```python
+#!/usr/bin/env python3
+
+import malbox_plugin_sdk as malbox
+
+class MyPlugin(malbox.Plugin):
+    def on_task(self, ctx: malbox.Context):
+        task = ctx.task()
+        sample = task.sample_bytes()
+        ctx.progress(0.5, "analyzing")
+
+        # ... perform analysis ...
+
+        ctx.results().push(malbox.PluginResult.json("my_result", {
+            "status": "clean"
+        }))
+
+malbox.run(MyPlugin())
+```
+
+The `malbox.run()` call starts the IPC event loop and blocks until the daemon shuts down. All communication with the daemon happens through the Rust runtime underneath - the Python layer dispatches handler calls.
+
+```bash
+chmod +x main.py
+```
+
+## Handler methods
+
+Subclass `malbox.Plugin` and override any of these methods. All have default no-op implementations.
+
+| Method | Signature | Required |
+|--------|-----------|----------|
+| `on_task` | `(self, ctx: Context) -> None` | No (default no-op) |
+| `on_start` | `(self, config: dict[str, str]) -> None` | No |
+| `on_stop` | `(self) -> None` | No |
+| `health_check` | `(self) -> HealthStatus` | No |
+| `on_event` | `(self, event: Event) -> None` | No |
+
+### Async handlers
+
+Any handler can be `async def` instead of `def`. The SDK detects coroutines at runtime and drives them on an asyncio event loop automatically.
+
+```python
+class MyPlugin(malbox.Plugin):
+    async def on_task(self, ctx: malbox.Context):
+        task = ctx.task()
+        result = await analyze_async(task.sample_bytes())
+        ctx.results().push(malbox.PluginResult.json("result", result))
+
+    async def on_event(self, event: malbox.Event):
+        await notify_external(event)
+```
+
+No event loop setup is needed - the SDK creates one on first async handler invocation.
+
+## TaskInfo
+
+Access task metadata via `ctx.task()`. The returned `TaskInfo` is only valid during the handler call.
+
+```python
+def on_task(self, ctx: malbox.Context):
+    task = ctx.task()
+    task.id            # int - unique task identifier
+    task.sample_path   # Path - absolute path to the sample on disk
+    task.config        # dict[str, str] - task configuration from daemon
+    task.sample_bytes()  # bytes - reads the entire sample into memory
+    task.config_value("key")  # str | None - look up a single config value
+```
+
+<Note>
+`Context` and `TaskInfo` are only valid during the handler call. Do not store references to them.
+</Note>
+
+## Pushing results
+
+Results are pushed to the daemon via the `ResultSink` obtained from `ctx.results()`. You can call push methods multiple times to stream results incrementally:
+
+```python
+ctx.results().push(malbox.PluginResult.json("name", {"key": "value"}))
+ctx.results().push(malbox.PluginResult.bytes("name", raw_bytes))
+ctx.results().push(malbox.PluginResult.file("name", "/path/to/file"))
+
+# Or use the convenience methods on ResultSink directly:
+ctx.results().push_json("name", json_bytes)
+ctx.results().push_bytes("name", raw_bytes)
+ctx.results().push_file("name", "/path/to/file")
+
+# Batch push multiple results at once:
+ctx.results().push_all([result1, result2, result3])
+```
+
+Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Reports
+
+<ReportsGuide />
+
+```python
+report = malbox.ReportBuilder("my-plugin", "0.1.0")
+report.display_name("My Plugin")
+report.summary("Analysis complete")
+report.verdict(
+    malbox.Classification.Malicious,
+    score=85,
+    confidence=malbox.Confidence.High,
+)
+report.indicator(malbox.Indicator("sha256", "abc123..."))
+report.section("overview", "Overview", [
+    malbox.Block.markdown("Found malicious indicators"),
+    malbox.Block.kv([
+        malbox.KvPair("Verdict", "Malicious"),
+        malbox.KvPair("Score", "85/100"),
+    ]),
+])
+ctx.results().push(report.build())
+```
+
+## Context methods
+
+```python
+ctx.progress(0.5, "scanning signatures")     # progress 0.0-1.0
+ctx.results().push(result)                    # push analysis result
+ctx.emit_event(event)                         # emit system event
+ctx.warn("suspicious file detected")          # attach warning to task
+ctx.mark_collected("/path/to/file")           # prevent auto-collection
+```
+
+## Logging
+
+Use the module-level logging functions to emit structured logs that integrate with the Rust tracing subscriber:
+
+```python
+malbox.info("starting analysis")
+malbox.debug("processing sample")
+malbox.warn("large file detected")
+malbox.error("failed to parse header")
+```
+
+## Handling errors
+
+Python exceptions in handlers are caught and reported to the daemon:
+
+- Exceptions in `on_task` result in a `TaskFailed` event
+- Exceptions in `on_start` prevent the plugin from reaching `Ready` state
+- Tracebacks are captured and included in error messages
+
+```python
+def on_task(self, ctx: malbox.Context):
+    task = ctx.task()
+    sample = task.sample_bytes()
+    if len(sample) == 0:
+        raise ValueError("empty sample")
+
+    ctx.results().push(malbox.PluginResult.json("result", {"status": "ok"}))
+```
+
+## Subscribing to events
+
+Override `on_event` to react to system-wide or plugin lifecycle events:
+
+```python
+def on_event(self, event: malbox.Event):
+    if event.kind == "TaskCompleted":
+        malbox.info(f"Task {event.id} completed")
+    elif event.kind == "PluginResultAvailable":
+        malbox.info(f"Result '{event.result_name}' from {event.source}")
+    elif event.kind == "ConfigReloaded":
+        malbox.info("Configuration reloaded")
+```
+
+See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
+
+## Holding state
+
+Your plugin class can hold any instance attributes. For `execution = "parallel"` where multiple `on_task` calls may execute concurrently, use threading locks for shared mutable state:
+
+```python
+import threading
+
+class MyPlugin(malbox.Plugin):
+    def on_start(self, config):
+        self.cache = {}
+        self.lock = threading.Lock()
+
+    def on_task(self, ctx):
+        task = ctx.task()
+        with self.lock:
+            self.cache[task.id] = "processing"
+```
+
+## Health checks
+
+Override `health_check` to report plugin health. The daemon polls this periodically.
+
+```python
+def health_check(self) -> malbox.HealthStatus:
+    if self.db.is_connected():
+        return malbox.HealthStatus.Healthy()
+    return malbox.HealthStatus.Degraded("database connection lost")
+```
+
+## Deploy
+
+<DeployHost />
+
+Make sure `main.py` is executable (`chmod +x`) and has the correct shebang (`#!/usr/bin/env python3`). The `malbox-plugin-sdk` package must be installed in the Python environment that the shebang points to.
+
+<Note>
+Each Python plugin runs as its own process. The daemon spawns `main.py` directly - the OS interprets the shebang and launches Python. The SDK's native extension handles all IPC communication with the daemon.
+</Note>
+
+## Examples
+
+See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).

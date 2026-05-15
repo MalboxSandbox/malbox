@@ -1,11 +1,160 @@
 ---
 title: "Provisioning"
-description: "Infrastructure provisioners to automate machine configuration, advanced post-scripting and more"
+description: "Infrastructure provisioners to automate machine configuration, plugin deployment, and snapshotting"
 ---
 
+## What are Provisioners?
+
+Provisioners handle post-allocation machine setup - installing packages, deploying guest plugins, running configuration scripts, and taking snapshots. After a [provider](/machinery/providers) allocates a machine, provisioning steps prepare it for analysis.
+
+Provisioners are transport-agnostic: each provisioner manages its own connectivity to the machine (WinRM, SSH, etc.). Like providers, provisioners register themselves at compile time using the `inventory` crate and can be developed independently.
+
+## Running Provisioning
+
+Provisioning is driven through the `malboxctl` CLI. Each invocation runs a single provisioning step against a machine via the daemon's HTTP API (`POST /v1/machines/{id}/provision`).
+
+```bash
+malboxctl machine provision win10-dev \
+  --provisioner ansible \
+  --snapshot with-yara \
+  --config '{"playbook": "playbooks/windows/provision.yml"}' \
+  --plugins guest-windows-agent
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--provisioner` | Yes | Provisioner type (e.g. `"ansible"`, `"native"`). |
+| `--snapshot` | No | Snapshot name to create after successful provisioning. |
+| `--revert-to` | No | Snapshot to revert to before provisioning (defaults to `"base"`). |
+| `--config` | No | Provisioner-specific config as JSON. |
+| `--plugins` | No | Guest plugin names to deploy (resolved from the daemon's plugin registry). |
+
+Machines can be referenced by name or numeric ID. If omitted, an interactive fuzzy selector is shown.
+
+You can view provisioning history with:
+
+```bash
+malboxctl machine provision-history win10-dev
+```
+
+### What happens during a provision step
+
+1. The machine transitions to `provisioning` state (prevents concurrent provisioning)
+2. The VM is reverted to the `--revert-to` snapshot (defaults to `"base"`) for a clean starting state
+3. The VM is started and the daemon waits for the management service (WinRM on port 5986 for Windows, SSH on port 22 for Linux) to become reachable
+4. The provisioner runs (e.g. Ansible executes the playbook)
+5. The VM is stopped
+6. If `--snapshot` was specified, a provider-level snapshot is taken and recorded in the database
+7. The machine transitions back to `ready`
+
+### Multi-step provisioning
+
+To build up a machine in layers, run multiple provision commands, each snapshotting after completion. Later steps can use `--revert-to` to start from a previous step's snapshot:
+
+```bash
+# Step 1: Configure auto-login, snapshot as "configured"
+malboxctl machine provision win10-dev \
+  --provisioner ansible \
+  --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_plugins": "true"}}' \
+  --snapshot configured
+
+# Step 2: Deploy guest plugins on top of the configured snapshot
+malboxctl machine provision win10-dev \
+  --provisioner ansible \
+  --revert-to configured \
+  --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_autologin": "true"}}' \
+  --plugins guest-windows-agent \
+  --snapshot ready
+```
 
 
+## Architecture
 
+The provisioner system follows the same pattern as [providers](/machinery/providers):
 
+- **`Provisioner` trait** - defines the contract all provisioners must implement: an async `provision(context)` method and a `name()` method.
+- **`ProvisionerMetadata`** - registered at compile time via the `inventory` crate. Contains the provisioner name and a factory function.
+- **`ProvisionContext`** - passed to the provisioner with the machine's network endpoint (IP, platform) and the step's TOML config.
+- **`ProvisionResult`** - returned by the provisioner with a status (`Success` or `Failed`) and optional output text.
 
+Provisioners are looked up by name at runtime using `create_provisioner(name, config)`.
 
+## Supported Provisioners
+
+### Ansible
+
+The built-in Ansible provisioner runs Ansible playbooks against allocated machines. It auto-generates dynamic inventory when needed and injects plugin metadata as extra variables.
+
+#### Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `playbook` | `string` | (required) | Path to the Ansible playbook to execute. Must exist on disk. |
+| `inventory` | `string` | `"dynamic"` | Inventory source. Set to `"dynamic"` to auto-generate a temporary inventory with the machine IP, or provide a path to a static inventory file. |
+| `extra_vars` | `table` | `{}` | Extra variables passed to `ansible-playbook --extra-vars`. |
+| `plugins` | `table` | `{}` | Plugin entries resolved by the daemon. Each key is a plugin name with `binary`, `manifest`, and `port` fields. |
+| `timeout` | `integer` | `1800` | Timeout in seconds for the `ansible-playbook` process. |
+| `ansible_bin` | `string` | `"ansible-playbook"` | Path to the `ansible-playbook` binary. |
+
+#### Dynamic Inventory
+
+When `inventory = "dynamic"` (the default), the provisioner generates a temporary inventory file containing the machine's IP address. For Windows machines, it automatically adds WinRM connection variables:
+
+```ini
+[malbox]
+192.168.1.50 ansible_connection=winrm ansible_winrm_transport=ntlm ansible_winrm_server_cert_validation=ignore ansible_port=5986 ansible_user=Administrator ansible_password=packer
+```
+
+For Linux machines, only the IP is added (SSH is the default connection).
+
+#### Guest Plugin Injection
+
+When plugins are specified (either via `--plugins` on the CLI or `guest_plugins` in the pipeline), the Ansible provisioner resolves each plugin's `plugin.toml` manifest and injects a `guest_plugins` extra variable as a JSON array. Each entry includes:
+
+```json
+{
+  "name": "my-plugin",
+  "binary": "/path/to/plugin.exe",
+  "toml": "/path/to/plugin.toml",
+  "port": 50051,
+  "paths": {
+    "sample_dir": "C:\\malbox\\samples",
+    "artifact_dir": "C:\\malbox\\artifacts",
+    "stash_dir": "C:\\malbox\\stash",
+    "log_dir": "C:\\malbox\\logs"
+  }
+}
+```
+
+The `paths` are resolved from the plugin's `[runtime.paths]` in `plugin.toml`, so playbooks can create the correct directories on the guest without hardcoding paths.
+
+#### Bundled Playbooks
+
+Malbox ships a modular `provision.yml` playbook for Windows that composes two steps:
+
+1. **Auto-login configuration** - configures the sandbox user for interactive sample execution
+2. **Guest plugin deployment** - copies plugin binaries and manifests, creates runtime directories, sets up scheduled tasks to start plugins on login
+
+Each sub-step can be skipped via extra variables (`skip_plugins`, `skip_autologin`):
+
+```bash
+# Plugins only (auto-login already configured):
+malboxctl machine provision win10-dev \
+  --provisioner ansible \
+  --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_autologin": "true"}}' \
+  --plugins guest-windows-agent \
+  --snapshot with-plugins
+```
+
+### Native
+
+The `native` provisioner is a no-op step used primarily as a snapshot checkpoint. It creates a snapshot of the machine in its current state without running any configuration.
+
+```bash
+malboxctl machine provision win10-dev --provisioner native --snapshot base
+```
+
+## Next Steps
+
+- Read about [Providers](/machinery/providers) for machine allocation
+- Read about [Packer](/machinery/packer) for building machine images

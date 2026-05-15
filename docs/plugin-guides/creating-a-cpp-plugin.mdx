@@ -3,6 +3,197 @@ title: "Creating a C++ Plugin"
 description: "Step-by-step guide to building analysis plugins in C++ using the Malbox Plugin SDK"
 ---
 
+import PluginToml from "/snippets/plugin-toml.mdx"
+import DeployHost from "/snippets/deploy-host.mdx"
+import DeployGuest from "/snippets/deploy-guest.mdx"
+import ReportsGuide from "/snippets/reports-guide.mdx"
+import BuildLinux from "/snippets/build-linux.mdx"
+import BuildWindows from "/snippets/build-windows.mdx"
+
+<View title="Host Plugin" icon="laptop">
+
+## Getting started
+
+Create a new repository from the [C++ plugin template](https://github.com/DualHorizon/malbox-plugin-template-cpp) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `CMakeLists.txt` and `plugin.toml` to match your plugin name.
+
+The template gives you a working plugin with CMake configuration, a `plugin.toml` manifest, example source code, and CI already set up.
+
+## Prerequisites
+
+- C++20 compiler (GCC 11+, Clang 13+, or MSVC 2019 16.10+)
+- CMake 3.20+
+
+## Project structure
+
+### `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my-plugin LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(MalboxPluginSDK REQUIRED)
+
+add_executable(my-plugin src/main.cpp)
+target_link_libraries(my-plugin PRIVATE MalboxPluginSDK::MalboxPluginSDK)
+```
+
+### `plugin.toml`
+
+<PluginToml />
+
+### `src/main.cpp`
+
+```cpp
+#include <malbox/plugin.hpp>
+
+class MyPlugin final : public malbox::HostPlugin {
+public:
+    void on_start(const std::unordered_map<std::string, std::string>& config) override {
+        // Called once before tasks arrive. Use config for initialization.
+    }
+
+    void on_task(const malbox::Context& ctx) override {
+        auto sample = ctx.task().sample_bytes();
+        ctx.progress(0.5, "analyzing");
+
+        // ... perform analysis ...
+
+        std::string json = R"({"status": "clean"})";
+        auto data = std::span<const uint8_t>{
+            reinterpret_cast<const uint8_t*>(json.data()),
+            json.size()
+        };
+        ctx.results().push(malbox::PluginResult::json("my_result", data));
+    }
+
+    void on_stop() override {
+        // Called once on shutdown. Clean up resources.
+    }
+};
+
+int main() {
+    malbox::PluginMeta meta{};
+    meta.name        = "my-plugin";
+    meta.version     = "0.1.0";
+    meta.description = "My analysis plugin";
+    meta.authors     = "Your Name";
+    meta.state       = malbox::PluginState::Ephemeral;
+    meta.execution   = malbox::ExecutionContext::Exclusive;
+
+    malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
+}
+```
+
+## Handler methods
+
+Override virtual methods on the `malbox::HostPlugin` base class:
+
+| Method | Signature | Required |
+|--------|-----------|----------|
+| `on_task` | `(const Context&) -> void` | No (default no-op) |
+| `on_start` | `(const std::unordered_map<std::string, std::string>&) -> void` | No |
+| `on_stop` | `() -> void` | No |
+| `health_check` | `() -> HealthStatus` | No |
+| `on_event` | `(const Event&) -> void` | No |
+
+## Pushing results
+
+Results are pushed to the daemon via the `ResultSink` obtained from `ctx.results()`. You can call push methods multiple times to stream results incrementally:
+
+```cpp
+// Using PluginResult objects
+ctx.results().push(PluginResult::json("name", byte_span));
+ctx.results().push(PluginResult::bytes("name", byte_span));
+ctx.results().push(PluginResult::file("name", "/path/to/file"));
+
+// Or use the convenience methods on ResultSink directly:
+ctx.results().push_json("name", byte_span);
+ctx.results().push_bytes("name", byte_span);
+ctx.results().push_file("name", "/path/to/file");
+```
+
+Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Reports
+
+<ReportsGuide />
+
+```cpp
+#include <malbox/report.hpp>
+
+using namespace malbox::report;
+
+auto report = ReportBuilder("my-plugin", "0.1.0")
+    .summary("Analysis complete")
+    .verdict(Classification::Malicious, 85, Confidence::High)
+    .indicator(Indicator("sha256", "abc123..."))
+    .section("overview", "Overview", [](SectionBuilder& s) {
+        s.markdown("Found malicious indicators");
+    })
+    .build();
+
+ctx.results().push(into_plugin_result(report));
+```
+
+## Handling errors
+
+Plugin methods can throw `malbox::Error` to signal failures. The SDK catches exceptions at the FFI boundary and reports them to the runtime.
+
+```cpp
+#include <malbox/error.hpp>
+
+if (something_wrong) {
+    throw malbox::Error{malbox::ErrorKind::Unknown, "analysis failed: corrupt sample"};
+}
+```
+
+SDK methods like `ctx.task().sample_bytes()` also throw `malbox::Error` on failure.
+
+## Subscribing to events
+
+Override `on_event` to react to system-wide or plugin lifecycle events:
+
+```cpp
+void on_event(const malbox::Event& event) override {
+    if (event.tag() == malbox::EventTag::PluginResultAvailable) {
+        auto source = event.source();
+        auto name = event.result_name();
+    }
+}
+```
+
+See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
+
+## Thread safety
+
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. Health checks may also arrive on a different thread regardless of execution context.
+
+## Build
+
+### Linux
+
+<BuildLinux />
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/malbox-plugin-sdk/dist
+cmake --build build
+```
+
+## Deploy
+
+<DeployHost />
+
+## Examples
+
+See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).
+
+</View>
+
+<View title="Guest Plugin" icon="container">
+
 ## Getting started
 
 Create a new repository from the [C++ plugin template](https://github.com/DualHorizon/malbox-plugin-template-cpp) by clicking **Use this template** on GitHub. Clone your new repository and rename the project in `CMakeLists.txt` and `plugin.toml` to match your plugin name.
@@ -16,8 +207,6 @@ The template gives you a working plugin with CMake configuration, a `plugin.toml
 - For Windows guest plugins: MinGW cross-compilation toolchain (provided by the Malbox devenv)
 
 ## Project structure
-
-Your plugin project has three essential files: a CMake build file, a plugin manifest, and your source code.
 
 ### `CMakeLists.txt`
 
@@ -47,41 +236,7 @@ The `malbox_generate_runtime_config` function invokes the `malbox-codegen` CLI (
 
 ### `plugin.toml`
 
-Every plugin needs a manifest alongside its binary. This tells the daemon how to manage your plugin.
-
-```toml
-[plugin]
-name = "my-plugin"
-version = "0.1.0"
-description = "My analysis plugin"
-authors = ["Your Name"]
-type = "guest"                    # or "host"
-
-[runtime]
-state = "ephemeral"               # or "persistent", "scoped"
-execution = "exclusive"           # or "sequential", "parallel", "unrestricted"
-port = 50051                      # gRPC listen port (default: 50051)
-log_filter = "info"               # tracing filter (default: "info")
-
-[runtime.paths]
-sample_dir       = "C:\\malbox\\samples"      # where daemon pushes the sample
-artifact_dir     = "C:\\malbox\\artifacts"    # where plugin writes output (auto-collected)
-stash_dir        = "C:\\malbox\\stash"        # internal result stash spillover
-log_dir          = "C:\\malbox\\logs"         # SDK-internal log overflow files
-external_log_dir = "C:\\malbox\\ext-logs"     # external tool/driver logs (auto-collected)
-
-[runtime.stash]
-threshold_bytes = 1048576
-ttl_secs = 120
-
-[results.my_result]
-description = "What this result contains"
-user_visible = true
-display_name = "My Result"
-render = "json"
-```
-
-See [Plugin Configuration](/plugin-system/configuration) for details on plugin types, state management, and execution contexts.
+<PluginToml />
 
 ### `src/main.cpp`
 
@@ -89,15 +244,11 @@ See [Plugin Configuration](/plugin-system/configuration) for details on plugin t
 #include <malbox/plugin.hpp>
 #include "malbox_runtime_config.hpp"   // generated from plugin.toml
 
-class MyPlugin final : public malbox::Plugin {
+class MyPlugin final : public malbox::GuestPlugin {
 public:
-    void on_start(const std::unordered_map<std::string, std::string>& config) override {
-        // Called once before tasks arrive. Use config for initialization.
-    }
-
-    void on_task(const malbox::Task& task, const malbox::Context& ctx) override {
-        auto sample = task.sample_bytes();
-        ctx.emit_progress(0.5, "analyzing");
+    void on_start(const malbox::Context& ctx) override {
+        auto sample = ctx.task().sample_bytes();
+        ctx.progress(0.5, "analyzing");
 
         // ... perform analysis ...
 
@@ -106,11 +257,11 @@ public:
             reinterpret_cast<const uint8_t*>(json.data()),
             json.size()
         };
-        ctx.push_result(malbox::PluginResult::json("my_result", data));
+        ctx.results().push(malbox::PluginResult::json("my_result", data));
     }
 
-    void on_stop() override {
-        // Called once on shutdown. Clean up resources.
+    void on_stop(const malbox::Context& ctx) override {
+        // Called when the current task ends.
     }
 };
 
@@ -120,7 +271,6 @@ int main() {
     meta.version     = "0.1.0";
     meta.description = "My analysis plugin";
     meta.authors     = "Your Name";
-    meta.plugin_type = malbox::PluginType::Guest;
     meta.state       = malbox::PluginState::Ephemeral;
     meta.execution   = malbox::ExecutionContext::Exclusive;
 
@@ -131,52 +281,38 @@ int main() {
 }
 ```
 
-Your plugin subclasses `malbox::Plugin` and implements `on_task` at minimum. The `on_start` and `on_stop` lifecycle hooks are optional.
-
-For a **host** plugin, change the metadata and entry point:
-
-```cpp
-meta.plugin_type = malbox::PluginType::Host;
-malbox::run_host_plugin(std::make_unique<MyPlugin>(), meta);
-```
-
 ## Handler methods
 
-Override virtual methods on the `malbox::Plugin` base class:
+Override virtual methods on the `malbox::GuestPlugin` base class:
 
 | Method | Signature | Required |
 |--------|-----------|----------|
-| `on_task` | `(const Task&, const Context&) -> void` | Yes |
-| `on_start` | `(const std::unordered_map<std::string, std::string>&) -> void` | No |
-| `on_stop` | `() -> void` | No |
+| `on_start` | `(const Context&) -> void` | Yes |
+| `on_stop` | `(const Context&) -> void` | Yes |
+| `execute_sample` | `(const std::filesystem::path&) -> LaunchResult` | No |
 | `health_check` | `() -> HealthStatus` | No |
-| `on_daemon_event` | `(DaemonEvent, const Context&) -> void` | No |
-| `on_task_event` | `(TaskEvent, const TaskEventPayload&, const Context&) -> void` | No |
-| `on_plugin_event` | `(PluginEvent, const PluginEventPayload&, const Context&) -> void` | No |
-| `on_sample_event` | `(SampleEvent, const SampleEventPayload&, const Context&) -> void` | No |
-
-Only `on_task` is required (pure virtual). All other handlers default to no-ops.
 
 ## Pushing results
 
-Results are pushed to the daemon during `on_task` via `ctx.push_result()`. You can call it multiple times to stream results incrementally. There are three result types:
+Results are pushed to the daemon via the `ResultSink` obtained from `ctx.results()`. You can call push methods multiple times to stream results incrementally:
 
 ```cpp
-// JSON-encoded result (pass raw UTF-8 bytes)
-ctx.push_result(PluginResult::json("name", byte_span));
+// Using PluginResult objects
+ctx.results().push(PluginResult::json("name", byte_span));
+ctx.results().push(PluginResult::bytes("name", byte_span));
+ctx.results().push(PluginResult::file("name", "/path/to/file"));
 
-// Raw binary result
-ctx.push_result(PluginResult::bytes("name", byte_span));
-
-// Reference a file on disk (runtime reads it)
-ctx.push_result(PluginResult::file("name", "/path/to/file"));
+// Or use the convenience methods on ResultSink directly:
+ctx.results().push_json("name", byte_span);
+ctx.results().push_bytes("name", byte_span);
+ctx.results().push_file("name", "/path/to/file");
 ```
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
 
 ## Reports
 
-For structured analysis output with verdicts, indicators, TTPs, and frontend-renderable sections, use the `ReportBuilder` to construct a `Report` and push it as a result:
+<ReportsGuide />
 
 ```cpp
 #include <malbox/report.hpp>
@@ -192,10 +328,8 @@ auto report = ReportBuilder("my-plugin", "0.1.0")
     })
     .build();
 
-ctx.push_result(into_plugin_result(report));
+ctx.results().push(into_plugin_result(report));
 ```
-
-See the [C++ SDK Reference](/reference/plugin-sdk/cpp) for the full report API.
 
 ## Handling errors
 
@@ -204,54 +338,22 @@ Plugin methods can throw `malbox::Error` to signal failures. The SDK catches exc
 ```cpp
 #include <malbox/error.hpp>
 
-// In your on_task:
 if (something_wrong) {
-    throw malbox::Error(-1, "analysis failed: corrupt sample");
+    throw malbox::Error{malbox::ErrorKind::Unknown, "analysis failed: corrupt sample"};
 }
 ```
 
-SDK methods like `task.sample_bytes()` also throw `malbox::Error` on failure.
-
-## Subscribing to events
-
-Beyond task processing, your plugin can react to system events by overriding the event handler methods:
-
-```cpp
-class MyPlugin final : public malbox::Plugin {
-public:
-    void on_task(const malbox::Task& task, const malbox::Context& ctx) override {
-        // ...
-    }
-
-    void on_task_event(
-        TaskEvent event,
-        const TaskEventPayload& payload,
-        const Context& ctx
-    ) override {
-        // React to task lifecycle events
-    }
-
-    void on_sample_event(
-        SampleEvent event,
-        const SampleEventPayload& payload,
-        const Context& ctx
-    ) override {
-        // React to sample processing events
-    }
-};
-```
-
-See the [Events Reference](/reference/plugin-sdk/events) for the full list of available events.
+SDK methods like `ctx.task().sample_bytes()` also throw `malbox::Error` on failure.
 
 ## Thread safety
 
-When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar synchronization primitives. Health checks may also arrive on a different thread regardless of execution context.
+Protect shared mutable state with `std::mutex` or similar. Health checks may arrive on a different thread.
 
 ## Build
 
 ### Linux
 
-Host plugins always target Linux (they run on the daemon machine). Guest plugins targeting a Linux guest VM also use this:
+<BuildLinux />
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/malbox-plugin-sdk/dist
@@ -260,7 +362,7 @@ cmake --build build
 
 ### Windows (cross-compile)
 
-Guest plugins that run inside a Windows analysis VM need to be cross-compiled. The Malbox devenv provides a MinGW toolchain and a CMake toolchain file for this:
+<BuildWindows />
 
 ```bash
 cmake -B build-win \
@@ -271,44 +373,12 @@ cmake --build build-win
 
 This produces a statically linked `.exe` binary with no runtime DLL dependencies.
 
-<Note>
-The MinGW toolchain file reads `MINGW_LIB_PATH` and `MINGW_INCLUDE_PATH` environment variables for library and header search paths. The Malbox devenv sets these automatically.
-</Note>
-
 ## Deploy
 
-### Host plugins
-
-Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's plugin directory. The daemon discovers plugins automatically on startup.
-
-<Tree>
-  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
-    <Tree.File name="my-host-plugin-bin" />
-    <Tree.File name="plugin.toml" />
-  </Tree.Folder>
-</Tree>
-
-### Guest plugins
-
-Guest plugin binaries must be deployed inside the analysis VM. Place them in the daemon's plugin directory (so the daemon knows about them), then provision the binary into the VM:
-
-<Tree>
-  <Tree.Folder name="~/.config/malbox/plugins/" defaultOpen>
-    <Tree.File name="my-guest-plugin-bin" />
-    <Tree.File name="plugin.toml" />
-  </Tree.Folder>
-</Tree>
-
-Provision into the VM using the deploy playbook:
-
-```bash
-cargo run -p malbox-cli machine provision <machine_id> \
-  --provisioner ansible \
-  --config '{"playbook": "configuration/infrastructure/ansible/playbooks/windows/deploy-guest-plugin.yml"}' \
-  --snapshot <snapshot_name> \
-  --plugins my-guest-plugin
-```
+<DeployGuest />
 
 ## Examples
 
 See the [example plugins on GitHub](https://github.com/DualHorizon/malbox/tree/dev/back-end/examples/plugins).
+
+</View>

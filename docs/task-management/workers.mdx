@@ -5,28 +5,49 @@ description: "How Malbox workers execute tasks and report results"
 
 ## Overview
 
-Workers are the execution engines of the task management system. Each worker operates as an independent async task, receiving jobs through channels, executing them via the task executor, and reporting results back to the pool. Workers are managed through the [worker pool](/task-management/scheduling#worker-pool).
+Workers are the execution engines of the task management system. Each worker operates as an independent Tokio task that competes for tasks from a shared queue, executes them via the task executor, and reports results back to the pool. Workers are managed through the [worker pool](/task-management/scheduling#worker-pool).
 
 ## Architecture
 
-A worker is fundamentally an async event loop that processes jobs until shutdown. Each worker has a UUID-based worker ID, holds a reference to the shared `TaskExecutor`, and communicates through three distinct channels:
+A worker is fundamentally an async event loop that processes tasks until shutdown or idle timeout. Each worker has a UUID-based worker ID, holds a reference to the shared task queue and task store, and uses two coordination primitives:
 
-- **Job reception** - Receives new jobs via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Completion reporting** - Reports results back to the pool via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Shutdown signal** - Receives termination requests via a [oneshot channel](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html)
+- **Task notification** - a shared [`Notify`](https://docs.rs/tokio/latest/tokio/sync/struct.Notify.html) signals when new tasks are enqueued. Workers wake up and compete to dequeue a task (another worker may grab it first).
+- **Shutdown signal** - a [`CancellationToken`](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) propagated from the worker pool triggers graceful termination.
 
-The worker's execution loop multiplexes these channels using `tokio::select!`, processing whichever event arrives first. When a job arrives, the worker executes it and reports the result. When a shutdown signal arrives, the worker terminates gracefully.
+The worker's execution loop uses `tokio::select!` to multiplex the task notifier, the cancellation token, and (for non-baseline workers) an idle timeout. When notified, the worker attempts to dequeue a task from the shared priority queue. If another worker already grabbed it, the loop continues waiting.
+
+### Worker Types
+
+The worker pool maintains two categories of workers:
+
+- **Baseline workers** (`min_workers`) - always running, no idle timeout. These are spawned when the scheduler starts and stay alive until shutdown.
+- **Demand workers** - spawned when all active workers are busy and the pool is below `max_workers`. These have an idle timeout and exit automatically when they receive no work within that window.
+
+### Backpressure
+
+Workers signal "currently executing a task" using an atomic busy counter. The worker pool checks this counter on every task enqueue: if all active workers are busy and the pool is below `max_workers`, a new demand worker is spawned. This ensures the pool scales up under load without over-provisioning.
+
+### Task Execution
+
+When a worker picks up a task, it drives the full task lifecycle:
+
+1. **Initializing** - load task details, emit `TaskStarting` event
+2. **Preparing resources** - acquire a machine from the machine pool (or fast-path for host-only tasks)
+3. **Running** - transfer sample to guest VM, register guest plugins, execute the sample, then run all plugins with an analysis timeout
+4. **Stopping** - release the machine, unregister guest plugins
+5. **Final state** - mark the task as `Completed`, `Failed`, `TimedOut`, or `Canceled`
+
+Task cancellation is cooperative: each task gets a child `CancellationToken` that is checked at safe points during execution, allowing in-flight tasks to clean up (release machines, unregister plugins) before returning.
 
 ### Configuration
 
 Worker behavior is controlled through configuration options:
 
+- Maximum and minimum worker counts
+- Idle timeout for demand workers
 - Compatible task types (enabling worker specialization)
 - Execution mode (single or batch processing)
-- Batch size limits
-- Timeout values for batch collection and idle shutdown
+- Resource limits (memory, CPU, disk, network)
+- Plugin allow/deny lists
 
 See the complete [configuration reference](/reference/configuration/workers).
-
-### Job Processing
-

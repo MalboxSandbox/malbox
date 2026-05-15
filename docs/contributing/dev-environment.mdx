@@ -1,6 +1,6 @@
 ---
 title: "Dev Environment"
-description: "Set up and use the Malbox development environment"
+description: "Set up a local Malbox development environment with Nix"
 ---
 
 ## Prerequisites
@@ -8,8 +8,7 @@ description: "Set up and use the Malbox development environment"
 Before you begin, make sure you have the following installed:
 
 - **Git** - to clone the repository
-- **devenv** - Malbox uses [devenv](https://devenv.sh/) for reproducible development environments. Follow the [official installation guide](https://devenv.sh/getting-started/) to install it (this also installs Nix if you don't have it)
-- **pnpm** - required for the frontend. Follow the [pnpm installation guide](https://pnpm.io/installation)
+- **Nix** - Malbox uses a [Nix flake](https://nixos.wiki/wiki/Flakes) for reproducible development environments. Install Nix with flakes enabled via the [Determinate Systems installer](https://zero-to-nix.com/start/install) or the [official installer](https://nixos.org/download/)
 - A **Linux host** (or WSL2 on Windows)
 
 ## Clone and enter the environment
@@ -22,26 +21,46 @@ cd malbox
 Start the development environment:
 
 ```bash
-devenv shell
+nix develop
 ```
 
 This automatically sets up:
 
 - Rust stable toolchain (rustc, cargo, clippy, rustfmt, rust-analyzer)
-- PostgreSQL 16 (started as a background service)
+- PostgreSQL 16
 - Node.js and pnpm
 - C/C++ build tools (cmake, gcc, clang 18)
 - Windows cross-compilation toolchain (MinGW)
 - Infrastructure tools (packer, ansible)
+- Protobuf compiler and codegen tools
 - Pre-commit hooks (cargo-check, clippy, rustfmt)
 
 <Note>
   The first run takes a while as Nix downloads and builds all dependencies. Subsequent runs are near-instant.
 </Note>
 
+The flake also provides specialized sub-shells if you only need a subset of tools:
+
+```bash
+nix develop .#backend   # Rust toolchain, PostgreSQL, build tools
+nix develop .#frontend  # Node.js, pnpm
+nix develop .#docs      # Node.js (for Mintlify)
+```
+
+Each subdirectory (`back-end/`, `front-end/`, `docs/`) includes an `.envrc` file that activates the appropriate sub-shell automatically. If you use [direnv](https://direnv.net/), just `cd` into the directory you want to work in.
+
 ## Database
 
-PostgreSQL starts automatically when you enter `devenv shell`. The default configuration is:
+PostgreSQL 16 is managed by process-compose. Start it from the `back-end/` directory:
+
+```bash
+cd back-end
+process-compose up
+```
+
+This initializes the data directory, starts PostgreSQL, and creates the `malbox_db` database automatically.
+
+The `DATABASE_URL` environment variable is set for you automatically by the flake:
 
 | Setting      | Value                                          |
 | ------------ | ---------------------------------------------- |
@@ -49,10 +68,7 @@ PostgreSQL starts automatically when you enter `devenv shell`. The default confi
 | Port         | `5432`                                         |
 | Database     | `malbox_db`                                    |
 | User         | `postgres`                                     |
-| Password     | `password`                                     |
 | DATABASE_URL | `postgres://postgres@localhost:5432/malbox_db` |
-
-The `DATABASE_URL` environment variable is set for you automatically in devenv.
 
 To run pending database migrations:
 
@@ -63,19 +79,18 @@ sqlx migrate run
 
 ## Running the backend
 
-From the repository root:
+Make sure PostgreSQL is running via `process-compose up` first (see [Database](#database)), then from the `back-end/` directory:
 
 ```bash
-devenv up -d # start the PostgreSQL server
 cd back-end
-cargo run --p malbox-daemon
+cargo run -p malbox-daemon
 ```
 
 The daemon starts an HTTP server on `http://127.0.0.1:8080`.
 
 ## Running the frontend
 
-In a separate terminal (also inside `devenv shell`):
+In a separate terminal:
 
 ```bash
 cd front-end
@@ -97,6 +112,7 @@ BODY_SIZE_LIMIT=0
 In a separate terminal:
 
 ```bash
+cd docs
 npx mintlify@latest dev
 ```
 
@@ -169,7 +185,7 @@ cargo doc --no-deps --document-private-items
 
 ## Pre-commit hooks
 
-The devenv environment installs Git hooks that run on every commit:
+The Nix flake installs Git hooks that run on every commit:
 
 - **cargo-check** - verifies the project compiles
 - **clippy** - catches common mistakes and style issues
@@ -179,7 +195,7 @@ Do not skip these hooks with `--no-verify`. If a hook fails, fix the issue befor
 
 ## Troubleshooting
 
-### `devenv shell` fails or hangs
+### `nix develop` fails or hangs
 
 Make sure Nix is installed correctly and the Nix daemon is running:
 
@@ -190,18 +206,18 @@ nix --version
 If you see errors about missing flake inputs, try:
 
 ```bash
-devenv update
+nix flake update
 ```
 
 ### Database connection refused
 
-PostgreSQL may not have started yet. Check its status:
+PostgreSQL may not be running. Check its status:
 
 ```bash
 pg_isready -h 127.0.0.1 -p 5432
 ```
 
-If it reports no connection, make sure you started the PostgreSQL service via `devenv up -d`.
+If it reports no connection, make sure `process-compose up` is running in the `back-end/` directory (see [Database](#database)).
 
 ### SQLx compile errors about missing queries in CI
 
@@ -222,6 +238,6 @@ SQLX_OFFLINE=true cargo build
 
 Make sure:
 
-1. The backend is running (`cargo run --bin malbox-daemon`)
-2. Your `.env` file has the correct `MALBOX_API_URL` (default: `http://127.0.0.1:8080`)
-3. Both terminals are inside `devenv shell`
+1. PostgreSQL is running (`process-compose up` in `back-end/`)
+2. The backend is running (`cargo run -p malbox-daemon`)
+3. Your `.env` file has the correct `MALBOX_API_URL` (default: `http://127.0.0.1:8080`)
