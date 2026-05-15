@@ -1,6 +1,6 @@
 ---
-title: "Event hooks and the plugin pub/sub model"
-description: "How Malbox plugins subscribe to per-plugin and daemon broadcast event channels, route handlers via on_event, and react to task and sample events."
+title: "Event Hooks"
+description: "How plugins respond to system events through hooks"
 ---
 
 Malbox's plugin system is event-driven. Rather than polling for changes or running on fixed schedules, plugins subscribe to specific events and respond when those events occur. This approach enables efficient, reactive analysis workflows where plugins only activate when relevant activity happens.
