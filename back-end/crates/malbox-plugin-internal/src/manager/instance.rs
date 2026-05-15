@@ -134,23 +134,6 @@ pub struct PluginInstance {
     pub log_file_path: Option<PathBuf>,
 }
 
-impl PluginInstance {
-    /// Create a new instance in the [`Starting`](PluginLifecycle::Starting)
-    /// state with no process or client attached.
-    pub fn new(entry: Arc<PluginEntry>) -> Self {
-        Self {
-            entry,
-            lifecycle: PluginLifecycle::Starting,
-            process: None,
-            grpc_client: None,
-            task_channels: None,
-            started_at: None,
-            last_health_check: None,
-            log_file_path: None,
-        }
-    }
-}
-
 impl fmt::Debug for PluginInstance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PluginInstance")

@@ -61,7 +61,7 @@ impl Watcher {
                     EventKind::Create(_) => PendingChange::Added(plugin_subdir),
                     EventKind::Modify(_) => PendingChange::Modified(plugin_subdir),
                     EventKind::Remove(_) => {
-                        let name = path
+                        let name = plugin_subdir
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default();
