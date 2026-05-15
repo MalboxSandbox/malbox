@@ -30,7 +30,7 @@ export async function getResultContent(
 	taskId: number,
 	resultId: number
 ): Promise<Response> {
-	return request(fetchFn, `/v1/tasks/${taskId}/results/${resultId}`);
+	return request(fetchFn, `/v1/tasks/${taskId}/results/${resultId}/content`);
 }
 
 export async function cancelTask(
