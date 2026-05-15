@@ -3,7 +3,7 @@
 //! Uses request/response pattern for task dispatch with streaming responses.
 
 use malbox_plugin_transport::ipc::headers::{
-    FLAG_HAS_MORE_CHUNKS, FLAG_IS_FINAL, ResponseKind, ResultFormat, TaskRequestHeader,
+    EventKind, FLAG_HAS_MORE_CHUNKS, FLAG_IS_FINAL, ResponseKind, ResultFormat, TaskRequestHeader,
 };
 use malbox_plugin_transport::ipc::notify::NotifyKind;
 use malbox_plugin_transport::ipc::{IpcService, Node};
@@ -89,21 +89,81 @@ impl HostTaskChannels {
             _reserved: [0; 3],
         };
 
-        let pending = self
-            .task_client
-            .send(&header, &payload_bytes)
-            .map_err(|e| {
-                ManagerError::ExecutionFailed(
-                    plugin_id.clone(),
-                    format!("failed to send task request: {e}"),
-                )
-            })?;
+        let deadline = Instant::now() + timeout;
+
+        // Send the task request. If no server received it (ephemeral plugin
+        // still starting), wait for readiness and resend.
+        let pending =
+            self.send_with_readiness_wait(plugin_id, task_id, &header, &payload_bytes, deadline)?;
 
         // Wake the plugin immediately so it drains the request from shared
         // memory. The plugin's WaitSet also has a 500ms interval as a fallback.
         let _ = self.plugin_notifier.wake(NotifyKind::TaskAvailable);
 
         self.collect_responses(plugin_id, task_id, pending, timeout)
+    }
+
+    /// Send a task request, ensuring the plugin's task server is connected.
+    ///
+    /// In iceoryx2 request-response, a request sent when no server is connected
+    /// is delivered to zero servers and silently lost. For ephemeral plugins
+    /// that are still starting up, we detect this via `is_connected()` and wait
+    /// for the plugin's `PluginStarted` event before resending.
+    fn send_with_readiness_wait(
+        &self,
+        plugin_id: &PluginId,
+        task_id: i32,
+        header: &TaskRequestHeader,
+        payload: &[u8],
+        deadline: Instant,
+    ) -> Result<TaskPendingResponse> {
+        let pending = self.task_client.send(header, payload).map_err(|e| {
+            ManagerError::ExecutionFailed(
+                plugin_id.clone(),
+                format!("failed to send task request: {e}"),
+            )
+        })?;
+
+        if pending.is_connected() {
+            return Ok(pending);
+        }
+
+        // No server received the request - plugin is still starting.
+        // Drop the undelivered pending and wait for PluginStarted.
+        drop(pending);
+        debug!(
+            plugin = %plugin_id,
+            task_id,
+            "task server not connected, waiting for plugin to start"
+        );
+
+        self.wait_for_plugin_ready(plugin_id, deadline)?;
+
+        self.task_client.send(header, payload).map_err(|e| {
+            ManagerError::ExecutionFailed(
+                plugin_id.clone(),
+                format!("failed to send task request after readiness wait: {e}"),
+            )
+        })
+    }
+
+    /// Block until the plugin emits a `PluginStarted` event on its per-plugin
+    /// event channel, indicating all IPC ports (including `TaskServer`) are up.
+    fn wait_for_plugin_ready(&self, plugin_id: &PluginId, deadline: Instant) -> Result<()> {
+        while Instant::now() < deadline {
+            while let Ok(Some(event)) = self.event_subscriber.try_recv() {
+                if EventKind::try_from(event.header.event_type) == Ok(EventKind::PluginStarted) {
+                    debug!(plugin = %plugin_id, "plugin ready (PluginStarted event received)");
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        Err(ManagerError::ExecutionFailed(
+            plugin_id.clone(),
+            "plugin task server did not become ready within timeout".into(),
+        ))
     }
 
     fn collect_responses(

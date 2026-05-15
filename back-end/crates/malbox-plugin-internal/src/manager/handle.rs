@@ -122,7 +122,13 @@ impl PluginHandle {
         let instance = Arc::clone(&self.instance);
         let plugin_id = self.plugin_id.clone();
         let sample_path = sample_path.to_string();
-        let timeout = Duration::from_secs(300);
+        let timeout_secs = self
+            .entry
+            .runtime_config
+            .as_ref()
+            .map(|c| c.analysis_timeout)
+            .unwrap_or(300);
+        let timeout = Duration::from_secs(timeout_secs);
 
         let outputs = tokio::task::spawn_blocking(move || {
             let instance_guard = instance.blocking_lock();

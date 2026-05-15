@@ -29,7 +29,7 @@ use malbox_machinery::{
     Machine as RuntimeMachine, MachineEndpoint, MachineId, MachineState, Platform,
 };
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_plugin_internal::manager::handle::OutputFormat;
+use malbox_plugin_internal::manager::handle::{OutputFormat, PluginHandle};
 use malbox_plugin_internal::transport::daemon::GrpcClient;
 use malbox_plugin_internal::transport::messages::events::Event;
 use malbox_plugin_internal::transport::traits::TransportEmitter;
@@ -465,7 +465,10 @@ impl Worker {
             300
         };
         let analysis_secs = plugin_timeout_secs.saturating_add(ANALYSIS_TIMEOUT_GRACE_SECS);
-        let mut registered_guests = Vec::new();
+        let mut guest_handles: std::collections::HashMap<
+            malbox_plugin_internal::registry::types::PluginId,
+            PluginHandle,
+        > = std::collections::HashMap::new();
 
         let work_result = self
             .run_task_on_machine(
@@ -474,14 +477,14 @@ impl Worker {
                 &db_machine,
                 machine_id,
                 analysis_secs,
-                &mut registered_guests,
+                &mut guest_handles,
                 token,
             )
             .await;
 
         // --- Unconditional cleanup (runs for success, failure, timeout, and cancellation) ---
-        for plugin_id in &registered_guests {
-            self.plugin_manager.unregister_guest(plugin_id);
+        for (_, handle) in guest_handles {
+            handle.release().await;
         }
 
         if let Err(e) = self
@@ -565,7 +568,10 @@ impl Worker {
         db_machine: &malbox_database::repositories::machinery::Machine,
         machine_id: i32,
         analysis_secs: u64,
-        registered_guests: &mut Vec<malbox_plugin_internal::registry::types::PluginId>,
+        guest_handles: &mut std::collections::HashMap<
+            malbox_plugin_internal::registry::types::PluginId,
+            PluginHandle,
+        >,
         token: &CancellationToken,
     ) -> Result<TaskOutcome> {
         // Check cancellation before heavy work.
@@ -719,14 +725,14 @@ impl Worker {
                         .register_guest(&plugin_id, addr.clone())
                         .await
                     {
-                        Ok(()) => {
+                        Ok(handle) => {
                             info!(
                                 task_id,
                                 plugin = plugin_name.as_str(),
                                 addr = addr.as_str(),
                                 "Registered guest plugin"
                             );
-                            registered_guests.push(plugin_id);
+                            guest_handles.insert(plugin_id, handle);
                         }
                         Err(e) => {
                             warn!(task_id, plugin = plugin_name.as_str(), error = %e, "Failed to register guest plugin");
@@ -792,118 +798,114 @@ impl Worker {
 
                 let plugin_id = &entry.id;
                 let plugin_ok = async {
-                    if entry.manifest.plugin.plugin_type
-                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest
-                        && !snapshot_guest_plugins
-                            .iter()
-                            .any(|n| n == plugin_id.as_str())
-                    {
-                        info!(
-                            task_id,
-                            plugin = plugin_id.as_str(),
-                            "Skipping guest plugin not in active snapshot"
-                        );
-                        return true;
-                    }
+                    let is_guest = entry.manifest.plugin.plugin_type
+                        == malbox_plugin_internal::registry::manifest::PluginTypeConfig::Guest;
 
-                    match self.plugin_manager.acquire(plugin_id).await {
-                        Ok(handle) => {
-                            let mut config = std::collections::HashMap::new();
-                            let plugin_timeout_secs = analysis_secs
-                                .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
-                            config.insert(
-                                "analysis_timeout".to_string(),
-                                plugin_timeout_secs.to_string(),
+                    let handle = if is_guest {
+                        match guest_handles.remove(plugin_id) {
+                            Some(h) => h,
+                            None => return true,
+                        }
+                    } else {
+                        match self.plugin_manager.acquire(plugin_id).await {
+                            Ok(h) => h,
+                            Err(e) => {
+                                warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                                return false;
+                            }
+                        }
+                    };
+
+                    let mut config = std::collections::HashMap::new();
+                    let plugin_timeout_secs = analysis_secs
+                        .saturating_sub(ANALYSIS_TIMEOUT_GRACE_SECS);
+                    config.insert(
+                        "analysis_timeout".to_string(),
+                        plugin_timeout_secs.to_string(),
+                    );
+                    let ok = match handle.execute_task(task_id, &task.target, config).await {
+                        Ok(outputs) => {
+                            info!(
+                                task_id,
+                                plugin = plugin_id.as_str(),
+                                result_count = outputs.len(),
+                                "Plugin execution completed"
                             );
-                            let ok = match handle.execute_task(task_id, &task.target, config).await {
-                                Ok(outputs) => {
-                                    info!(
+
+                            let plugin_name = plugin_id.as_str();
+                            for output in &outputs {
+                                let fs_format = match output.format {
+                                    OutputFormat::Json => ResultFormat::Json,
+                                    OutputFormat::Bytes => ResultFormat::Bytes,
+                                };
+                                let db_format = match output.format {
+                                    OutputFormat::Json => DbResultFormat::Json,
+                                    OutputFormat::Bytes => DbResultFormat::Bytes,
+                                };
+                                let db_role = if matches!(output.format, OutputFormat::Json)
+                                    && output.result_name
+                                        == malbox_plugin_transport::REPORT_RESULT_NAME
+                                {
+                                    ResultRole::Report
+                                } else {
+                                    ResultRole::Artifact
+                                };
+
+                                match self
+                                    .result_store
+                                    .store(
                                         task_id,
-                                        plugin = plugin_id.as_str(),
-                                        result_count = outputs.len(),
-                                        "Plugin execution completed"
-                                    );
-
-                                    let plugin_name = plugin_id.as_str();
-                                    for output in &outputs {
-                                        let fs_format = match output.format {
-                                            OutputFormat::Json => ResultFormat::Json,
-                                            OutputFormat::Bytes => ResultFormat::Bytes,
-                                        };
-                                        let db_format = match output.format {
-                                            OutputFormat::Json => DbResultFormat::Json,
-                                            OutputFormat::Bytes => DbResultFormat::Bytes,
-                                        };
-                                        let db_role = if matches!(output.format, OutputFormat::Json)
-                                            && output.result_name
-                                                == malbox_plugin_transport::REPORT_RESULT_NAME
-                                        {
-                                            ResultRole::Report
-                                        } else {
-                                            ResultRole::Artifact
-                                        };
-
-                                        match self
-                                            .result_store
-                                            .store(
+                                        plugin_name,
+                                        &output.result_name,
+                                        fs_format,
+                                        &output.data,
+                                    )
+                                    .await
+                                {
+                                    Ok(rel_path) => {
+                                        if let Err(e) = task_results::insert_task_result(
+                                            self.task_store.pool(),
+                                            &task_results::InsertTaskResult {
                                                 task_id,
                                                 plugin_name,
-                                                &output.result_name,
-                                                fs_format,
-                                                &output.data,
-                                            )
-                                            .await
+                                                result_name: &output.result_name,
+                                                format: db_format,
+                                                role: db_role,
+                                                size_bytes: output.data.len() as i64,
+                                                file_path: &rel_path,
+                                            },
+                                        )
+                                        .await
                                         {
-                                            Ok(rel_path) => {
-                                                if let Err(e) = task_results::insert_task_result(
-                                                    self.task_store.pool(),
-                                                    &task_results::InsertTaskResult {
-                                                        task_id,
-                                                        plugin_name,
-                                                        result_name: &output.result_name,
-                                                        format: db_format,
-                                                        role: db_role,
-                                                        size_bytes: output.data.len() as i64,
-                                                        file_path: &rel_path,
-                                                    },
-                                                )
-                                                .await
-                                                {
-                                                    error!(
-                                                        task_id,
-                                                        plugin_name,
-                                                        result_name = output.result_name.as_str(),
-                                                        error = %e,
-                                                        "Failed to insert task result into DB"
-                                                    );
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!(
-                                                    task_id,
-                                                    plugin_name,
-                                                    result_name = output.result_name.as_str(),
-                                                    error = %e,
-                                                    "Failed to store task result to filesystem"
-                                                );
-                                            }
+                                            error!(
+                                                task_id,
+                                                plugin_name,
+                                                result_name = output.result_name.as_str(),
+                                                error = %e,
+                                                "Failed to insert task result into DB"
+                                            );
                                         }
                                     }
-                                    true
+                                    Err(e) => {
+                                        error!(
+                                            task_id,
+                                            plugin_name,
+                                            result_name = output.result_name.as_str(),
+                                            error = %e,
+                                            "Failed to store task result to filesystem"
+                                        );
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
-                                    false
-                                }
-                            };
-                            handle.release().await;
-                            ok
+                            }
+                            true
                         }
                         Err(e) => {
-                            warn!(task_id, plugin = plugin_id.as_str(), error = %e, "Failed to acquire plugin");
+                            error!(task_id, plugin = plugin_id.as_str(), error = %e, "Plugin execution failed");
                             false
                         }
-                    }
+                    };
+                    handle.release().await;
+                    ok
                 }
                 .instrument(debug_span!("plugin.execute", plugin = %plugin_id))
                 .await;

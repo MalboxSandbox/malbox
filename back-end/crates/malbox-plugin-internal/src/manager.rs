@@ -12,6 +12,7 @@ pub mod instance;
 pub mod ipc_channels;
 pub mod log_router;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -45,6 +46,7 @@ pub struct PluginManager {
     registry: Arc<PluginRegistry>,
     emitter: Arc<DaemonEventPublisher>,
     ipc_node: Arc<Node<IpcService>>,
+    log_dir: PathBuf,
     /// Held to keep the background health-check task alive for the lifetime of the manager.
     #[allow(dead_code)]
     health_check_handle: JoinHandle<()>,
@@ -61,6 +63,7 @@ impl PluginManager {
         ipc_node: Arc<Node<IpcService>>,
         health_check_interval: Duration,
         token: CancellationToken,
+        log_dir: PathBuf,
     ) -> Result<Self> {
         let snapshot = registry.snapshot();
         let instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>> =
@@ -97,6 +100,7 @@ impl PluginManager {
             registry,
             emitter,
             ipc_node,
+            log_dir,
             health_check_handle,
             token,
         })
@@ -141,24 +145,14 @@ impl PluginManager {
                 ))
             }
             PluginStateConfig::Ephemeral => {
-                // Guest plugins registered via register_guest() are already in
-                // the instances map with a gRPC client. Use the existing
-                // instance instead of trying to spawn a local process.
-                if let Some(instance_lock) = self.instances.get(plugin_id) {
-                    let mut instance = instance_lock.value().lock().await;
-                    if instance.grpc_client.is_some() && instance.lifecycle.can_acquire() {
-                        instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
-                        return Ok(PluginHandle::new(
-                            plugin_id.clone(),
-                            Arc::clone(entry),
-                            Arc::clone(instance_lock.value()),
-                            Arc::clone(&self.ipc_node),
-                            Arc::clone(&self.emitter),
-                        ));
-                    }
-                }
-
                 info!(plugin = %plugin_id, "spawning ephemeral plugin instance");
+
+                // Clean up stale iceoryx2 resources from previously killed
+                // plugin processes. Without this, a dead server port remains
+                // registered on the service and the new process fails with
+                // ExceedsMaxSupportedServers.
+                Node::<IpcService>::cleanup_dead_nodes(self.ipc_node.config());
+
                 let mut instance = spawn_host_plugin(entry).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
                 instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
@@ -180,11 +174,11 @@ impl PluginManager {
     /// Register a guest plugin that connected from inside a VM.
     ///
     /// Establishes a gRPC client connection to the given address and creates a
-    /// [`PluginInstance`] in the [`Ready`](PluginLifecycle::Ready) state. The
-    /// instance is inserted into the instances map so it can be acquired by
-    /// workers for task execution.
+    /// [`PluginInstance`] in the [`Ready`](PluginLifecycle::Ready) state.
+    /// Returns a [`PluginHandle`] that the caller owns exclusively, bypassing
+    /// the shared instances map to avoid contention between parallel tasks.
     #[instrument(skip_all, fields(plugin = %plugin_id, addr = %addr), err)]
-    pub async fn register_guest(&self, plugin_id: &PluginId, addr: String) -> Result<()> {
+    pub async fn register_guest(&self, plugin_id: &PluginId, addr: String) -> Result<PluginHandle> {
         let snapshot = self.registry.snapshot();
         let entry = snapshot
             .get(plugin_id)
@@ -210,7 +204,7 @@ impl PluginManager {
             ));
         }
 
-        let instance = PluginInstance {
+        let mut instance = PluginInstance {
             entry: Arc::clone(entry),
             lifecycle: PluginLifecycle::Ready,
             process: None,
@@ -221,51 +215,44 @@ impl PluginManager {
             log_file_path: None,
         };
 
-        self.instances
-            .insert(plugin_id.clone(), Arc::new(Mutex::new(instance)));
-
         // Start consuming the guest plugin's log stream in the background.
-        {
-            let instance_lock = self
-                .instances
-                .get(plugin_id)
-                .expect("instance was just inserted");
-            let mut instance = instance_lock.value().lock().await;
-
-            if let Some(ref mut client) = instance.grpc_client {
-                match client.stream_logs(true).await {
-                    Ok(stream) => {
-                        let run_id = format!(
-                            "{}",
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis()
-                        );
-                        let log_dir = std::path::PathBuf::from("logs");
-                        let (_handle, log_path) = log_router::spawn_log_consumer(
-                            plugin_id.clone(),
-                            stream,
-                            log_dir,
-                            run_id,
-                        );
-                        instance.log_file_path = Some(log_path);
-                        debug!(plugin = %plugin_id, "log stream consumer started");
-                    }
-                    Err(e) => {
-                        warn!(
-                            plugin = %plugin_id,
-                            error = %e,
-                            "failed to start log stream (non-fatal)"
-                        );
-                    }
+        if let Some(ref mut client) = instance.grpc_client {
+            match client.stream_logs(true).await {
+                Ok(stream) => {
+                    let run_id = format!(
+                        "{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
+                    let log_dir = self.log_dir.clone();
+                    let (_handle, log_path) =
+                        log_router::spawn_log_consumer(plugin_id.clone(), stream, log_dir, run_id);
+                    instance.log_file_path = Some(log_path);
+                    debug!(plugin = %plugin_id, "log stream consumer started");
+                }
+                Err(e) => {
+                    warn!(
+                        plugin = %plugin_id,
+                        error = %e,
+                        "failed to start log stream (non-fatal)"
+                    );
                 }
             }
         }
 
         info!(plugin = %plugin_id, addr = %addr, "guest plugin registered");
 
-        Ok(())
+        let instance_lock = Arc::new(Mutex::new(instance));
+
+        Ok(PluginHandle::new(
+            plugin_id.clone(),
+            Arc::clone(entry),
+            instance_lock,
+            Arc::clone(&self.ipc_node),
+            Arc::clone(&self.emitter),
+        ))
     }
 
     /// Remove a previously registered guest plugin instance.

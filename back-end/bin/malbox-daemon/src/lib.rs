@@ -196,6 +196,7 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
                 Arc::clone(&ipc_node),
                 std::time::Duration::from_secs(10),
                 shutdown_token.child_token(),
+                config.paths.data_dir.join("logs"),
             )
             .await
             .map_err(|e| {
