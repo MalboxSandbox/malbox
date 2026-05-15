@@ -1,10 +1,18 @@
 use malbox_plugin_sdk::health::HealthStatus;
 use pyo3::prelude::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Severity {
+    Healthy,
+    Degraded,
+    Unhealthy,
+}
+
 #[pyclass(name = "HealthStatus", module = "malbox_plugin_sdk")]
 #[derive(Clone)]
 pub struct PyHealthStatus {
     pub(crate) inner: HealthStatus,
+    severity: Severity,
 }
 
 #[pymethods]
@@ -14,6 +22,7 @@ impl PyHealthStatus {
     fn healthy() -> Self {
         Self {
             inner: HealthStatus::ready(),
+            severity: Severity::Healthy,
         }
     }
 
@@ -22,6 +31,7 @@ impl PyHealthStatus {
     fn degraded(reason: String) -> Self {
         Self {
             inner: HealthStatus::not_ready(reason),
+            severity: Severity::Degraded,
         }
     }
 
@@ -30,6 +40,7 @@ impl PyHealthStatus {
     fn unhealthy(reason: String) -> Self {
         Self {
             inner: HealthStatus::not_ready(reason),
+            severity: Severity::Unhealthy,
         }
     }
 
@@ -44,10 +55,14 @@ impl PyHealthStatus {
     }
 
     fn __repr__(&self) -> String {
-        if self.inner.is_ready() {
-            "HealthStatus.Healthy".to_string()
-        } else {
-            format!("HealthStatus.Degraded('{}')", self.inner.reason())
+        match self.severity {
+            Severity::Healthy => "HealthStatus.Healthy".to_string(),
+            Severity::Degraded => {
+                format!("HealthStatus.Degraded('{}')", self.inner.reason())
+            }
+            Severity::Unhealthy => {
+                format!("HealthStatus.Unhealthy('{}')", self.inner.reason())
+            }
         }
     }
 }
@@ -56,6 +71,7 @@ impl PyHealthStatus {
     pub(crate) fn default_healthy() -> Self {
         Self {
             inner: HealthStatus::ready(),
+            severity: Severity::Healthy,
         }
     }
 }

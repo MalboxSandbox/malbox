@@ -276,9 +276,14 @@ pub struct PyTreeNode {
 impl PyTreeNode {
     #[new]
     #[pyo3(signature = (label, children=vec![], meta=None))]
-    fn new(label: String, children: Vec<PyTreeNode>, meta: Option<PyObject>) -> PyResult<Self> {
+    fn new(
+        py: Python<'_>,
+        label: String,
+        children: Vec<PyTreeNode>,
+        meta: Option<PyObject>,
+    ) -> PyResult<Self> {
         let meta_value = match meta {
-            Some(obj) => py_obj_to_json_value(&obj)?,
+            Some(obj) => py_obj_to_json_value(py, &obj)?,
             None => serde_json::Value::Null,
         };
         Ok(Self {
@@ -305,8 +310,8 @@ impl PyTreeNode {
     }
 
     #[getter]
-    fn meta(&self) -> PyResult<PyObject> {
-        json_value_to_py_obj(&self.inner.meta)
+    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+        json_value_to_py_obj(py, &self.inner.meta)
     }
 }
 
@@ -329,13 +334,14 @@ impl PyTimelineEvent {
     #[new]
     #[pyo3(signature = (ts, label, severity=None, meta=None))]
     fn new(
+        py: Python<'_>,
         ts: String,
         label: String,
         severity: Option<String>,
         meta: Option<PyObject>,
     ) -> PyResult<Self> {
         let meta_value = match meta {
-            Some(obj) => py_obj_to_json_value(&obj)?,
+            Some(obj) => py_obj_to_json_value(py, &obj)?,
             None => serde_json::Value::Null,
         };
         Ok(Self {
@@ -364,8 +370,8 @@ impl PyTimelineEvent {
     }
 
     #[getter]
-    fn meta(&self) -> PyResult<PyObject> {
-        json_value_to_py_obj(&self.inner.meta)
+    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+        json_value_to_py_obj(py, &self.inner.meta)
     }
 }
 
@@ -387,9 +393,9 @@ pub struct PyGraphNode {
 impl PyGraphNode {
     #[new]
     #[pyo3(signature = (id, label, meta=None))]
-    fn new(id: String, label: String, meta: Option<PyObject>) -> PyResult<Self> {
+    fn new(py: Python<'_>, id: String, label: String, meta: Option<PyObject>) -> PyResult<Self> {
         let meta_value = match meta {
-            Some(obj) => py_obj_to_json_value(&obj)?,
+            Some(obj) => py_obj_to_json_value(py, &obj)?,
             None => serde_json::Value::Null,
         };
         Ok(Self {
@@ -412,8 +418,8 @@ impl PyGraphNode {
     }
 
     #[getter]
-    fn meta(&self) -> PyResult<PyObject> {
-        json_value_to_py_obj(&self.inner.meta)
+    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+        json_value_to_py_obj(py, &self.inner.meta)
     }
 }
 
@@ -505,10 +511,15 @@ impl PyBlock {
     }
 
     #[staticmethod]
-    fn heading(level: u8, text: String) -> Self {
-        Self {
-            inner: Block::Heading { level, text },
+    fn heading(level: u8, text: String) -> PyResult<Self> {
+        if !(1..=6).contains(&level) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "heading level must be 1-6",
+            ));
         }
+        Ok(Self {
+            inner: Block::Heading { level, text },
+        })
     }
 
     #[staticmethod]
@@ -530,19 +541,18 @@ impl PyBlock {
     #[staticmethod]
     #[pyo3(signature = (columns, rows, sortable=true, searchable=false))]
     fn table(
+        py: Python<'_>,
         columns: Vec<PyColumn>,
         rows: PyObject,
         sortable: bool,
         searchable: bool,
     ) -> PyResult<Self> {
-        let rows_value: Vec<serde_json::Value> = Python::with_gil(|py| {
-            let json_mod = py.import("json")?;
-            let json_str = json_mod
-                .call_method1("dumps", (rows.bind(py),))?
-                .extract::<String>()?;
-            serde_json::from_str(&json_str)
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-        })?;
+        let json_mod = py.import("json")?;
+        let json_str = json_mod
+            .call_method1("dumps", (rows.bind(py),))?
+            .extract::<String>()?;
+        let rows_value: Vec<serde_json::Value> = serde_json::from_str(&json_str)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             inner: Block::Table {
                 columns: columns.into_iter().map(|c| c.inner).collect(),
@@ -562,15 +572,13 @@ impl PyBlock {
 
     #[staticmethod]
     #[pyo3(signature = (data, collapsed=true))]
-    fn json(data: PyObject, collapsed: bool) -> PyResult<Self> {
-        let json_value: serde_json::Value = Python::with_gil(|py| {
-            let json_mod = py.import("json")?;
-            let json_str = json_mod
-                .call_method1("dumps", (data.bind(py),))?
-                .extract::<String>()?;
-            serde_json::from_str(&json_str)
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-        })?;
+    fn json(py: Python<'_>, data: PyObject, collapsed: bool) -> PyResult<Self> {
+        let json_mod = py.import("json")?;
+        let json_str = json_mod
+            .call_method1("dumps", (data.bind(py),))?
+            .extract::<String>()?;
+        let json_value: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             inner: Block::Json {
                 data: json_value,
@@ -658,24 +666,20 @@ impl From<PyBlock> for Block {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Convert a Python object to a serde_json::Value via Python's json module.
-fn py_obj_to_json_value(obj: &PyObject) -> PyResult<serde_json::Value> {
-    Python::with_gil(|py| {
-        let json_mod = py.import("json")?;
-        let json_str = json_mod
-            .call_method1("dumps", (obj.bind(py),))?
-            .extract::<String>()?;
-        serde_json::from_str(&json_str)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-    })
+fn py_obj_to_json_value(py: Python<'_>, obj: &PyObject) -> PyResult<serde_json::Value> {
+    let json_mod = py.import("json")?;
+    let json_str = json_mod
+        .call_method1("dumps", (obj.bind(py),))?
+        .extract::<String>()?;
+    serde_json::from_str(&json_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
 /// Convert a serde_json::Value back to a Python object via Python's json module.
-fn json_value_to_py_obj(value: &serde_json::Value) -> PyResult<PyObject> {
-    Python::with_gil(|py| {
-        let json_str = serde_json::to_string(value)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let json_mod = py.import("json")?;
-        let obj = json_mod.call_method1("loads", (json_str,))?;
-        Ok(obj.into())
-    })
+fn json_value_to_py_obj(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObject> {
+    let json_str = serde_json::to_string(value)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let json_mod = py.import("json")?;
+    let obj = json_mod.call_method1("loads", (json_str,))?;
+    Ok(obj.into())
 }

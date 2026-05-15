@@ -37,14 +37,12 @@ impl Clone for PyPluginResult {
 #[pymethods]
 impl PyPluginResult {
     #[staticmethod]
-    fn json(name: String, data: PyObject) -> PyResult<Self> {
-        let json_bytes: Vec<u8> = Python::with_gil(|py| {
-            let json_str = py
-                .import("json")?
-                .call_method1("dumps", (data.bind(py),))?
-                .extract::<String>()?;
-            Ok::<_, PyErr>(json_str.into_bytes())
-        })?;
+    fn json(py: Python<'_>, name: String, data: PyObject) -> PyResult<Self> {
+        let json_str = py
+            .import("json")?
+            .call_method1("dumps", (data.bind(py),))?
+            .extract::<String>()?;
+        let json_bytes: Vec<u8> = json_str.into_bytes();
         Ok(Self {
             inner: PluginResult::Json {
                 name,

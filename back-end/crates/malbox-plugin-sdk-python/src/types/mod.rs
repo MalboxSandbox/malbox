@@ -1,6 +1,5 @@
 pub mod context;
 pub mod event;
-pub mod exec;
 pub mod health;
 pub mod report;
 pub mod result;

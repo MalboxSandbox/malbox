@@ -54,33 +54,14 @@ impl PythonPlugin {
         Self { py_plugin }
     }
 
-    /// If the result is a coroutine, drive it to completion with asyncio.
     fn maybe_await(&self, py: Python<'_>, result: &Bound<'_, PyAny>) -> PyResult<()> {
-        // Check if it's a coroutine (has send method = coroutine protocol)
-        if result.hasattr("send")? {
-            let asyncio = py.import("asyncio")?;
-
-            // Try to get or create an event loop
-            let event_loop = match asyncio.call_method0("get_event_loop") {
-                Ok(loop_obj) => {
-                    // Check if the loop is closed
-                    let is_closed: bool = loop_obj.call_method0("is_closed")?.extract()?;
-                    if is_closed {
-                        let new_loop = asyncio.call_method0("new_event_loop")?;
-                        asyncio.call_method1("set_event_loop", (&new_loop,))?;
-                        new_loop
-                    } else {
-                        loop_obj
-                    }
-                }
-                Err(_) => {
-                    let new_loop = asyncio.call_method0("new_event_loop")?;
-                    asyncio.call_method1("set_event_loop", (&new_loop,))?;
-                    new_loop
-                }
-            };
-
-            event_loop.call_method1("run_until_complete", (result,))?;
+        let asyncio = py.import("asyncio")?;
+        let is_coro: bool = asyncio.call_method1("iscoroutine", (result,))?.extract()?;
+        if is_coro {
+            let event_loop = asyncio.call_method0("new_event_loop")?;
+            let run_result = event_loop.call_method1("run_until_complete", (result,));
+            event_loop.call_method0("close")?;
+            run_result?;
         }
         Ok(())
     }
@@ -98,9 +79,15 @@ impl Plugin for PythonPlugin {
             match result {
                 Ok(obj) => match obj.extract::<PyHealthStatus>(py) {
                     Ok(status) => status.inner,
-                    Err(_) => HealthStatus::ready(),
+                    Err(e) => {
+                        tracing::warn!("health_check returned non-HealthStatus type: {e}");
+                        HealthStatus::not_ready(format!("health_check type error: {e}"))
+                    }
                 },
-                Err(_) => HealthStatus::ready(),
+                Err(e) => {
+                    tracing::error!("health_check raised an exception: {e}");
+                    HealthStatus::not_ready(format!("health_check exception: {e}"))
+                }
             }
         })
     }
@@ -109,10 +96,12 @@ impl Plugin for PythonPlugin {
 impl HostPlugin for PythonPlugin {
     fn on_task(&self, ctx: &Context) -> Result<()> {
         Python::with_gil(|py| {
-            let py_ctx = unsafe { PyContext::from_ref(ctx) };
+            let (py_ctx, valid) = unsafe { PyContext::from_ref(ctx) };
 
-            let result = self.py_plugin.call_method1(py, "on_task", (py_ctx,))?;
+            let result = self.py_plugin.call_method1(py, "on_task", (py_ctx,));
+            valid.store(false, std::sync::atomic::Ordering::Release);
 
+            let result = result?;
             self.maybe_await(py, result.bind(py))?;
             Ok(())
         })

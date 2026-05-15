@@ -14,6 +14,3 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     types::register(m)?;
     Ok(())
 }
-
-#[allow(unused_imports)]
-use runtime::run;
