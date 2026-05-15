@@ -36,6 +36,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, instrument};
 
+const POLL_INTERVAL_MS: u64 = 500;
+const RESULT_CHANNEL_CAPACITY: usize = 256;
+
 /// Task request payload serialized with postcard over IPC.
 #[derive(Serialize, Deserialize)]
 pub struct TaskRequestPayload<'a> {
@@ -53,10 +56,10 @@ struct TaskRequestPayloadOwned {
 }
 
 /// Host plugin runtime with WaitSet-driven event loop.
-#[allow(dead_code)]
 pub struct HostRuntime<P> {
     plugin: P,
     meta: PluginMeta,
+    #[allow(dead_code)]
     plugin_id: String,
 
     // iceoryx2 node - must outlive all ports created from it
@@ -69,7 +72,8 @@ pub struct HostRuntime<P> {
     daemon_event_sub: DaemonEventSubscriber,
     plugin_event_pub: PluginEventPublisher,
 
-    // Results (chaining)
+    // Results (chaining) - publisher used when result forwarding is wired up
+    #[allow(dead_code)]
     result_pub: ResultPublisher,
     result_subscriptions: Vec<(String, ResultSubscriber)>,
 
@@ -151,7 +155,9 @@ impl<P: HostPlugin> HostRuntime<P> {
             associated_id: 0,
             _reserved: [0; 6],
         };
-        let _ = self.plugin_event_pub.emit_signal(&header);
+        if let Err(e) = self.plugin_event_pub.emit_signal(&header) {
+            error!(plugin = %self.meta.name(), error = %e, "Failed to emit PluginStarted event");
+        }
         info!(plugin = %self.meta.name(), "Plugin started, entering WaitSet event loop");
 
         // Build WaitSet
@@ -165,7 +171,7 @@ impl<P: HostPlugin> HostRuntime<P> {
 
         // Also attach an interval for periodic checks (shutdown, etc.)
         let _interval_guard = waitset
-            .attach_interval(core::time::Duration::from_millis(500))
+            .attach_interval(core::time::Duration::from_millis(POLL_INTERVAL_MS))
             .map_err(|e| SdkError::Init(format!("Failed to attach interval: {e}")))?;
 
         let result = waitset.wait_and_process(|attachment_id| {
@@ -206,7 +212,9 @@ impl<P: HostPlugin> HostRuntime<P> {
             associated_id: 0,
             _reserved: [0; 6],
         };
-        let _ = self.plugin_event_pub.emit_signal(&header);
+        if let Err(e) = self.plugin_event_pub.emit_signal(&header) {
+            error!(plugin = %self.meta.name(), error = %e, "Failed to emit PluginStopped event");
+        }
 
         info!(plugin = %self.meta.name(), "Plugin runtime exited");
         Ok(())
@@ -228,7 +236,7 @@ impl<P: HostPlugin> HostRuntime<P> {
                 return;
             }
 
-            if let Ok(event) = Event::try_from(&event.header)
+            if let Ok(event) = event.to_event()
                 && let Err(e) = self.plugin.on_event(event)
             {
                 error!(plugin = %self.meta.name(), error = %e, "on_event error");
@@ -277,14 +285,16 @@ impl<P: HostPlugin> HostRuntime<P> {
                     ..Default::default()
                 };
                 let msg = format!("deserialization error: {e}");
-                let _ = active_request.send_response(&resp, msg.as_bytes());
+                if let Err(e) = active_request.send_response(&resp, msg.as_bytes()) {
+                    error!(task_id, error = %e, "Failed to send error response to daemon");
+                }
                 return;
             }
         };
 
         let config: HashMap<String, String> = request.config.into_iter().collect();
 
-        let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(256);
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(RESULT_CHANNEL_CAPACITY);
 
         let emitter: Arc<dyn TransportEmitter + Send + Sync> = Arc::new(());
         let task_ctx = Context::new(
@@ -311,7 +321,9 @@ impl<P: HostPlugin> HostRuntime<P> {
                     flags: FLAG_IS_FINAL,
                     ..Default::default()
                 };
-                let _ = active_request.send_response(&resp, &[]);
+                if let Err(e) = active_request.send_response(&resp, &[]) {
+                    error!(task_id, error = %e, "Failed to send task completion to daemon");
+                }
 
                 let ev = EventHeader {
                     event_type: EventKind::TaskCompleted as u16,
@@ -319,7 +331,9 @@ impl<P: HostPlugin> HostRuntime<P> {
                     associated_id: task_id,
                     _reserved: [0; 6],
                 };
-                let _ = self.plugin_event_pub.emit_signal(&ev);
+                if let Err(e) = self.plugin_event_pub.emit_signal(&ev) {
+                    error!(task_id, error = %e, "Failed to emit TaskCompleted event");
+                }
                 info!(plugin = %self.meta.name(), task_id, "Task completed");
             }
             Err(e) => {
@@ -330,7 +344,9 @@ impl<P: HostPlugin> HostRuntime<P> {
                     ..Default::default()
                 };
                 let msg = e.to_string();
-                let _ = active_request.send_response(&resp, msg.as_bytes());
+                if let Err(send_err) = active_request.send_response(&resp, msg.as_bytes()) {
+                    error!(task_id, error = %send_err, "Failed to send task error to daemon");
+                }
 
                 let ev = EventHeader {
                     event_type: EventKind::TaskFailed as u16,
@@ -338,7 +354,9 @@ impl<P: HostPlugin> HostRuntime<P> {
                     associated_id: task_id,
                     _reserved: [0; 6],
                 };
-                let _ = self.plugin_event_pub.emit_signal(&ev);
+                if let Err(emit_err) = self.plugin_event_pub.emit_signal(&ev) {
+                    error!(task_id, error = %emit_err, "Failed to emit TaskFailed event");
+                }
                 error!(plugin = %self.meta.name(), task_id, error = %e, "Task failed");
             }
         }
@@ -358,7 +376,13 @@ fn forward_result_to_ipc(active_request: &ActiveTaskRequest, msg: &TaskResultMes
                 _ => IpcResultFormat::Bytes,
             },
         ),
-        MsgResultKind::ResultRef => return,
+        MsgResultKind::ResultRef => {
+            debug!(
+                task_id = msg.task_id,
+                "ResultRef not supported for host plugins, skipping"
+            );
+            return;
+        }
     };
 
     let name_bytes = msg.result_name.as_bytes();

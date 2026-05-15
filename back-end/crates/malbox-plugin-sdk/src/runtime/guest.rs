@@ -90,7 +90,8 @@ pub struct GuestRuntimeConfig {
 pub fn sweep_log_overflow_orphans(log_dir: &std::path::Path) {
     use std::time::{Duration, SystemTime};
 
-    let grace = Duration::from_secs(10 * 60);
+    const ORPHAN_SWEEP_GRACE_SECS: u64 = 10 * 60;
+    let grace = Duration::from_secs(ORPHAN_SWEEP_GRACE_SECS);
     let now = SystemTime::now();
 
     let read_dir = match std::fs::read_dir(log_dir) {
@@ -191,10 +192,11 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         request: Request<proto::TaskRequest>,
     ) -> std::result::Result<Response<Self::ExecuteTaskStream>, Status> {
         let req = request.into_inner();
+        const TASK_CHANNEL_CAPACITY: usize = 32;
         let (proto_tx, proto_rx) =
-            mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(32);
+            mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(TASK_CHANNEL_CAPACITY);
         let (result_tx, mut result_rx) =
-            mpsc::channel::<crate::context::message::TaskResultMessage>(32);
+            mpsc::channel::<crate::context::message::TaskResultMessage>(TASK_CHANNEL_CAPACITY);
 
         let plugin = self.plugin.clone();
         let full_sample_path = if std::path::Path::new(&req.sample_path).is_relative()
@@ -286,11 +288,12 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         match files::pull_file(&self.artifact_dir, &req.path).await {
             Ok(data) => {
                 let path = req.path;
+                const FILE_CHUNK_SIZE: usize = 64 * 1024;
                 let chunks: Vec<std::result::Result<proto::FileChunk, Status>> = data
-                    .chunks(64 * 1024)
+                    .chunks(FILE_CHUNK_SIZE)
                     .enumerate()
                     .map(|(i, chunk)| {
-                        let remaining = data.len() - (i * 64 * 1024) - chunk.len();
+                        let remaining = data.len() - (i * FILE_CHUNK_SIZE) - chunk.len();
                         Ok(proto::FileChunk {
                             path: path.clone(),
                             data: chunk.to_vec(),
@@ -362,7 +365,8 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let s = async_stream::stream! {
             use tokio::io::AsyncReadExt;
             let mut file = file;
-            let mut buf = vec![0u8; 64 * 1024];
+            const READ_BUF_SIZE: usize = 64 * 1024;
+            let mut buf = vec![0u8; READ_BUF_SIZE];
             let mut index: u32 = 0;
             loop {
                 let n = match file.read(&mut buf).await {
@@ -486,7 +490,8 @@ impl<P: GuestPlugin> GuestRuntime<P> {
                 let overflow_path =
                     log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
 
-                let bus = Arc::new(LogBus::with_overflow(1024, overflow_path));
+                const LOG_BUS_CAPACITY: usize = 1024;
+                let bus = Arc::new(LogBus::with_overflow(LOG_BUS_CAPACITY, overflow_path));
                 crate::internal::init_tracing(self.config.log_filter, Some(Arc::clone(&bus)));
                 bus
             }

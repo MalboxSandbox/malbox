@@ -48,7 +48,7 @@ impl From<&tracing::Level> for LogLevel {
 /// A single captured log entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    /// Nanosecond timestamp (monotonic clock, relative to process start).
+    /// Nanosecond timestamp (wall-clock, UNIX epoch).
     pub timestamp_ns: u64,
     /// Severity level.
     pub level: LogLevel,

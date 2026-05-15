@@ -24,10 +24,11 @@ pub enum StashFormat {
 
 /// Metadata for a single stashed result (path on disk, ownership, size).
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct StashEntry {
     pub path: PathBuf,
+    #[allow(dead_code)]
     pub result_name: String,
+    #[allow(dead_code)]
     pub format: StashFormat,
     pub size_bytes: u64,
     /// True for SDK-written temp files (deleted after pull). False for

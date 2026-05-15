@@ -160,39 +160,44 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecut
     }
 
     info!(path = %sample_path.display(), "Calling execute_sample");
-    match plugin.execute_sample(&sample_path) {
+    let launched = match plugin.execute_sample(&sample_path) {
         Ok(LaunchResult::Launched) => {
             info!(path = %sample_path.display(), "Sample launched successfully");
+            true
         }
         Ok(LaunchResult::UseDefault) => {
             info!(path = %sample_path.display(), "Plugin returned UseDefault, using default launcher");
-            let result = crate::plugin::guest::default_launch(&sample_path);
-            match result {
+            match crate::plugin::guest::default_launch(&sample_path) {
                 LaunchResult::Launched => {
                     info!(path = %sample_path.display(), "Default launch succeeded");
+                    true
                 }
                 LaunchResult::UseDefault => {
-                    error!(path = %sample_path.display(), "Default launch also returned UseDefault");
+                    error!(path = %sample_path.display(), "Default launch also returned UseDefault, sample was never executed");
+                    false
                 }
             }
         }
         Err(e) => {
-            error!(path = %sample_path.display(), error = %e, "execute_sample failed");
+            error!(path = %sample_path.display(), error = %e, "execute_sample failed, sample was never executed");
+            false
         }
-    }
+    };
 
-    let timeout = config
-        .get("analysis_timeout")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(default_timeout);
-    info!(timeout_secs = timeout, "Waiting for analysis timeout");
-    std::thread::sleep(std::time::Duration::from_secs(timeout));
+    if launched {
+        let timeout = config
+            .get("analysis_timeout")
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(default_timeout);
+        info!(timeout_secs = timeout, "Waiting for analysis timeout");
+        std::thread::sleep(std::time::Duration::from_secs(timeout));
+    }
 
     if let Err(e) = plugin.on_stop(&ctx) {
         error!(error = %e, "GuestPlugin on_stop failed");
     }
 
-    if auto_collect_artifacts.enabled {
+    if launched && auto_collect_artifacts.enabled {
         debug!("auto-collecting artifacts from {}", artifact_dir.display());
         let claimed = ctx.claimed_paths();
         collector::auto_collect(
@@ -204,7 +209,7 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecut
         );
     }
 
-    if auto_collect_external_logs.enabled {
+    if launched && auto_collect_external_logs.enabled {
         debug!(
             "auto-collecting external logs from {}",
             external_log_dir.display()

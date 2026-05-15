@@ -121,7 +121,7 @@ impl ReportBuilder {
     ) -> Self {
         self.report.verdict = Some(Verdict {
             classification,
-            score,
+            score: score.map(|s| s.min(100)),
             confidence,
             labels: Vec::new(),
         });
@@ -235,7 +235,7 @@ impl SectionBuilder {
     /// Add a heading (level 1-6, maps to HTML heading levels).
     pub fn heading(self, level: u8, text: impl Into<String>) -> Self {
         self.block(Block::Heading {
-            level,
+            level: level.clamp(1, 6),
             text: text.into(),
         })
     }
