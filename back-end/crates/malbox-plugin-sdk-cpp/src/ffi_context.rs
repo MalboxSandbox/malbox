@@ -163,7 +163,6 @@ pub unsafe extern "C" fn malbox_context_warn(
     };
 
     let (rc, _) = result_to_rc(context.warn(msg));
-    clear_last_error();
     rc
 }
 
@@ -238,6 +237,11 @@ pub unsafe extern "C" fn malbox_context_flush_results(
 
     if count == 0 {
         return 0;
+    }
+
+    if names.is_null() || datas.is_null() || data_lens.is_null() || formats.is_null() {
+        set_last_error("array pointers must not be null when count > 0");
+        return -1;
     }
 
     let mut results = Vec::with_capacity(count);

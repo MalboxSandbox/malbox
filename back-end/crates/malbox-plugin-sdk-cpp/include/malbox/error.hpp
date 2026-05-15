@@ -10,13 +10,14 @@ int32_t malbox_last_error(const char** out_message);
 
 namespace malbox {
 
-/// Well-known error categories returned by the C API.
+/// Error category returned by the C API.
+///
+/// The Rust FFI layer currently returns -1 for all errors; the specific
+/// category is conveyed through the message string retrieved via
+/// malbox_last_error(). This enum is kept as a single value for forward
+/// compatibility - differentiated codes may be added in the future.
 enum class ErrorKind : int32_t {
-    Unknown        = -1,
-    InvalidContext = -2,
-    ChannelClosed  = -3,
-    Io             = -4,
-    Transport      = -5,
+    Unknown = -1,
 };
 
 /// Exception type thrown when a Malbox C API call fails (returns a negative rc).

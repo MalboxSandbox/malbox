@@ -111,7 +111,7 @@ impl GuestPlugin for GuestVtablePlugin {
         match rc {
             0 => Ok(LaunchResult::UseDefault),
             1 => Ok(LaunchResult::Launched),
-            _ => Ok(LaunchResult::UseDefault),
+            _ => check_rc(rc).map(|()| LaunchResult::UseDefault),
         }
     }
 }

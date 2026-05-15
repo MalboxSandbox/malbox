@@ -72,7 +72,7 @@ impl Plugin for VtablePlugin {
         };
 
         let mut status = MalboxHealthStatus {
-            ready: false,
+            ready: true,
             reason: std::ptr::null(),
         };
 
@@ -80,16 +80,15 @@ impl Plugin for VtablePlugin {
         let rc = unsafe { health_check(self.vtable.plugin_ptr, &mut status) };
 
         if rc != 0 {
-            return HealthStatus::ready();
+            return HealthStatus::not_ready("health_check callback failed");
         }
 
         let reason = if status.reason.is_null() {
             String::new()
         } else {
             unsafe { std::ffi::CStr::from_ptr(status.reason) }
-                .to_str()
-                .unwrap_or("")
-                .to_owned()
+                .to_string_lossy()
+                .into_owned()
         };
 
         if status.ready {
