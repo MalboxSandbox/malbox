@@ -1,0 +1,41 @@
+---
+title: "Changelog"
+description: "Release notes for Malbox covering new features, plugin SDK updates, CLI changes, UI improvements, and bug fixes shipped each week."
+---
+
+<Update label="May 15, 2026" tags={["release"]}>
+
+## New features
+
+- **Python plugin SDK.** You can now write host plugins in Python using the new SDK with PyO3 bindings, alongside the existing Rust and C++ options. See the [Python plugin guide](/plugin-guides/creating-a-python-plugin).
+- **Automatic installer.** A new install script (powered by amber) plus a bare-metal installer crate make it easier to get Malbox running on a fresh host. See [Automatic install](/installation/automatic).
+- **New CLI binaries.** The old `malbox-cli` has been replaced by two focused binaries: `malbox` for everyday use and `malboxctl` for administration.
+- **Redesigned report UI.** Reports now feature score cards, a threat overview, artifact previews, and richer visualization blocks for faster triage.
+- **Submission configuration modal.** Configure analysis options directly from a new submission modal in the web UI, and cancel running tasks from the task view.
+- **Snapshots API coverage.** The front-end now exposes snapshot management end-to-end.
+- **New plugin event handlers.** Host plugins can subscribe to events and results and react with an `on_result` handler. See [Event hooks](/plugin-system/event-hooks).
+- **More example plugins.** The plugin examples have been refreshed for the new SDK API, with additional samples to learn from.
+- **Release checksums.** Release binaries now ship with SHA256 checksums for verification.
+
+## Updates
+
+- **C++ SDK refresh.** The C++ plugin SDK has been updated to match the latest native SDK surface. See [Creating a C++ plugin](/plugin-guides/creating-a-cpp-plugin).
+- **Polished CLI output.** Tables auto-fit your terminal width, branded colors are applied across commands, and selection prompts are now interactive.
+- **More reliable scheduler.** Plugin execution failures are tracked explicitly, and sample paths are resolved more reliably so tasks fail loudly instead of silently.
+- **Faster, more reliable plugin runtime.** The host plugin runtime has been rewritten around an event-driven loop, and the guest plugin lifecycle and IPC layer have been reworked for better stability under load.
+- **Stricter configuration.** Configuration files now reject unknown fields, so typos surface immediately instead of being silently ignored. See [Plugin configuration](/reference/configuration/plugins).
+- **Improved logging.** Plugin runtime logs are more informative when things go wrong.
+
+## Bug fixes
+
+- Fixed plugin launch failures not being surfaced clearly; report score values are now clamped to valid ranges.
+- Fixed several plugin transport issues: event mapping, chunked-payload flags, and payload encoding.
+- Fixed Python plugin SDK error handling and added a context validity guard.
+- Fixed C++ plugin SDK health check defaults and FFI error propagation.
+- Fixed a potential deadlock when spawning guest plugins.
+- Fixed missing `created_at` / `updated_at` fields on sample records.
+- Renamed the CLI `--format` flag to `--image-format` to avoid a conflict — update your scripts accordingly.
+- Fixed C++ codegen producing invalid empty vector initializers.
+- Fixed the result content proxy path in the front-end.
+
+</Update>
