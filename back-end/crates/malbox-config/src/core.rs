@@ -1,11 +1,12 @@
 use crate::{
     Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig, images::ImagesConfig,
     machinery::MachineryConfig, machines::MachineConfig, plugins::PluginsConfig,
-    providers::ProvidersConfig, provisioning::ProvisioningConfig,
+    providers::ProvidersConfig,
 };
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub paths: PathConfig,
     pub general: GeneralConfig,
@@ -17,8 +18,6 @@ pub struct Config {
     #[serde(default)]
     pub images: Option<ImagesConfig>,
     #[serde(default)]
-    pub provisioning: Option<ProvisioningConfig>,
-    #[serde(default)]
     pub guest_access: Option<GuestAccessConfig>,
     #[serde(default)]
     pub plugins: PluginsConfig,
@@ -28,6 +27,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GeneralConfig {
     pub environment: Environment,
     #[serde(default = "default_log_level")]
@@ -43,6 +43,7 @@ pub struct GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HttpConfig {
     pub host: String,
     pub port: u16,
@@ -57,12 +58,14 @@ pub struct HttpConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisConfig {
     pub timeout: u32,
     pub max_vms: u32,
@@ -72,6 +75,7 @@ pub struct AnalysisConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlatformAnalysisConfig {
     pub default_profile: String,
     pub timeout: Option<u32>,

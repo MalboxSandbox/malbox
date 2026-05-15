@@ -24,7 +24,7 @@ pub use machinery::MachineryConfig;
 pub use machines::{Arch, MachineConfig, validate_machine_configs};
 pub use plugins::PluginsConfig;
 pub use providers::ProvidersConfig;
-pub use provisioning::{ProvisionStep, ProvisioningConfig};
+pub use provisioning::ProvisionStep;
 pub use storage::PathConfig;
 pub use types::*;
 

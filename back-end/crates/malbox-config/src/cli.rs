@@ -3,11 +3,13 @@ use crate::storage::PathConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CliConfig {
     pub api: ApiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApiConfig {
     #[serde(default = "default_api_url")]
     pub url: String,

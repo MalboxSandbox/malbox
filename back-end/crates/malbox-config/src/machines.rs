@@ -11,6 +11,7 @@ pub enum Arch {
 
 /// Declarative machine definition from config.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MachineConfig {
     pub name: String,
     pub image: String,

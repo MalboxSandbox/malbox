@@ -35,6 +35,7 @@ impl From<TransportKind> for String {
 /// and command execution. When absent, guest access is disabled and tasks
 /// requiring it will fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GuestAccessConfig {
     pub transport: TransportKind,
 
