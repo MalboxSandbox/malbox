@@ -3,7 +3,7 @@ title: "Machinery providers: machine allocation and snapshots"
 description: "How Malbox providers create, destroy, and snapshot analysis machines across infrastructure platforms using the capability-based provider system."
 ---
 
-## What are Providers?
+## What are providers?
 
 Providers are the foundation of Malbox's machinery system. They handle the creation and allocation of compute infrastructure where analysis takes place.
 
@@ -34,7 +34,7 @@ Providers declare which capabilities they support. One capability is mandatory; 
 
 You can query a provider's capabilities at runtime via `has_capability("snapshot")` or `list_capabilities()`.
 
-## Supported Providers
+## Supported providers
 
 ### libvirt
 
@@ -47,7 +47,7 @@ Configuration in `malbox.toml`:
 uri = "qemu:///system"
 ```
 
-## Next Steps
+## Next steps
 
 - Read about [Provisioners](/machinery/provisioners) for configuring machines after creation
 - Read about [Packer](/machinery/packer) for building machine images

@@ -5,7 +5,7 @@ description: "How Malbox plugins subscribe to per-plugin and daemon broadcast ev
 
 Malbox's plugin system is event-driven. Rather than polling for changes or running on fixed schedules, plugins subscribe to specific events and respond when those events occur. This approach enables efficient, reactive analysis workflows where plugins only activate when relevant activity happens.
 
-## How Event Hooks Work
+## How event hooks work
 
 When you register a plugin with Malbox, you declare which events your plugin should respond to. The system uses two types of event channels:
 
@@ -14,18 +14,18 @@ When you register a plugin with Malbox, you declare which events your plugin sho
 
 The runtime uses a WaitSet-based reactor pattern - your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler if one exists, or to a catch-all `on_event` method.
 
-## Event Categories
+## Event categories
 
 Events are grouped into four categories based on what triggers them:
 
 | Category | Description |
 |----------|-------------|
-| **Task Events** | Fired during task lifecycle stages |
-| **Plugin Events** | Fired when plugin processes start, stop, or produce results |
-| **Sample Events** | Fired when samples are received or finish processing |
-| **System Events** | Fired for system-wide occurrences like shutdown or configuration changes |
+| **Task events** | Fired during task lifecycle stages |
+| **Plugin events** | Fired when plugin processes start, stop, or produce results |
+| **Sample events** | Fired when samples are received or finish processing |
+| **System events** | Fired for system-wide occurrences like shutdown or configuration changes |
 
-## Subscribing to Events
+## Subscribing to events
 
 Plugins declare subscriptions in the `[events]` section of their `plugin.toml`. The subscription model is declarative - you specify which plugins to subscribe to, and the SDK runtime handles the IPC channel setup and routing.
 
@@ -50,7 +50,7 @@ impl MyPlugin {
 }
 ```
 
-## Plugin Result Chaining
+## Plugin result chaining
 
 Beyond reacting to lifecycle events, plugins can subscribe to other plugins' event channels. When a subscribed plugin produces a result, a `PluginResultAvailable` event fires with the source plugin name and result name. Your plugin's `on_event` handler receives this event, enabling reactive analysis pipelines where plugins chain off each other's output.
 
@@ -60,6 +60,6 @@ Events are lightweight signals - they carry minimal metadata (source plugin name
 
 ## Reference
 
-For the complete list of available events and their parameters, see the [Events Reference](/reference/plugin-sdk/events).
+For the complete list of available events and their parameters, see the [events reference](/reference/plugin-sdk/events).
 
 

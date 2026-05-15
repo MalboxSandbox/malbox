@@ -16,7 +16,7 @@ A worker is fundamentally an async event loop that processes tasks until shutdow
 
 The worker's execution loop uses `tokio::select!` to multiplex the task notifier, the cancellation token, and (for non-baseline workers) an idle timeout. When notified, the worker attempts to dequeue a task from the shared priority queue. If another worker already grabbed it, the loop continues waiting.
 
-### Worker Types
+### Worker types
 
 The worker pool maintains two categories of workers:
 
@@ -27,7 +27,7 @@ The worker pool maintains two categories of workers:
 
 Workers signal "currently executing a task" using an atomic busy counter. The worker pool checks this counter on every task enqueue: if all active workers are busy and the pool is below `max_workers`, a new demand worker is spawned. This ensures the pool scales up under load without over-provisioning.
 
-### Task Execution
+### Task execution
 
 When a worker picks up a task, it drives the full task lifecycle:
 

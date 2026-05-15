@@ -22,7 +22,7 @@ For a step-by-step walkthrough on building a plugin, see the [Creating a Rust Pl
 
 Complete API reference for the Malbox C++20 Plugin SDK. For a step-by-step walkthrough, see the [Creating a C++ Plugin](/plugin-guides/creating-a-cpp-plugin) guide.
 
-## Plugin Classes
+## Plugin classes
 
 <Tabs>
   <Tab title="Host">
@@ -286,7 +286,7 @@ enum class EventTag : int32_t {
 | `source()` | `const std::string&` | Source plugin (`PluginResultAvailable` only) |
 | `result_name()` | `const std::string&` | Result name (`PluginResultAvailable` only) |
 
-### Factory Methods
+### Factory methods
 
 ```cpp
 Event::task_created(int32_t task_id)
@@ -310,7 +310,7 @@ Event::config_reloaded()
 
 A structured result envelope with semantic metadata and a presentation layer for frontend rendering. All report types live in the `malbox::report` namespace.
 
-### Semantic Types
+### Semantic types
 
 ```cpp
 enum class Classification { Clean, Suspicious, Malicious, Unknown };
@@ -356,7 +356,7 @@ struct ArtifactRef {
 };
 ```
 
-### Presentation Blocks
+### Presentation blocks
 
 ```cpp
 using Block = std::variant<
@@ -386,7 +386,7 @@ using Block = std::variant<
 | `BlockTimeline` | `events` (`std::vector<TimelineEvent>`) |
 | `BlockGraph` | `nodes`, `edges` |
 
-### Helper Structs
+### Helper structs
 
 ```cpp
 struct KvPair { std::string key; std::string value; bool mono = false; };
@@ -540,7 +540,7 @@ struct AutoCollectConfig {
 };
 ```
 
-## Runtime Entry Points
+## Runtime entry points
 
 <Tabs>
   <Tab title="Host">
@@ -591,7 +591,7 @@ MALBOX_LOG_WARN("message");
 MALBOX_LOG_ERROR("message");
 ```
 
-## Error Handling
+## Error handling
 
 ```cpp
 enum class ErrorKind : int32_t {
@@ -610,7 +610,7 @@ public:
 };
 ```
 
-## Thread Safety
+## Thread safety
 
 When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. The runtime guarantees that only one callback is active at a time unless `ExecutionContext::Parallel` is chosen.
 
@@ -636,7 +636,7 @@ When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute co
 
 Complete API reference for the Malbox Python Plugin SDK. For a step-by-step walkthrough, see the [Creating a Python Plugin](/plugin-guides/creating-a-python-plugin) guide.
 
-## Plugin Base Class
+## Plugin base class
 
 Every plugin subclasses `malbox_plugin_sdk.Plugin` and overrides `on_task` at minimum. All other methods have default no-op implementations. Handlers can be `def` (synchronous) or `async def` (asynchronous) - the runtime detects coroutines automatically.
 
@@ -648,7 +648,7 @@ class MyPlugin(malbox.Plugin):
         ...
 ```
 
-### Lifecycle Methods
+### Lifecycle methods
 
 #### `on_task`
 
@@ -678,7 +678,7 @@ def on_stop(self) -> None
 def health_check(self) -> HealthStatus
 ```
 
-### Event Handler
+### Event handler
 
 #### `on_event`
 
@@ -811,7 +811,7 @@ report = malbox.ReportBuilder(plugin_id: str, plugin_version: str)
 | `raw(value: Any)` | Attach raw JSON data |
 | `build() -> PluginResult` | Finalize and return as a pushable result |
 
-### Classification & Confidence
+### Classification & confidence
 
 ```python
 malbox.Classification.Clean / .Suspicious / .Malicious / .Unknown
@@ -836,7 +836,7 @@ malbox.Ttp(id: str, name: str, evidence: str | None = None)
 malbox.ArtifactRef(result_name: str, kind: str, description: str | None = None)
 ```
 
-### Block Types
+### Block types
 
 | Constructor | Description |
 |-------------|-------------|
@@ -857,7 +857,7 @@ malbox.ArtifactRef(result_name: str, kind: str, description: str | None = None)
 | `Block.timeline(events: list[TimelineEvent])` | Timeline |
 | `Block.graph(nodes, edges)` | Graph visualization |
 
-### Helper Types
+### Helper types
 
 ```python
 malbox.KvPair(key: str, value: str, mono: bool = False)
@@ -878,7 +878,7 @@ malbox.warn(message: str) -> None
 malbox.error(message: str) -> None
 ```
 
-## Entry Point
+## Entry point
 
 ```python
 malbox.run(
@@ -888,7 +888,7 @@ malbox.run(
 ) -> None
 ```
 
-## Thread Safety
+## Thread safety
 
 When using `execution = "parallel"` in `plugin.toml`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `threading.Lock` or similar. The GIL is released during IPC operations, so Python code in handlers runs without contention from the runtime's event loop.
 

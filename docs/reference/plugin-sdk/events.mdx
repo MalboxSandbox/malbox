@@ -5,7 +5,7 @@ description: "Reference for every event a Malbox plugin can subscribe to, includ
 
 This page documents all events that plugins can subscribe to through the hook system. For conceptual information about how event hooks work, see [Event Hooks](/plugin-system/event-hooks).
 
-## Task Events
+## Task events
 
 Events fired during the task lifecycle. The `id` field carries the `task_id`.
 
@@ -17,7 +17,7 @@ Events fired during the task lifecycle. The `id` field carries the `task_id`.
 | TaskFailed | A task failed during execution |
 | TaskCanceled | A task was canceled (timeout or manual) |
 
-## Plugin Events
+## Plugin events
 
 Events related to plugin process lifecycle and output. The `id` field carries the `plugin_id` (except for `PluginResultAvailable`, which carries `source` and `result_name` instead). These events are published on per-plugin event channels that other plugins can subscribe to.
 
@@ -27,7 +27,7 @@ Events related to plugin process lifecycle and output. The `id` field carries th
 | PluginStopped | A plugin process has stopped |
 | PluginResultAvailable | A plugin produced an analysis result. The `source` field identifies the originating plugin and `result_name` identifies the result. Handle via `on_event` |
 
-## Sample Events
+## Sample events
 
 Events fired during sample processing. The `id` field carries the `sample_id`.
 
@@ -37,7 +37,7 @@ Events fired during sample processing. The `id` field carries the `sample_id`.
 | SampleStopped | A sample analysis session has stopped |
 | SampleResultProduced | A sample produced an analysis result |
 
-## System Events
+## System events
 
 Events for system-wide occurrences. Broadcast on the shared daemon event channel to all plugins.
 

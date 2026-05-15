@@ -5,7 +5,7 @@ description: "All worker and worker pool settings in malbox.toml, including max_
 
 This page documents all worker configuration options. For conceptual information, see [Workers](/task-management/workers).
 
-## Daemon-Level Settings
+## Daemon-level settings
 
 Worker pool settings are configured in the `[general]` section of `malbox.toml`:
 
@@ -24,7 +24,7 @@ idle_timeout_ms = 60000
 
 Baseline workers (`min_workers`) have no idle timeout and run until the daemon shuts down. Demand workers are spawned when all active workers are busy and exit automatically after `idle_timeout_ms` of inactivity.
 
-## Worker Configuration
+## Worker configuration
 
 Individual worker behavior is controlled through `WorkerConfig`:
 

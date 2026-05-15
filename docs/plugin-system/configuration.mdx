@@ -5,7 +5,7 @@ description: "Configure plugin behavior in plugin.toml: host vs guest plugin typ
 
 Malbox provides configuration options for controlling how plugins operate. Both the plugin system itself and individual plugins can be configured to fit specific use cases and requirements. All plugin configuration lives in `plugin.toml`, a manifest file that sits alongside the plugin binary.
 
-## Plugin Types
+## Plugin types
 
 Plugins can run either on the host system or inside a sandboxed (guest) environment:
 
@@ -16,7 +16,7 @@ Plugins can run either on the host system or inside a sandboxed (guest) environm
 
 Host plugins implement the `HostPlugin` trait with `on_task`, `on_start`, `on_stop`, `on_event`, and `health_check` handlers. Guest plugins implement the `GuestPlugin` trait with `on_start`, `on_stop`, `execute_sample`, and `health_check` handlers.
 
-## Execution Contexts
+## Execution contexts
 
 Execution contexts define how plugins coordinate with each other during task execution:
 
@@ -34,7 +34,7 @@ Set via `execution` in the `[runtime]` section of `plugin.toml`:
 execution = "parallel"
 ```
 
-## State Management
+## State management
 
 State management controls how plugins maintain data across their lifecycle:
 
@@ -55,19 +55,19 @@ Set via `state` in the `[runtime]` section of `plugin.toml`:
 state = "persistent"
 ```
 
-## Runtime Configuration
+## Runtime configuration
 
 Guest plugins carry their runtime settings in the `[runtime]` section of their `plugin.toml`. The SDK bakes these values into the plugin binary at build time. Host plugins have the same `[runtime]` section, but the daemon reads it at registry scan time rather than baking it into the binary.
 
 Key runtime settings include paths (sample directory, artifact directory, stash directory), stash behavior (threshold and TTL), analysis timeout, log filter, and auto-collection configuration for artifacts and external logs.
 
-To change a runtime setting, edit `plugin.toml` and rebuild the plugin (guest) or restart the daemon (host). See the [Plugin Configuration Reference](/reference/configuration/plugins) for the full field list, defaults, and validation rules.
+To change a runtime setting, edit `plugin.toml` and rebuild the plugin (guest) or restart the daemon (host). See the [plugin configuration reference](/reference/configuration/plugins) for the full field list, defaults, and validation rules.
 
-## Custom Plugin Settings
+## Custom plugin settings
 
 Beyond system-level configuration, plugin developers can expose custom settings. The daemon passes a `HashMap<String, String>` config map to the plugin's `on_start` handler. In Rust host plugins, the `#[malbox::handlers]` macro can automatically deserialize this map into a typed struct if your `on_start` method takes a typed parameter.
 
-## Event Subscriptions
+## Event subscriptions
 
 Host plugins can subscribe to other plugins' event channels via the `[events]` section in `plugin.toml`. This enables reactive analysis pipelines where plugins chain off each other's output. See [Event Hooks](/plugin-system/event-hooks) for details.
 
@@ -82,4 +82,4 @@ Guest plugins do not support event subscriptions.
 
 ## Reference
 
-For complete specifications, all available options, and validation rules, see the [Plugin Configuration Reference](/reference/configuration/plugins).
+For complete specifications, all available options, and validation rules, see the [plugin configuration reference](/reference/configuration/plugins).

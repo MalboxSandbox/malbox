@@ -5,7 +5,7 @@ description: "Complete schema reference for the plugin.toml manifest, including 
 
 This page documents the complete `plugin.toml` manifest schema. For conceptual information, see [Plugin Configuration](/plugin-system/configuration).
 
-## Full Example
+## Full example
 
 ```toml
 [plugin]
@@ -88,14 +88,14 @@ Controls how the plugin runtime behaves. For guest plugins, these values are bak
 | `log_filter` | `string` | No | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. |
 | `analysis_timeout` | `integer` | No | `300` | Maximum analysis time in seconds. Must be >= 1. The daemon wraps this with an additional grace period for result flushing. |
 
-### Plugin Types
+### Plugin types
 
 | Type | Description |
 |------|-------------|
 | `"guest"` | Executes inside a sandboxed VM. Communicates via gRPC. Terminated with the sandbox after task completion. |
 | `"host"` | Executes directly on the host system via iceoryx2 IPC. Can persist across multiple tasks. |
 
-### Execution Contexts
+### Execution contexts
 
 | Value | Description |
 |-------|-------------|
@@ -104,7 +104,7 @@ Controls how the plugin runtime behaves. For guest plugins, these values are bak
 | `"parallel"` | Multiple tasks may run concurrently. |
 | `"unrestricted"` | No constraints on concurrency or ordering. |
 
-### State Management
+### State management
 
 | Value | Description |
 |-------|-------------|

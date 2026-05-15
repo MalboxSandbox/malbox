@@ -21,17 +21,17 @@ On startup, the scheduler also recovers orphaned tasks from the database (tasks 
 
 The scheduler maintains references to three subsystems: the task store, task queue, and worker pool.
 
-### Task Store
+### Task store
 
 The task store provides persistent database storage combined with an in-memory cache for efficient retrieval of tasks loaded during the daemon's lifetime.
 
-### Task Queue
+### Task queue
 
 The task queue implements priority-based ordering using a [binary heap](https://doc.rust-lang.org/std/collections/struct.BinaryHeap.html). Task priority determines processing order when resources become available.
 
 <Note>The task queue stores only task IDs. Actual task contents are retrieved from the task store.</Note>
 
-### Worker Pool
+### Worker pool
 
 The worker pool manages the lifecycle of worker instances. It maintains a baseline of `min_workers` that never idle out, and spawns additional workers (up to `max_workers`) when all active workers are busy. Additional workers have an idle timeout and exit automatically when work dries up. See [Workers](/task-management/workers) for more details.
 

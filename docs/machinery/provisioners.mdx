@@ -3,13 +3,13 @@ title: "Machine provisioning with Ansible and native runners"
 description: "Use Malbox provisioners to install packages, deploy guest plugins, run configuration scripts, and snapshot analysis machines after allocation."
 ---
 
-## What are Provisioners?
+## What are provisioners?
 
 Provisioners handle post-allocation machine setup - installing packages, deploying guest plugins, running configuration scripts, and taking snapshots. After a [provider](/machinery/providers) allocates a machine, provisioning steps prepare it for analysis.
 
 Provisioners are transport-agnostic: each provisioner manages its own connectivity to the machine (WinRM, SSH, etc.). Like providers, provisioners register themselves at compile time using the `inventory` crate and can be developed independently.
 
-## Running Provisioning
+## Running provisioning
 
 Provisioning is driven through the `malboxctl` CLI. Each invocation runs a single provisioning step against a machine via the daemon's HTTP API (`POST /v1/machines/{id}/provision`).
 
@@ -79,7 +79,7 @@ The provisioner system follows the same pattern as [providers](/machinery/provid
 
 Provisioners are looked up by name at runtime using `create_provisioner(name, config)`.
 
-## Supported Provisioners
+## Supported provisioners
 
 ### Ansible
 
@@ -96,7 +96,7 @@ The built-in Ansible provisioner runs Ansible playbooks against allocated machin
 | `timeout` | `integer` | `1800` | Timeout in seconds for the `ansible-playbook` process. |
 | `ansible_bin` | `string` | `"ansible-playbook"` | Path to the `ansible-playbook` binary. |
 
-#### Dynamic Inventory
+#### Dynamic inventory
 
 When `inventory = "dynamic"` (the default), the provisioner generates a temporary inventory file containing the machine's IP address. For Windows machines, it automatically adds WinRM connection variables:
 
@@ -107,7 +107,7 @@ When `inventory = "dynamic"` (the default), the provisioner generates a temporar
 
 For Linux machines, only the IP is added (SSH is the default connection).
 
-#### Guest Plugin Injection
+#### Guest plugin injection
 
 When plugins are specified (either via `--plugins` on the CLI or `guest_plugins` in the pipeline), the Ansible provisioner resolves each plugin's `plugin.toml` manifest and injects a `guest_plugins` extra variable as a JSON array. Each entry includes:
 
@@ -128,7 +128,7 @@ When plugins are specified (either via `--plugins` on the CLI or `guest_plugins`
 
 The `paths` are resolved from the plugin's `[runtime.paths]` in `plugin.toml`, so playbooks can create the correct directories on the guest without hardcoding paths.
 
-#### Bundled Playbooks
+#### Bundled playbooks
 
 Malbox ships a modular `provision.yml` playbook for Windows that composes two steps:
 
@@ -154,7 +154,7 @@ The `native` provisioner is a no-op step used primarily as a snapshot checkpoint
 malboxctl machine provision win10-dev --provisioner native --snapshot base
 ```
 
-## Next Steps
+## Next steps
 
 - Read about [Providers](/machinery/providers) for machine allocation
 - Read about [Packer](/machinery/packer) for building machine images
