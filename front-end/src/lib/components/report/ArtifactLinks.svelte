@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import { formatBytes } from '$lib/api/format';
+	import { previewKind } from './artifact';
+	import ArtifactPreview from './ArtifactPreview.svelte';
 	import type { ArtifactLink } from '$lib/api/types';
 
 	interface Props {
@@ -8,6 +10,8 @@
 	}
 
 	let { artifacts }: Props = $props();
+
+	let previewArtifact = $state<ArtifactLink | null>(null);
 
 	type ArtifactNode = {
 		name: string;
@@ -102,18 +106,46 @@
 			<div class="flex flex-wrap gap-2">
 				{#each topLevelFiles as node (node.name)}
 					{@const a = node.artifact!}
-					<a
-						href={a.url}
-						download={a.result_name}
-						class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-card)] px-3 py-2 text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]"
+					{@const canPreview = previewKind(a.result_name, a.format) !== 'none'}
+					<div
+						class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-card)] px-3 py-2 text-xs text-[var(--color-text-primary)]"
 					>
 						<span>{node.name}</span>
 						<span class="text-[var(--color-text-secondary)]">&middot;</span>
 						<span class="uppercase text-[var(--color-text-secondary)]">{a.format}</span>
 						<span class="text-[var(--color-text-secondary)]">&middot;</span>
 						<span class="text-[var(--color-text-secondary)]">{formatBytes(a.size_bytes)}</span>
-						<span class="ml-1 text-[var(--color-accent)]">&darr;</span>
-					</a>
+						{#if canPreview}
+							<button
+								type="button"
+								onclick={() => (previewArtifact = a)}
+								class="ml-1 text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-accent)]"
+								title="Preview"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									class="size-3.5"
+								>
+									<path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+									<path
+										fill-rule="evenodd"
+										d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"
+										clip-rule="evenodd"
+									/>
+								</svg>
+							</button>
+						{/if}
+						<a
+							href={a.url}
+							download={a.result_name}
+							class="text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-accent)]"
+							title="Download"
+						>
+							&darr;
+						</a>
+					</div>
 				{/each}
 			</div>
 		{/if}
@@ -163,9 +195,8 @@
 				{#if expanded}
 					<div class="max-h-80 overflow-y-auto border-t border-[var(--color-border)]/50">
 						{#each flat.files as a (a.result_name)}
-							<a
-								href={a.url}
-								download={a.result_name}
+							{@const canPreview = previewKind(a.result_name, a.format) !== 'none'}
+							<div
 								class="flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[var(--color-bg-tertiary)]"
 							>
 								<span class="w-4"></span>
@@ -178,13 +209,44 @@
 									<span class="uppercase">{a.format}</span>
 									<span>&middot;</span>
 									<span>{formatBytes(a.size_bytes)}</span>
-									<span class="text-[var(--color-accent)]">&darr;</span>
+									{#if canPreview}
+										<button
+											type="button"
+											onclick={() => (previewArtifact = a)}
+											class="text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-accent)]"
+											title="Preview"
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 20 20"
+												fill="currentColor"
+												class="size-3.5"
+											>
+												<path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+												<path
+													fill-rule="evenodd"
+													d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"
+													clip-rule="evenodd"
+												/>
+											</svg>
+										</button>
+									{/if}
+									<a
+										href={a.url}
+										download={a.result_name}
+										class="text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-accent)]"
+										title="Download"
+									>
+										&darr;
+									</a>
 								</span>
-							</a>
+							</div>
 						{/each}
 					</div>
 				{/if}
 			</div>
 		{/each}
 	</div>
+
+	<ArtifactPreview artifact={previewArtifact} onclose={() => (previewArtifact = null)} />
 {/if}

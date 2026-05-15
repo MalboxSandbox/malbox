@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { splitDateTime, isTerminalStatus, formatBytes } from '$lib/api/format';
 	import { cancelTask } from '$lib/api/tasks';
-	import ScoreBar from './ScoreBar.svelte';
+	import ScoreCard from './ScoreCard.svelte';
 	import PluginTile from './PluginTile.svelte';
-	import Iocs from './blocks/Iocs.svelte';
-	import Ttps from './blocks/Ttps.svelte';
+	import ThreatOverview from './ThreatOverview.svelte';
 	import CopyButton from '$lib/components/ui/CopyButton.svelte';
 	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
 	import type { TaskReport } from '$lib/api/types';
@@ -115,19 +114,11 @@
 		{/if}
 	</div>
 
-	<!-- Main grid: File info (wider) | Execution + Machine info (stacked, narrower) -->
+	<!-- Main grid: File info (wider) | Score + Execution + Machine info (stacked, narrower) -->
 	<div class="grid gap-6 md:grid-cols-3">
 		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8 md:col-span-2">
 			<h2 class="text-sm font-medium text-[var(--color-text-secondary)]">File information</h2>
 			<dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-6 gap-y-3 text-sm">
-				<dt class="text-[var(--color-text-secondary)]">Score</dt>
-				<dd class="text-[var(--color-text-primary)]">
-					{#if hasScore}
-						<ScoreBar score={data.aggregate.score!} classification={data.aggregate.verdict} />
-					{:else}
-						<span class="text-[var(--color-text-secondary)]">Not available</span>
-					{/if}
-				</dd>
 				<dt class="text-[var(--color-text-secondary)]">Target</dt>
 				<dd class="break-all text-[var(--color-text-primary)]">
 					{data.task.target}
@@ -160,8 +151,12 @@
 			</dl>
 		</div>
 
-		<div class="space-y-6">
-			<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
+		<div class="flex flex-col gap-6">
+			{#if hasScore}
+				<ScoreCard score={data.aggregate.score!} classification={data.aggregate.verdict} />
+			{/if}
+
+			<div class="flex flex-1 flex-col gap-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
 				<h2 class="text-sm font-medium text-[var(--color-text-secondary)]">Execution</h2>
 				<dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
 					<dt class="text-[var(--color-text-secondary)]">Platform</dt>
@@ -232,21 +227,7 @@
 		</div>
 	{/if}
 
-	{#if data.aggregate.indicators.length > 0}
-		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
-			<h2 class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-				Indicators ({data.aggregate.indicators.length})
-			</h2>
-			<Iocs items={data.aggregate.indicators} />
-		</div>
-	{/if}
-
-	{#if data.aggregate.ttps.length > 0}
-		<div class="space-y-4 rounded-2xl bg-[var(--color-bg-secondary)] p-8">
-			<h2 class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-				TTPs ({data.aggregate.ttps.length})
-			</h2>
-			<Ttps items={data.aggregate.ttps} />
-		</div>
+	{#if data.aggregate.indicators.length > 0 || data.aggregate.ttps.length > 0}
+		<ThreatOverview indicators={data.aggregate.indicators} ttps={data.aggregate.ttps} />
 	{/if}
 </div>

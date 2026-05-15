@@ -8,4 +8,4 @@
 	let { data }: Props = $props();
 </script>
 
-<PluginReport view={data.view} />
+<PluginReport view={data.view} sample={data.sample} />
