@@ -63,9 +63,9 @@ impl TransportReceiver for () {
     }
 
     fn wait_blocking(&self) -> Result<Event> {
-        loop {
-            std::thread::park();
-        }
+        Err(crate::error::TransportError::NotConnected(
+            "no-op receiver cannot receive events".into(),
+        ))
     }
 
     fn try_recv(&self) -> Result<Option<Event>> {

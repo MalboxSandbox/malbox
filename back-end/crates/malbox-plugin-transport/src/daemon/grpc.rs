@@ -107,7 +107,11 @@ impl GrpcClient {
     }
 
     /// Pull a file from the guest, collecting streamed chunks.
+    ///
+    /// Rejects files larger than 256 MB to prevent unbounded memory growth.
     pub async fn pull_file(&mut self, source: &str) -> Result<Vec<u8>> {
+        const MAX_FILE_SIZE: usize = 256 * 1024 * 1024;
+
         let request = proto::PullFileRequest {
             path: source.to_string(),
         };
@@ -120,6 +124,11 @@ impl GrpcClient {
 
         let mut buf = Vec::new();
         while let Some(chunk) = stream.message().await.map_err(TransportError::GrpcStatus)? {
+            if buf.len() + chunk.data.len() > MAX_FILE_SIZE {
+                return Err(TransportError::Grpc(format!(
+                    "pull_file exceeded {MAX_FILE_SIZE} byte limit for '{source}'"
+                )));
+            }
             buf.extend_from_slice(&chunk.data);
         }
         Ok(buf)

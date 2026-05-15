@@ -8,6 +8,9 @@ pub enum TransportError {
     #[error("IPC buffer full: {0}")]
     BufferFull(String),
 
+    #[error("Not connected: {0}")]
+    NotConnected(String),
+
     #[cfg(feature = "grpc")]
     #[error("gRPC error: {0}")]
     Grpc(String),

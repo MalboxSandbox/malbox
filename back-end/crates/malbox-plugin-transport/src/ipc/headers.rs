@@ -122,6 +122,7 @@ pub enum EventKind {
     // Sample lifecycle (associated_id = sample_id)
     SampleStarted = 20,
     SampleStopped = 21,
+    SampleResultProduced = 22,
 
     // System (associated_id = 0)
     DaemonShutdown = 30,
@@ -180,6 +181,7 @@ impl TryFrom<u16> for EventKind {
             12 => Ok(Self::PluginResultAvailable),
             20 => Ok(Self::SampleStarted),
             21 => Ok(Self::SampleStopped),
+            22 => Ok(Self::SampleResultProduced),
             30 => Ok(Self::DaemonShutdown),
             31 => Ok(Self::ConfigReloaded),
             _ => Err(v),
@@ -224,7 +226,7 @@ mod tests {
 
     #[test]
     fn event_kind_roundtrip() {
-        let cases = [0, 1, 2, 3, 4, 10, 11, 12, 20, 21, 30, 31u16];
+        let cases = [0, 1, 2, 3, 4, 10, 11, 12, 20, 21, 22, 30, 31u16];
         for v in cases {
             let kind = EventKind::try_from(v).unwrap();
             assert_eq!(kind as u16, v);

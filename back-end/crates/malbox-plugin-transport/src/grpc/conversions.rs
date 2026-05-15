@@ -24,7 +24,8 @@ pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
             result_name,
         } => format!(
             r#"{{"source":"{}","result_name":"{}"}}"#,
-            source, result_name
+            escape_json_str(source),
+            escape_json_str(result_name),
         )
         .into_bytes(),
         Event::SampleStarted { sample_id }
@@ -43,6 +44,24 @@ pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
         is_final: false,
         kind: proto::ResultKind::Result.into(),
     }
+}
+
+fn escape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

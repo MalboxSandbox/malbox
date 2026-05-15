@@ -191,7 +191,9 @@ impl ActiveTaskRequest {
             let mut chunk_header = *header;
             chunk_header.chunk_index = chunk_index;
             chunk_header.total_size = if chunk_index == 0 { total_size } else { 0 };
-            if !is_last_chunk {
+            if is_last_chunk {
+                chunk_header.flags &= !super::headers::FLAG_HAS_MORE_CHUNKS;
+            } else {
                 chunk_header.flags |= super::headers::FLAG_HAS_MORE_CHUNKS;
             }
             if chunk_index > 0 {

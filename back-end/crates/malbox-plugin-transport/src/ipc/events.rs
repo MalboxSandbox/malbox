@@ -37,6 +37,9 @@ impl TryFrom<&EventHeader> for Event {
             }),
             Ok(EventKind::SampleStarted) => Ok(Event::SampleStarted { sample_id: id }),
             Ok(EventKind::SampleStopped) => Ok(Event::SampleStopped { sample_id: id }),
+            Ok(EventKind::SampleResultProduced) => {
+                Ok(Event::SampleResultProduced { sample_id: id })
+            }
             Ok(EventKind::DaemonShutdown) => Ok(Event::DaemonShutdown),
             Ok(EventKind::ConfigReloaded) => Ok(Event::ConfigReloaded),
             Err(v) => Err(v),
@@ -58,7 +61,7 @@ impl From<&Event> for EventHeader {
             Event::SampleStarted { sample_id } => (EventKind::SampleStarted as u16, *sample_id),
             Event::SampleStopped { sample_id } => (EventKind::SampleStopped as u16, *sample_id),
             Event::SampleResultProduced { sample_id } => {
-                (EventKind::SampleStarted as u16, *sample_id)
+                (EventKind::SampleResultProduced as u16, *sample_id)
             }
             Event::DaemonShutdown => (EventKind::DaemonShutdown as u16, 0),
             Event::ConfigReloaded => (EventKind::ConfigReloaded as u16, 0),
@@ -255,7 +258,19 @@ impl DaemonEventPublisher {
 
 impl TransportEmitter for DaemonEventPublisher {
     fn emit(&self, event: Event) -> Result<()> {
-        self.emit_signal(&EventHeader::from(&event))
+        let header = EventHeader::from(&event);
+        if let Event::PluginResultAvailable {
+            ref source,
+            ref result_name,
+        } = event
+        {
+            let mut payload = source.as_bytes().to_vec();
+            payload.push(0);
+            payload.extend_from_slice(result_name.as_bytes());
+            self.emit_with_header(&header, &payload)
+        } else {
+            self.emit_signal(&header)
+        }
     }
 }
 
@@ -320,6 +335,30 @@ impl DaemonEventSubscriber {
 pub struct ReceivedEvent {
     pub header: EventHeader,
     pub payload: Vec<u8>,
+}
+
+impl ReceivedEvent {
+    /// Convert to an [`Event`], decoding payload data for events that carry it.
+    ///
+    /// Unlike `Event::try_from(&header)`, this also extracts string fields
+    /// (e.g. `PluginResultAvailable.source`/`result_name`) from the payload.
+    pub fn to_event(&self) -> std::result::Result<Event, u16> {
+        let mut event = Event::try_from(&self.header)?;
+        if let Event::PluginResultAvailable {
+            ref mut source,
+            ref mut result_name,
+        } = event
+            && !self.payload.is_empty()
+        {
+            if let Some(sep) = self.payload.iter().position(|&b| b == 0) {
+                *source = String::from_utf8_lossy(&self.payload[..sep]).into_owned();
+                *result_name = String::from_utf8_lossy(&self.payload[sep + 1..]).into_owned();
+            } else {
+                *source = String::from_utf8_lossy(&self.payload).into_owned();
+            }
+        }
+        Ok(event)
+    }
 }
 
 #[cfg(test)]

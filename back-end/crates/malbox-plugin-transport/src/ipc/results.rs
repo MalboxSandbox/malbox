@@ -83,7 +83,7 @@ impl ResultPublisher {
                             payload.len()
                         )));
                     }
-                    std::thread::yield_now();
+                    std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 Err(e) => {
                     return Err(TransportError::Ipc(Box::new(e)));
