@@ -1,0 +1,82 @@
+---
+title: "Roadmap"
+description: "See what we're building, what's in progress, and where Malbox is headed."
+---
+
+Malbox is under active development. This is a broad overview, not an exhaustive list - priorities may shift as we learn from users and the community.
+
+<Steps>
+  <Step title="Foundation">
+    <span className="rm-label rm-label--done"><span className="rm-dot" /> Shipped</span>
+
+    Core platform capabilities that power Malbox today.
+
+    <Columns cols={2}>
+      <Card title="Multi-language plugin SDK" icon="puzzle">
+        Write analysis plugins in Rust, C++, or Python with SDK support for both host and guest environments.
+      </Card>
+      <Card title="Task scheduling" icon="clock">
+        Run analyses in parallel with configurable worker pools, queue priorities, and timeout management.
+      </Card>
+      <Card title="VM machinery framework" icon="server">
+        Pluggable providers and provisioners for managing virtual machine lifecycle across different hypervisors.
+      </Card>
+      <Card title="CLI tooling" icon="terminal">
+        Purpose-built binaries for everyday use and administration, with interactive prompts and styled output.
+      </Card>
+      <Card title="Report visualization" icon="panels-top-left">
+        Score cards, threat overviews, artifact previews, and detailed analysis breakdowns in the web UI.
+      </Card>
+      <Card title="Automated installation" icon="download">
+        One-command installer that handles dependencies, configuration, and initial setup for fresh deployments.
+      </Card>
+    </Columns>
+  </Step>
+
+  <Step title="Expansion">
+    <span className="rm-label rm-label--wip"><span className="rm-dot rm-dot--pulse" /> In progress</span>
+
+    Improvements and new capabilities currently in development.
+
+    <Columns cols={2}>
+     <Card title="Plugin marketplace" icon="store">
+        Central registry for discovering, sharing, and installing community-built analysis plugins.
+      </Card>
+      <Card title="Search and correlation" icon="search">
+        Search across analyses and correlate indicators of compromise to surface connections between samples.
+      </Card>
+      <Card title="Cloud machinery providers" icon="cloud">
+        Native VM provider integrations for AWS EC2 and Azure to run analysis environments in the cloud.
+      </Card>
+      <Card title="Plugin hot-reload" icon="refresh-cw">
+        Update and reload plugins at runtime without restarting the platform or interrupting running analyses.
+      </Card>
+    </Columns>
+  </Step>
+
+  <Step title="Horizon">
+    <span className="rm-label rm-label--plan"><span className="rm-dot" /> Planned</span>
+
+    Future directions we are exploring for the platform.
+
+    <Columns cols={2}>
+      <Card title="Official Plugins" icon="check">
+        Curated list of plugins made by Malbox maintainers for the community.
+      </Card>
+      <Card title="Collaborative workspaces" icon="users">
+        Share analyses, annotate findings, and coordinate investigations across team members.
+      </Card>
+      <Card title="Threat intelligence feeds" icon="shield">
+        Automatic enrichment from external threat databases and indicator-of-compromise repositories.
+      </Card>
+      <Card title="VMI plugins" icon="cpu">
+        Host-only plugins that leverage virtual machine introspection to monitor guest behavior without in-guest agents.
+      </Card>
+      <Card title="On-prem fleet management" icon="server">
+        Centralized management of on-premise analysis node clusters with health monitoring, load balancing, and automated scaling.
+      </Card>
+    </Columns>
+  </Step>
+</Steps>
+
+<Tip>Have a feature request? Open an issue on [GitHub](https://github.com/DualHorizon/malbox/issues).</Tip>

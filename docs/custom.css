@@ -1,0 +1,127 @@
+/* Roadmap: deactivate Mintlify's default active tab (only when we have a saved tab) */
+html[data-rm-tab] a.nav-tabs-item[data-active="true"]:not([data-rm-active]) {
+  color: rgb(75 85 99) !important;
+  text-shadow: none !important;
+}
+html.dark[data-rm-tab] a.nav-tabs-item[data-active="true"]:not([data-rm-active]) {
+  color: rgb(156 163 175) !important;
+}
+html[data-rm-tab] a.nav-tabs-item[data-active="true"]:not([data-rm-active]) > div {
+  background: transparent !important;
+}
+
+/* Roadmap: activate the saved tab */
+a.nav-tabs-item[data-rm-active] {
+  color: rgb(31 41 55) !important;
+  text-shadow: -0.2px 0 0 currentColor, 0.2px 0 0 currentColor !important;
+}
+html.dark a.nav-tabs-item[data-rm-active] {
+  color: rgb(229 231 235) !important;
+}
+a.nav-tabs-item[data-rm-active] > div {
+  background: rgb(var(--primary)) !important;
+}
+html.dark a.nav-tabs-item[data-rm-active] > div {
+  background: rgb(var(--primary-light)) !important;
+}
+
+/* Standalone pages: deactivate the previously active sidebar page */
+html[data-current-path="/roadmap"] ul.sidebar-group li[data-active="true"] a,
+html[data-current-path="/changelog"] ul.sidebar-group li[data-active="true"] a {
+  background: transparent !important;
+  color: rgb(107 114 128) !important;
+  text-shadow: none !important;
+}
+html.dark[data-current-path="/roadmap"] ul.sidebar-group li[data-active="true"] a,
+html.dark[data-current-path="/changelog"] ul.sidebar-group li[data-active="true"] a {
+  color: rgb(156 163 175) !important;
+}
+
+/* Standalone pages: active anchor text */
+html[data-current-path="/roadmap"] a.nav-anchor[href="/roadmap"],
+html[data-current-path="/changelog"] a.nav-anchor[href="/changelog"] {
+  color: rgb(var(--primary)) !important;
+}
+html.dark[data-current-path="/roadmap"] a.nav-anchor[href="/roadmap"],
+html.dark[data-current-path="/changelog"] a.nav-anchor[href="/changelog"] {
+  color: rgb(var(--primary-light)) !important;
+}
+
+/* Standalone pages: active icon container - primary background */
+html[data-current-path="/roadmap"] a.nav-anchor[href="/roadmap"] > div,
+html[data-current-path="/changelog"] a.nav-anchor[href="/changelog"] > div {
+  background: rgb(var(--primary)) !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  filter: none !important;
+}
+html.dark[data-current-path="/roadmap"] a.nav-anchor[href="/roadmap"] > div,
+html.dark[data-current-path="/changelog"] a.nav-anchor[href="/changelog"] > div {
+  background: rgb(var(--primary-light)) !important;
+}
+
+/* Standalone pages: active icon - white on primary background */
+html[data-current-path="/roadmap"] a.nav-anchor[href="/roadmap"] svg,
+html[data-current-path="/changelog"] a.nav-anchor[href="/changelog"] svg {
+  background: white !important;
+  opacity: 1 !important;
+}
+
+/* Roadmap phase status labels */
+
+.rm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  margin-bottom: 4px;
+}
+
+.rm-label--done {
+  color: #059669;
+  background: #ecfdf5;
+}
+
+.rm-label--wip {
+  color: #4f46e5;
+  background: #eef2ff;
+}
+
+.rm-label--plan {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
+.dark .rm-label--done {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.dark .rm-label--wip {
+  color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.1);
+}
+
+.dark .rm-label--plan {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.rm-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.rm-dot--pulse {
+  animation: rm-pulse 2s ease-in-out infinite;
+}
+
+@keyframes rm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

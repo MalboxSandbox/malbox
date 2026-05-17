@@ -1,0 +1,159 @@
+---
+title: "Results and reports"
+description: "Complete reference for plugin result types and report structures"
+---
+
+This page documents all result types and report structures that plugins can produce. For builder API methods and language-specific signatures, see the [SDK reference](/reference/plugin-sdk/sdk). For usage examples, see the plugin creation guides for [Rust](/plugin-guides/creating-a-rust-plugin), [C++](/plugin-guides/creating-a-cpp-plugin), or [Python](/plugin-guides/creating-a-python-plugin).
+
+## Result types
+
+Every plugin output is a `PluginResult` with a name and one of three formats.
+
+| Type | Description |
+|------|-------------|
+| Json | Serialized JSON data. Used for structured analysis output |
+| Bytes | Arbitrary binary data |
+| File | Reference to a file on disk. The runtime streams the file content |
+
+The result `name` must match a key declared in `[results.<name>]` in your `plugin.toml`. See the [plugin configuration reference](/reference/configuration/plugins#resultsname) for manifest options like `user_visible`, `display_name`, and `render`.
+
+## Reports
+
+A report is a structured JSON result pushed with the reserved name `report`. It provides a semantic layer for machine-queryable metadata and a presentation layer for frontend rendering.
+
+### Classification
+
+| Value | Description |
+|-------|-------------|
+| Clean | No malicious indicators detected |
+| Suspicious | Exhibits potentially malicious behavior |
+| Malicious | Confirmed malicious behavior |
+| Unknown | Unable to determine classification |
+
+### Confidence
+
+| Value | Description |
+|-------|-------------|
+| Low | Speculative or based on weak signals |
+| Medium | Likely correct but not certain |
+| High | Highly reliable (strong signature match, behavioral confirmation) |
+
+### Verdict
+
+The overall threat assessment attached to a report.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `classification` | `Classification` | Yes | Threat classification |
+| `score` | `u8` (0-100) | No | Numeric threat score |
+| `confidence` | `Confidence` | No | Assessment reliability |
+| `labels` | `string[]` | No | Free-form tags (e.g. `trojan`, `ransomware`, `packed`) |
+
+### Indicator
+
+An indicator of compromise (IOC) observed during analysis.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | `string` | Yes | IOC type (e.g. `sha256`, `ipv4`, `domain`, `url`, `mutex`, `registry`, `filepath`) |
+| `value` | `string` | Yes | The observed value |
+| `context` | `string` | No | Where or how the IOC was observed |
+| `first_seen` | `string` | No | ISO 8601 timestamp of first observation |
+
+### Ttp
+
+A MITRE ATT&CK technique observed during analysis.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | `string` | Yes | Technique ID (e.g. `T1055`, `T1055.001`) |
+| `name` | `string` | Yes | Human-readable name (e.g. "Process Injection") |
+| `evidence` | `string` | No | Free-text evidence supporting the observation |
+
+### ArtifactRef
+
+A reference to a sibling `PluginResult` produced by the same plugin.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `result_name` | `string` | Yes | Name of the sibling result |
+| `kind` | `string` | Yes | Artifact type (e.g. `pcap`, `screenshot`, `memdump`, `yara`) |
+| `description` | `string` | No | What this artifact contains |
+
+## Presentation blocks
+
+Report sections contain an ordered list of typed blocks for frontend rendering. Unknown block types degrade gracefully to a JSON tree view.
+
+| Block | Description |
+|-------|-------------|
+| Markdown | Markdown-rendered text |
+| Callout | Callout box with level: `info`, `success`, `warn`, or `error` |
+| Heading | Section heading (level 1-6) |
+| Divider | Horizontal rule |
+| Kv | Key-value definition list |
+| Table | Data table with optional sorting and search |
+| Code | Syntax-highlighted code block |
+| Json | Collapsible interactive JSON viewer |
+| Hex | Hex dump with configurable start offset |
+| Image | Image rendered from an artifact reference |
+| Download | Download link for an artifact |
+| Iocs | Formatted indicator of compromise list |
+| Ttps | Formatted MITRE ATT&CK technique list |
+| Tree | Collapsible hierarchy (process trees, file structures) |
+| Timeline | Chronological event timeline |
+| Graph | Node-and-edge graph (network diagrams, call graphs) |
+
+## Block helper types
+
+Types used as fields within presentation blocks.
+
+### KvPair
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | `string` | - | Label |
+| `value` | `string` | - | Content |
+| `mono` | `bool` | `false` | Render value in monospace (useful for hashes, paths) |
+
+### Column
+
+Used by the Table block.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | `string` | - | JSON key for row lookup |
+| `label` | `string` | - | Column header text |
+| `type` | `string` | `"string"` | Type hint: `string`, `number`, `bool`, `datetime` |
+
+### TreeNode
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `label` | `string` | Yes | Display text |
+| `children` | `TreeNode[]` | No | Nested child nodes |
+| `meta` | `JSON` | No | Metadata shown on hover or expand |
+
+### TimelineEvent
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ts` | `string` | Yes | ISO 8601 timestamp or relative offset |
+| `label` | `string` | Yes | Event description |
+| `severity` | `string` | No | Color hint (e.g. `high`, `medium`, `low`) |
+| `meta` | `JSON` | No | Detail metadata on hover or click |
+
+### GraphNode
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | `string` | Yes | Unique node ID (referenced by edges) |
+| `label` | `string` | Yes | Display label |
+| `meta` | `JSON` | No | Metadata on click or hover |
+
+### GraphEdge
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from` | `string` | Yes | Source node ID |
+| `to` | `string` | Yes | Target node ID |
+| `label` | `string` | No | Edge label (e.g. "spawns", "connects to") |

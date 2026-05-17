@@ -74,16 +74,7 @@
                     }
                 ]
             },
-            {
-                "tab": "Changelog",
-                "groups": [
-                    {
-                        "group": "Changelog",
-                        "pages": ["changelog"]
-                    }
-                ]
-            },
-            {
+{
                 "tab": "Reference",
                 "groups": [
                     {
@@ -97,6 +88,7 @@
                         "group": "Plugin SDK",
                         "pages": [
                         "reference/plugin-sdk/sdk",
+                        "reference/plugin-sdk/results",
                         "reference/plugin-sdk/events"
                     ]
                     }
@@ -106,13 +98,13 @@
         "global": {
             "anchors": [
                 {
-                    "anchor": "Blog",
-                    "href": "https://blog.malbox.app",
-                    "icon": "newspaper"
+                    "anchor": "Changelog",
+                    "href": "/changelog",
+                    "icon": "scroll-text"
                 },
                 {
                     "anchor": "Roadmap",
-                    "href": "https://github.com/DualHorizon/malbox",
+                    "href": "/roadmap",
                     "icon": "map"
                 }
             ]
