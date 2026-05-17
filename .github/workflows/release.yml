@@ -40,18 +40,22 @@ jobs:
     - name: Package binaries
       run: |
         VERSION="${GITHUB_REF_NAME}"
-        STAGING="malbox-${VERSION}-linux-x64"
-        mkdir -p "${STAGING}"
-        cp "target/${LINUX_TARGET}/release/malbox" "${STAGING}/"
-        cp "target/${LINUX_TARGET}/release/malboxctl" "${STAGING}/"
-        cp "target/${LINUX_TARGET}/release/malbox-daemon" "${STAGING}/"
-        tar czf "${STAGING}.tar.gz" "${STAGING}"
 
-    - name: Upload artifact
+        for bin in malbox malboxctl malbox-daemon; do
+          DIR="${bin}-${VERSION}-linux-x64"
+          mkdir -p "${DIR}"
+          cp "target/${LINUX_TARGET}/release/${bin}" "${DIR}/"
+          tar czf "${DIR}.tar.gz" "${DIR}"
+        done
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v7
       with:
         name: backend-linux-x64
-        path: back-end/malbox-*-linux-x64.tar.gz
+        path: |
+          back-end/malbox-v*-linux-x64.tar.gz
+          back-end/malboxctl-v*-linux-x64.tar.gz
+          back-end/malbox-daemon-v*-linux-x64.tar.gz
 
   build-cpp-sdk-linux:
     name: Build C++ Plugin SDK (Linux)
