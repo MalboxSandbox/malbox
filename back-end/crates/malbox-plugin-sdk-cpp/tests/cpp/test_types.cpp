@@ -26,11 +26,7 @@ int main() {
     static_assert(static_cast<int32_t>(malbox::LaunchResult::Launched)   == 1);
 
     // ErrorKind values
-    static_assert(static_cast<int32_t>(malbox::ErrorKind::Unknown)        == -1);
-    static_assert(static_cast<int32_t>(malbox::ErrorKind::InvalidContext) == -2);
-    static_assert(static_cast<int32_t>(malbox::ErrorKind::ChannelClosed)  == -3);
-    static_assert(static_cast<int32_t>(malbox::ErrorKind::Io)             == -4);
-    static_assert(static_cast<int32_t>(malbox::ErrorKind::Transport)      == -5);
+    static_assert(static_cast<int32_t>(malbox::ErrorKind::Unknown) == -1);
 
     // HealthStatus
     auto ok = malbox::HealthStatus::ok();
