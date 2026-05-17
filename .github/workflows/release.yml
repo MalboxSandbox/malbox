@@ -15,7 +15,7 @@ env:
 jobs:
   build-backend:
     name: Build backend binaries
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: back-end
@@ -55,7 +55,7 @@ jobs:
 
   build-cpp-sdk-linux:
     name: Build C++ Plugin SDK (Linux)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: back-end
@@ -89,7 +89,7 @@ jobs:
 
   build-cpp-sdk-windows:
     name: Build C++ Plugin SDK (Windows)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
         working-directory: back-end
@@ -124,7 +124,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-backend, build-cpp-sdk-linux, build-cpp-sdk-windows]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
     - uses: actions/checkout@v6
