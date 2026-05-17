@@ -35,14 +35,15 @@ jobs:
         nix develop ..#backend --command
         cargo build --release
         --manifest-path Cargo.toml
-        -p malbox-cli -p malbox-daemon
+        -p malbox -p malboxctl -p malbox-daemon
 
     - name: Package binaries
       run: |
         VERSION="${GITHUB_REF_NAME}"
         STAGING="malbox-${VERSION}-linux-x64"
         mkdir -p "${STAGING}"
-        cp "target/${LINUX_TARGET}/release/malbox-cli" "${STAGING}/"
+        cp "target/${LINUX_TARGET}/release/malbox" "${STAGING}/"
+        cp "target/${LINUX_TARGET}/release/malboxctl" "${STAGING}/"
         cp "target/${LINUX_TARGET}/release/malbox-daemon" "${STAGING}/"
         tar czf "${STAGING}.tar.gz" "${STAGING}"
 
