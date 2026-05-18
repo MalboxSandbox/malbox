@@ -68,7 +68,7 @@ pub type ProvisionerFactory =
 ///
 /// Submitted to the `inventory` registry by provisioner crates.
 pub struct ProvisionerMetadata {
-    /// Unique name for this provisioner (e.g., "ansible", "native").
+    /// Unique name for this provisioner (e.g., "ansible").
     pub name: &'static str,
     /// Factory function to create a provisioner instance from TOML config.
     pub create: ProvisionerFactory,

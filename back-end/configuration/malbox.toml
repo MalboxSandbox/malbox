@@ -118,9 +118,11 @@ uri = "qemu:///system"
 # machine after allocation. Steps with a `snapshot` key create a provider
 # snapshot recorded in the database.
 
-[[provisioning.steps]]
-type = "native"
-snapshot = "base"
+# [[provisioning.steps]]
+# type = "ansible"
+# snapshot = "base"
+# [provisioning.steps.config]
+# playbook = "playbooks/windows/base.yml"
 
 # [[provisioning.steps]]
 # type = "ansible"
