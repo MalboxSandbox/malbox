@@ -1,0 +1,36 @@
+[package]
+name = "malbox-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["provider-libvirt", "provisioner-ansible"]
+provider-libvirt = ["dep:malbox-provider-libvirt"]
+# Add more providers here as they're implemented:
+# provider-vmware = ["dep:malbox-provider-vmware"]
+# provider-virtualbox = ["dep:malbox-provider-virtualbox"]
+provisioner-ansible = ["dep:malbox-provisioner-ansible"]
+
+[dependencies]
+malbox-database = { path = "../malbox-database" }
+malbox-utils = { path = "../malbox-utils" }
+malbox-tracing = { path = "../malbox-tracing" }
+malbox-config = { path = "../malbox-config" }
+malbox-scheduler = { path = "../malbox-scheduler" }
+malbox-http = { path = "../malbox-http" }
+malbox-machinery = { path = "../malbox-machinery" }
+malbox-resources = { path = "../malbox-resources" }
+malbox-plugin-internal = { path = "../malbox-plugin-internal" }
+
+# Provider implementations (optional, feature-gated)
+malbox-provider-libvirt = { path = "../malbox-provider-libvirt", optional = true }
+# malbox-provider-vmware = { path = "../malbox-provider-vmware", optional = true }
+# malbox-provider-virtualbox = { path = "../malbox-provider-virtualbox", optional = true }
+
+# Provisioner implementations (optional, feature-gated)
+malbox-provisioner-ansible = { path = "../malbox-provisioner-ansible", optional = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

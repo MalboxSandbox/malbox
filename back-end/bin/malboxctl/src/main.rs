@@ -7,7 +7,8 @@ use tracing::level_filters::LevelFilter;
 
 mod commands;
 mod utils;
-use commands::{Cli, Command};
+use commands::daemon::DaemonCommands;
+use commands::{Cli, Command, Commands};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,10 +20,17 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let log_level = if cli.verbose {
-        LevelFilter::DEBUG
-    } else {
-        LevelFilter::WARN
+    let log_level = match &cli.command {
+        Commands::Daemon(d) => match &d.command {
+            DaemonCommands::Start(args) => args.log_level,
+        },
+        _ => {
+            if cli.verbose {
+                LevelFilter::DEBUG
+            } else {
+                LevelFilter::WARN
+            }
+        }
     };
     init_tracing(log_level);
 

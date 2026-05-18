@@ -4,16 +4,17 @@ use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
 
 mod start;
-use start::StartArgs;
+pub use start::StartArgs;
 
 #[derive(Parser)]
 pub struct DaemonCommand {
     #[command(subcommand)]
-    command: DaemonCommands,
+    pub command: DaemonCommands,
 }
 
 #[derive(Subcommand)]
 pub enum DaemonCommands {
+    /// Start the malbox daemon
     Start(StartArgs),
 }
 
