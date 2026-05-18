@@ -78,6 +78,13 @@
                 "tab": "Reference",
                 "groups": [
                     {
+                        "group": "CLI",
+                        "pages": [
+                            "reference/cli/malbox",
+                            "reference/cli/malboxctl"
+                        ]
+                    },
+                    {
                         "group": "Configuration",
                         "pages": [
                             "reference/configuration/workers",

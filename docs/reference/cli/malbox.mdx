@@ -1,0 +1,147 @@
+---
+title: "malbox"
+description: "CLI reference for the malbox command-line tool"
+---
+
+The `malbox` CLI lets you submit samples, manage analysis tasks, and retrieve results from your Malbox instance.
+
+## Global flags
+
+These flags are available on every subcommand.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format` | `text` \| `json` | `text` | Output format |
+| `--api-url` | `string` | From `cli.toml` | Override the API base URL |
+| `-v`, `--verbose` | - | `false` | Enable verbose output (sets log level to DEBUG) |
+| `-y`, `--yes` | - | `false` | Skip confirmation prompts |
+
+The API URL defaults to the value in `~/.config/malbox/cli.toml`. If no config file exists, it falls back to `http://127.0.0.1:8080`.
+
+## task
+
+Manage analysis tasks.
+
+### task submit
+
+Submit a file for analysis.
+
+```bash
+malbox task submit <file> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `file` | `string` | Yes | - | Path to the file to analyze |
+| `--package` | `string` | No | - | Analysis package to use |
+| `--module` | `string` | No | - | Analysis module to use |
+| `--timeout` | `integer` | No | - | Analysis timeout in seconds |
+| `--priority` | `integer` | No | - | Task priority (higher = more urgent) |
+| `--tags` | `string[]` | No | - | Tags for the task (accepts multiple values) |
+| `--owner` | `string` | No | - | Task owner |
+| `--memory` | - | No | `false` | Enable memory dump |
+| `--unique` | - | No | `false` | Only analyze if the sample is unique |
+| `--enforce-timeout` | - | No | `false` | Enforce the timeout strictly |
+
+### task list
+
+List all tasks.
+
+```bash
+malbox task list
+```
+
+### task get
+
+Get details and results of a specific task.
+
+```bash
+malbox task get [id] [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `id` | `integer` | No | - | Task ID. If omitted, an interactive fuzzy-select menu is shown. |
+| `--result` | `integer` | No | - | Fetch a specific result by its ID. JSON results are pretty-printed to a terminal; binary results are written raw when piped. |
+
+## machine
+
+View analysis machines.
+
+### machine list
+
+List all machines.
+
+```bash
+malbox machine list
+```
+
+### machine get
+
+Get details of a specific machine.
+
+```bash
+malbox machine get [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+## plugin
+
+View analysis plugins.
+
+### plugin list
+
+List registered plugins.
+
+```bash
+malbox plugin list [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--type` | `string` | No | - | Filter by plugin type (e.g. `guest`, `host`) |
+
+## completion
+
+Generate shell completions.
+
+```bash
+malbox completion <shell>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `shell` | `bash` \| `zsh` \| `fish` \| `elvish` \| `powershell` | Yes | Target shell |
+
+To install completions, redirect the output to the appropriate location for your shell:
+
+```bash
+# Bash
+malbox completion bash > ~/.local/share/bash-completion/completions/malbox
+
+# Zsh
+malbox completion zsh > ~/.zfunc/_malbox
+
+# Fish
+malbox completion fish > ~/.config/fish/completions/malbox.fish
+```
+
+## Configuration
+
+The `malbox` CLI reads its configuration from `~/.config/malbox/cli.toml`:
+
+```toml
+[api]
+url = "http://127.0.0.1:8080"
+```
+
+This file is created automatically by [`malboxctl config init`](/reference/cli/malboxctl#config-init).
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `RUST_LOG` | Override the log level filter. Takes precedence over `--verbose`. Uses standard [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |

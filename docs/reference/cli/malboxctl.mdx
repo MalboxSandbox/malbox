@@ -1,0 +1,311 @@
+---
+title: "malboxctl"
+description: "CLI reference for the malboxctl administration tool"
+---
+
+The `malboxctl` CLI is the administration tool for Malbox. Use it to install, configure, and manage the analysis sandbox infrastructure.
+
+## Global flags
+
+These flags are available on every subcommand.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--format` | `text` \| `json` | `text` | Output format |
+| `--api-url` | `string` | From `cli.toml` | Override the API base URL |
+| `-v`, `--verbose` | - | `false` | Enable verbose output (shows timestamps and debug info) |
+| `-y`, `--yes` | - | `false` | Skip confirmation prompts |
+
+## install
+
+Run the interactive installation wizard to set up Malbox.
+
+```bash
+malboxctl install [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--yes` | - | No | `false` | Skip confirmation prompts |
+
+The wizard walks you through:
+
+1. Nix installation strategy
+2. Provider selection (e.g. libvirt, VMware)
+3. Daemon source (prebuilt binary or compile from source)
+4. Frontend source (prebuilt or compile)
+5. PostgreSQL setup (existing URL or new instance)
+6. Systemd service configuration
+
+## upgrade
+
+Upgrade Malbox to the latest version.
+
+```bash
+malboxctl upgrade [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--force` | - | No | `false` | Force reinstall even if already up to date |
+| `--reconfigure` | - | No | `false` | Re-prompt for all installation choices |
+| `--rollback` | - | No | `false` | Roll back to the previous version |
+
+<Note>The `--reconfigure` flag is not yet implemented.</Note>
+
+## daemon
+
+Control the Malbox daemon.
+
+### daemon start
+
+Start the daemon.
+
+```bash
+malboxctl daemon start [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `-c`, `--config-path` | `string` | No | - | Path to config file |
+
+<Note>This command is not yet implemented.</Note>
+
+## config
+
+Manage daemon configuration.
+
+### config init
+
+Initialize a new configuration file with defaults.
+
+```bash
+malboxctl config init [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `-f`, `--force` | - | No | `false` | Force overwrite existing configuration |
+| `-o`, `--output` | `path` | No | `~/.config/malbox/malbox.toml` | Path to write the configuration file |
+
+This also generates a `cli.toml` alongside the main configuration file, which is used by the [`malbox`](/reference/cli/malbox) CLI.
+
+## provider
+
+Manage virtualization providers.
+
+### provider list
+
+List providers compiled into the daemon.
+
+```bash
+malboxctl provider list
+```
+
+### provider install
+
+Install a virtualization provider.
+
+```bash
+malboxctl provider install <name> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Provider name (e.g. `libvirt`, `vmware`) |
+| `--no-rebuild` | - | No | `false` | Skip automatic rebuild (only update config) |
+
+<Note>This command is not yet implemented.</Note>
+
+### provider uninstall
+
+Uninstall a virtualization provider.
+
+```bash
+malboxctl provider uninstall <name> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Provider name (e.g. `libvirt`, `vmware`) |
+| `--no-rebuild` | - | No | `false` | Skip automatic rebuild (only update config) |
+
+<Note>This command is not yet implemented.</Note>
+
+### provider rebuild
+
+Rebuild the daemon with the current provider configuration.
+
+```bash
+malboxctl provider rebuild [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `-r`, `--release` | - | No | `false` | Build in release mode |
+| `-v`, `--verbose` | - | No | `false` | Show verbose cargo output |
+
+<Note>This command is not yet implemented.</Note>
+
+## machine
+
+Manage analysis machines.
+
+### machine list
+
+List all machines.
+
+```bash
+malboxctl machine list
+```
+
+### machine get
+
+Get details of a specific machine.
+
+```bash
+malboxctl machine get [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+### machine provision
+
+Run a provisioning step against a machine.
+
+```bash
+malboxctl machine provision [machine] --provisioner <type> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+| `--provisioner` | `string` | Yes | - | Provisioner type (e.g. `ansible`, `native`) |
+| `--snapshot` | `string` | No | - | Snapshot name to create after provisioning |
+| `--revert-to` | `string` | No | `base` | Snapshot to revert to before provisioning |
+| `--config` | `string` | No | - | Provisioner config as JSON (e.g. `'{"playbook": "setup.yml"}'`) |
+| `--plugins` | `string[]` | No | - | Guest plugin names to deploy (accepts multiple values) |
+
+### machine provision-history
+
+List provision run history for a machine.
+
+```bash
+malboxctl machine provision-history [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+### machine snapshot list
+
+List snapshots for a machine.
+
+```bash
+malboxctl machine snapshot list [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+### machine snapshot delete
+
+Delete a snapshot.
+
+```bash
+malboxctl machine snapshot delete [machine] [snapshot_name]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+| `snapshot_name` | `string` | No | - | Snapshot name. If omitted, an interactive fuzzy-select menu is shown. |
+
+## image
+
+Manage VM images.
+
+### image register
+
+Register a new VM image.
+
+```bash
+malboxctl image register --name <name> --platform <platform> --arch <arch> --path <path> [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--name` | `string` | Yes | - | Image name |
+| `--platform` | `windows` \| `linux` | Yes | - | Target platform |
+| `--arch` | `x64` \| `x86` | Yes | - | Target architecture |
+| `--path` | `string` | Yes | - | Path to the image file |
+| `--image-format` | `string` | No | - | Image format (e.g. `qcow2`, `vmdk`) |
+| `--description` | `string` | No | - | Image description |
+
+### image list
+
+List all registered images.
+
+```bash
+malboxctl image list
+```
+
+### image get
+
+Get details of a specific image.
+
+```bash
+malboxctl image get <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Image name |
+
+### image delete
+
+Delete an image.
+
+```bash
+malboxctl image delete <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Image name |
+
+## completion
+
+Generate shell completions.
+
+```bash
+malboxctl completion <shell>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `shell` | `bash` \| `zsh` \| `fish` \| `elvish` \| `powershell` | Yes | Target shell |
+
+To install completions, redirect the output to the appropriate location for your shell:
+
+```bash
+# Bash
+malboxctl completion bash > ~/.local/share/bash-completion/completions/malboxctl
+
+# Zsh
+malboxctl completion zsh > ~/.zfunc/_malboxctl
+
+# Fish
+malboxctl completion fish > ~/.config/fish/completions/malboxctl.fish
+```
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `RUST_LOG` | Override the log level filter. Takes precedence over `--verbose`. Uses standard [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
+| `MALBOX_CONFIG` | Path to the daemon config file. Set automatically by the systemd service. |
