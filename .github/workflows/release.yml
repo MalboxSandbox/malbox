@@ -35,13 +35,13 @@ jobs:
         nix develop ..#backend --command
         cargo build --release
         --manifest-path Cargo.toml
-        -p malbox -p malboxctl -p malbox-daemon
+        -p malbox -p malboxctl
 
     - name: Package binaries
       run: |
         VERSION="${GITHUB_REF_NAME}"
 
-        for bin in malbox malboxctl malbox-daemon; do
+        for bin in malbox malboxctl; do
           DIR="${bin}-${VERSION}-linux-x64"
           mkdir -p "${DIR}"
           cp "target/${LINUX_TARGET}/release/${bin}" "${DIR}/"
@@ -55,7 +55,6 @@ jobs:
         path: |
           back-end/malbox-v*-linux-x64.tar.gz
           back-end/malboxctl-v*-linux-x64.tar.gz
-          back-end/malbox-daemon-v*-linux-x64.tar.gz
 
   build-cpp-sdk-linux:
     name: Build C++ Plugin SDK (Linux)
