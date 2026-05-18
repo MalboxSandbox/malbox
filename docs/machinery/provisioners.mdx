@@ -23,7 +23,7 @@ malboxctl machine provision win10-dev \
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--provisioner` | Yes | Provisioner type (e.g. `"ansible"`, `"native"`). |
+| `--provisioner` | Yes | Provisioner type (e.g. `"ansible"`). |
 | `--snapshot` | No | Snapshot name to create after successful provisioning. |
 | `--revert-to` | No | Snapshot to revert to before provisioning (defaults to `"base"`). |
 | `--config` | No | Provisioner-specific config as JSON. |
@@ -144,14 +144,6 @@ malboxctl machine provision win10-dev \
   --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_autologin": "true"}}' \
   --plugins guest-windows-agent \
   --snapshot with-plugins
-```
-
-### Native
-
-The `native` provisioner is a no-op step used primarily as a snapshot checkpoint. It creates a snapshot of the machine in its current state without running any configuration.
-
-```bash
-malboxctl machine provision win10-dev --provisioner native --snapshot base
 ```
 
 ## Next steps
