@@ -41,7 +41,7 @@ jobs:
         extra_nix_config: |
           experimental-features = nix-command flakes
 
-    - uses: DeterminateSystems/magic-nix-cache-action@v8
+    - uses: DeterminateSystems/magic-nix-cache-action@v13
 
     - name: Lint Python
       run: nix develop ..#backend --command ruff check crates/malbox-plugin-sdk-python/
