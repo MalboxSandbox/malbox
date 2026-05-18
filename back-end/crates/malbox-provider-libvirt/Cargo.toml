@@ -15,5 +15,5 @@ serde.workspace = true
 tokio.workspace = true
 virt = "0.4.3"
 uuid = { version = "1.11", features = ["v4"] }
-quick-xml = { version = "0.39", features = ["serialize"] }
+quick-xml = { version = "0.40", features = ["serialize"] }
 chrono = "0.4"
