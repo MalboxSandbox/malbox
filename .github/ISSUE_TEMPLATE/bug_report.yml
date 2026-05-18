@@ -1,0 +1,79 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the sections below so we can reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Run `malbox ...`
+        2. Submit a sample via ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of malbox is affected?
+      options:
+        - malbox (CLI)
+        - malboxctl (daemon/CLI)
+        - HTTP API
+        - Scheduler
+        - Database
+        - Plugin System
+        - Machinery / VM Management
+        - Providers
+        - Provisioners
+        - Configuration
+        - Frontend
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Tell us about your setup.
+      placeholder: |
+        - OS: e.g. Fedora 42
+        - Malbox version: e.g. 0.1.0 or commit hash
+        - Provider: e.g. libvirt/QEMU
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste any relevant log output, error messages, or screenshots.
+      render: text
+    validations:
+      required: false
