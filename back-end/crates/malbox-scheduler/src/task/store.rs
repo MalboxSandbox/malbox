@@ -88,7 +88,7 @@ impl TaskStore {
         }
 
         // Update task state in the database.
-        update_task_status(&self.db, task_id, state).await.unwrap();
+        update_task_status(&self.db, task_id, state).await?;
 
         Ok(())
     }
