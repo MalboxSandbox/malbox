@@ -83,7 +83,7 @@ Make sure PostgreSQL is running via `process-compose up` first (see [Database](#
 
 ```bash
 cd back-end
-cargo run -p malbox-daemon
+cargo run -p malboxctl -- daemon start
 ```
 
 The daemon starts an HTTP server on `http://127.0.0.1:8080`.
@@ -239,5 +239,5 @@ SQLX_OFFLINE=true cargo build
 Make sure:
 
 1. PostgreSQL is running (`process-compose up` in `back-end/`)
-2. The backend is running (`cargo run -p malbox-daemon`)
+2. The backend is running (`cargo run -p malboxctl -- daemon start`)
 3. Your `.env` file has the correct `MALBOX_API_URL` (default: `http://127.0.0.1:8080`)
