@@ -11,6 +11,7 @@ pub mod health;
 pub mod instance;
 pub mod ipc_channels;
 pub mod log_router;
+pub mod runtime;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,6 +29,7 @@ use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::PluginHandle;
 use crate::manager::health::spawn_health_check_loop;
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
+use crate::manager::runtime::{GuestRuntime, HostRuntime, PluginRuntime};
 use crate::registry::PluginRegistry;
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
@@ -76,7 +78,7 @@ impl PluginManager {
 
             if is_persistent && is_host {
                 info!(plugin = %entry.id, "spawning persistent host plugin");
-                match spawn_host_plugin(entry).await {
+                match spawn_host_plugin(entry, Arc::clone(&ipc_node)).await {
                     Ok(instance) => {
                         instances.insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
                     }
@@ -140,8 +142,6 @@ impl PluginManager {
                     plugin_id.clone(),
                     Arc::clone(entry),
                     Arc::clone(instance_lock.value()),
-                    Arc::clone(&self.ipc_node),
-                    Arc::clone(&self.emitter),
                 ))
             }
             PluginStateConfig::Ephemeral => {
@@ -153,7 +153,7 @@ impl PluginManager {
                 // ExceedsMaxSupportedServers.
                 Node::<IpcService>::cleanup_dead_nodes(self.ipc_node.config());
 
-                let mut instance = spawn_host_plugin(entry).await?;
+                let mut instance = spawn_host_plugin(entry, Arc::clone(&self.ipc_node)).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
                 instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
 
@@ -163,8 +163,6 @@ impl PluginManager {
                     plugin_id.clone(),
                     Arc::clone(entry),
                     instance_lock,
-                    Arc::clone(&self.ipc_node),
-                    Arc::clone(&self.emitter),
                 ))
             }
             PluginStateConfig::Scoped => Err(ManagerError::ScopedNotImplemented),
@@ -207,17 +205,15 @@ impl PluginManager {
         let mut instance = PluginInstance {
             entry: Arc::clone(entry),
             lifecycle: PluginLifecycle::Ready,
-            process: None,
-            grpc_client: Some(grpc_client),
-            task_channels: None,
+            runtime: PluginRuntime::Guest(GuestRuntime { grpc_client }),
             started_at: Some(Instant::now()),
             last_health_check: None,
             log_file_path: None,
         };
 
         // Start consuming the guest plugin's log stream in the background.
-        if let Some(ref mut client) = instance.grpc_client {
-            match client.stream_logs(true).await {
+        if let PluginRuntime::Guest(ref mut guest) = instance.runtime {
+            match guest.grpc_client.stream_logs(true).await {
                 Ok(stream) => {
                     let run_id = format!(
                         "{}",
@@ -250,8 +246,6 @@ impl PluginManager {
             plugin_id.clone(),
             Arc::clone(entry),
             instance_lock,
-            Arc::clone(&self.ipc_node),
-            Arc::clone(&self.emitter),
         ))
     }
 
@@ -287,8 +281,8 @@ impl PluginManager {
                     warn!(plugin = %plugin_id, "plugin removed from registry, stopping instance");
                     instance.lifecycle = PluginLifecycle::Stopping;
 
-                    if let Some(ref mut process) = instance.process {
-                        let _ = process.kill().await;
+                    if let PluginRuntime::Host(ref mut host) = instance.runtime {
+                        let _ = host.process.kill().await;
                     }
 
                     instance.lifecycle = PluginLifecycle::Stopped;
@@ -304,7 +298,7 @@ impl PluginManager {
 
             if is_persistent && is_host && !self.instances.contains_key(&entry.id) {
                 info!(plugin = %entry.id, "spawning newly discovered persistent host plugin");
-                match spawn_host_plugin(entry).await {
+                match spawn_host_plugin(entry, Arc::clone(&self.ipc_node)).await {
                     Ok(instance) => {
                         self.instances
                             .insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
@@ -334,8 +328,8 @@ impl PluginManager {
                 debug!(plugin = %plugin_id, "stopping plugin instance");
                 instance.lifecycle = PluginLifecycle::Stopping;
 
-                if let Some(ref mut process) = instance.process {
-                    let _ = process.kill().await;
+                if let PluginRuntime::Host(ref mut host) = instance.runtime {
+                    let _ = host.process.kill().await;
                 }
 
                 instance.lifecycle = PluginLifecycle::Stopped;
@@ -365,7 +359,10 @@ impl PluginManager {
 ///
 /// The returned instance is in the [`Starting`](PluginLifecycle::Starting)
 /// state with the process handle attached.
-async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
+async fn spawn_host_plugin(
+    entry: &PluginEntry,
+    ipc_node: Arc<Node<IpcService>>,
+) -> Result<PluginInstance> {
     let child = tokio::process::Command::new(&entry.binary_path)
         .env("MALBOX_PLUGIN_ID", entry.id.as_str())
         .kill_on_drop(true)
@@ -376,9 +373,11 @@ async fn spawn_host_plugin(entry: &PluginEntry) -> Result<PluginInstance> {
     Ok(PluginInstance {
         entry: Arc::new(entry.clone()),
         lifecycle: PluginLifecycle::Starting,
-        process: Some(child),
-        grpc_client: None,
-        task_channels: None,
+        runtime: PluginRuntime::Host(HostRuntime {
+            process: child,
+            task_channels: None,
+            ipc_node,
+        }),
         started_at: Some(Instant::now()),
         last_health_check: None,
         log_file_path: None,

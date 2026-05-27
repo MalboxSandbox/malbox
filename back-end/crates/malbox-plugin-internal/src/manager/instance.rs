@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::manager::ipc_channels::HostTaskChannels;
+use crate::manager::runtime::PluginRuntime;
 use crate::registry::types::PluginEntry;
 
 /// Lifecycle state machine for a running plugin process.
@@ -110,22 +110,8 @@ pub struct PluginInstance {
     pub entry: Arc<PluginEntry>,
     /// Current lifecycle state.
     pub lifecycle: PluginLifecycle,
-    /// Handle to the spawned child process.
-    ///
-    /// Uses `tokio::process::Child` so the manager can `.await` process exit
-    /// without blocking the async runtime. Set to `None` before spawn or after
-    /// the process has been reaped.
-    pub process: Option<tokio::process::Child>,
-    /// gRPC client for communicating with guest plugins running inside a VM.
-    ///
-    /// `None` for host plugins or before the gRPC connection is established.
-    pub grpc_client: Option<crate::transport::daemon::GrpcClient>,
-    /// Daemon-side IPC task channels for host plugins.
-    ///
-    /// Holds the request publisher and result receiver used during
-    /// [`execute_host_task`](crate::manager::handle::PluginHandle). `None` until
-    /// the channels are opened after the plugin process starts.
-    pub task_channels: Option<HostTaskChannels>,
+    /// Type-discriminated runtime state (host process or guest gRPC client).
+    pub runtime: PluginRuntime,
     /// Wall-clock time when the plugin process was started.
     pub started_at: Option<Instant>,
     /// Wall-clock time of the most recent successful health check.
@@ -136,11 +122,14 @@ pub struct PluginInstance {
 
 impl fmt::Debug for PluginInstance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let runtime_kind = match &self.runtime {
+            PluginRuntime::Host(_) => "Host",
+            PluginRuntime::Guest(_) => "Guest",
+        };
         f.debug_struct("PluginInstance")
             .field("plugin_id", &self.entry.id)
             .field("lifecycle", &self.lifecycle)
-            .field("has_process", &self.process.is_some())
-            .field("has_task_channels", &self.task_channels.is_some())
+            .field("runtime", &runtime_kind)
             .field("started_at", &self.started_at)
             .field("last_health_check", &self.last_health_check)
             .field("log_file_path", &self.log_file_path)

@@ -6,20 +6,15 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use prost::Message;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, warn};
+use tracing::instrument;
 
-use malbox_plugin_transport::ipc::{DaemonEventPublisher, IpcService, Node};
-
-use crate::manager::error::{ManagerError, Result};
+use crate::manager::error::Result;
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
-use crate::manager::ipc_channels::HostTaskChannels;
-use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
+use crate::manager::runtime::PluginRuntime;
+use crate::registry::manifest::PluginStateConfig;
 use crate::registry::types::{PluginEntry, PluginId};
-use crate::transport::grpc::proto;
 
 /// Format of a plugin output payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,9 +42,6 @@ pub struct PluginHandle {
     plugin_id: PluginId,
     entry: Arc<PluginEntry>,
     instance: Arc<Mutex<PluginInstance>>,
-    ipc_node: Arc<Node<IpcService>>,
-    #[allow(dead_code)]
-    emitter: Arc<DaemonEventPublisher>,
 }
 
 impl PluginHandle {
@@ -58,15 +50,11 @@ impl PluginHandle {
         plugin_id: PluginId,
         entry: Arc<PluginEntry>,
         instance: Arc<Mutex<PluginInstance>>,
-        ipc_node: Arc<Node<IpcService>>,
-        emitter: Arc<DaemonEventPublisher>,
     ) -> Self {
         Self {
             plugin_id,
             entry,
             instance,
-            ipc_node,
-            emitter,
         }
     }
 
@@ -82,9 +70,8 @@ impl PluginHandle {
 
     /// Execute a task on the plugin and collect the resulting outputs.
     ///
-    /// This dispatches the task to the plugin process via the appropriate
-    /// transport (IPC for host plugins, gRPC for guest plugins) and waits
-    /// for the plugin to produce its result outputs.
+    /// Delegates to the typed runtime (host IPC or guest gRPC) stored on
+    /// the plugin instance.
     #[instrument(skip_all, fields(plugin = %self.plugin_id(), task_id), err)]
     pub async fn execute_task(
         &self,
@@ -92,182 +79,11 @@ impl PluginHandle {
         sample_path: &str,
         config: HashMap<String, String>,
     ) -> Result<Vec<PluginOutput>> {
-        let plugin_type = self.entry.manifest.plugin.plugin_type;
-
-        match plugin_type {
-            PluginTypeConfig::Host => self.execute_host_task(task_id, sample_path, config).await,
-            PluginTypeConfig::Guest => self.execute_guest_task(task_id, sample_path, config).await,
-        }
-    }
-
-    /// Execute a task on a host plugin via IPC.
-    async fn execute_host_task(
-        &self,
-        task_id: i32,
-        sample_path: &str,
-        config: HashMap<String, String>,
-    ) -> Result<Vec<PluginOutput>> {
-        debug!(plugin = %self.plugin_id, task_id, "executing task on host plugin via IPC");
-
-        // Ensure task channels exist (lazy init, cached on instance).
-        {
-            let mut instance = self.instance.lock().await;
-            if instance.task_channels.is_none() {
-                let channels = HostTaskChannels::new(&self.ipc_node, self.plugin_id.as_str())?;
-                instance.task_channels = Some(channels);
-            }
-        }
-
-        // Use the v2 channels to dispatch and collect results in a blocking context.
-        let instance = Arc::clone(&self.instance);
-        let plugin_id = self.plugin_id.clone();
-        let sample_path = sample_path.to_string();
-        let timeout_secs = self
-            .entry
-            .runtime_config
-            .as_ref()
-            .map(|c| c.analysis_timeout)
-            .unwrap_or(300);
-        let timeout = Duration::from_secs(timeout_secs);
-
-        let outputs = tokio::task::spawn_blocking(move || {
-            let instance_guard = instance.blocking_lock();
-            let channels = instance_guard.task_channels.as_ref().unwrap();
-            channels.execute_task(&plugin_id, task_id, &sample_path, &config, timeout)
-        })
-        .await
-        .map_err(|e| {
-            ManagerError::ExecutionFailed(
-                self.plugin_id.clone(),
-                format!("spawn_blocking panicked: {e}"),
-            )
-        })??;
-
-        Ok(outputs)
-    }
-
-    /// Execute a task on a guest plugin via gRPC streaming.
-    async fn execute_guest_task(
-        &self,
-        task_id: i32,
-        sample_path: &str,
-        config: HashMap<String, String>,
-    ) -> Result<Vec<PluginOutput>> {
-        use crate::transport::grpc::proto::{ResultFormat as ProtoFormat, ResultKind};
-
         let mut instance = self.instance.lock().await;
-        let client = instance.grpc_client.as_mut().ok_or_else(|| {
-            ManagerError::ExecutionFailed(
-                self.plugin_id.clone(),
-                "guest plugin has no gRPC client".into(),
-            )
-        })?;
-
-        debug!(plugin = %self.plugin_id, task_id, "executing task on guest plugin via gRPC");
-
-        let mut stream = client
-            .execute_task(task_id, sample_path.to_string(), config)
+        instance
+            .runtime
+            .execute_task(&self.plugin_id, &self.entry, task_id, sample_path, config)
             .await
-            .map_err(|e| ManagerError::ExecutionFailed(self.plugin_id.clone(), e.to_string()))?;
-
-        let mut inline_outputs: Vec<PluginOutput> = Vec::new();
-        let mut pending_refs: Vec<proto::ResultRef> = Vec::new();
-
-        // --- Phase 1: drain the control stream ---
-        loop {
-            match stream.message().await {
-                Ok(Some(result)) => {
-                    let kind = ResultKind::try_from(result.kind).unwrap_or(ResultKind::Result);
-                    let is_final = result.is_final;
-
-                    match kind {
-                        ResultKind::Progress => {
-                            debug!(
-                                plugin = %self.plugin_id,
-                                task_id = result.task_id,
-                                "received progress update"
-                            );
-                        }
-                        ResultKind::Ready => {
-                            debug!(
-                                plugin = %self.plugin_id,
-                                task_id = result.task_id,
-                                "plugin signaled ready"
-                            );
-                        }
-                        ResultKind::Result => {
-                            info!(
-                                plugin = %self.plugin_id,
-                                task_id = result.task_id,
-                                result_name = %result.result_name,
-                                data_len = result.data.len(),
-                                is_final,
-                                "received inline task result from guest plugin"
-                            );
-
-                            let format = match ProtoFormat::try_from(result.format) {
-                                Ok(ProtoFormat::Json) => OutputFormat::Json,
-                                _ => OutputFormat::Bytes,
-                            };
-
-                            if !result.result_name.is_empty() {
-                                inline_outputs.push(PluginOutput {
-                                    result_name: result.result_name,
-                                    data: result.data,
-                                    format,
-                                });
-                            }
-                        }
-                        ResultKind::ResultRef => {
-                            let ref_msg = proto::ResultRef::decode(result.data.as_slice())
-                                .map_err(|e| {
-                                    ManagerError::ExecutionFailed(
-                                        self.plugin_id.clone(),
-                                        format!("failed to decode ResultRef: {e}"),
-                                    )
-                                })?;
-                            info!(
-                                plugin = %self.plugin_id,
-                                task_id = result.task_id,
-                                handle = %ref_msg.handle,
-                                result_name = %ref_msg.result_name,
-                                size_bytes = ref_msg.size_bytes,
-                                "received result ref (will pull after stream completes)"
-                            );
-                            pending_refs.push(ref_msg);
-                        }
-                    }
-
-                    if is_final {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    debug!(plugin = %self.plugin_id, "guest plugin task stream ended");
-                    break;
-                }
-                Err(status) => {
-                    warn!(
-                        plugin = %self.plugin_id,
-                        error = %status,
-                        "gRPC stream error during task execution"
-                    );
-                    return Err(ManagerError::ExecutionFailed(
-                        self.plugin_id.clone(),
-                        format!("gRPC stream error: {}", status),
-                    ));
-                }
-            }
-        }
-
-        // --- Phase 2: pull each ref sequentially on its own stream ---
-        let mut outputs = inline_outputs;
-        for ref_msg in pending_refs {
-            let pulled = pull_result_chunks(client, &self.plugin_id, &ref_msg).await?;
-            outputs.push(pulled);
-        }
-
-        Ok(outputs)
     }
 
     /// Release the plugin instance, transitioning it to the appropriate
@@ -288,8 +104,8 @@ impl PluginHandle {
             PluginStateConfig::Ephemeral => {
                 instance.lifecycle = PluginLifecycle::Stopping;
 
-                if let Some(ref mut process) = instance.process {
-                    let _ = process.kill().await;
+                if let PluginRuntime::Host(ref mut host) = instance.runtime {
+                    let _ = host.process.kill().await;
                 }
 
                 instance.lifecycle = PluginLifecycle::Stopped;
@@ -300,65 +116,4 @@ impl PluginHandle {
             }
         }
     }
-}
-
-async fn pull_result_chunks(
-    client: &mut crate::transport::daemon::GrpcClient,
-    plugin_id: &PluginId,
-    ref_msg: &proto::ResultRef,
-) -> Result<PluginOutput> {
-    use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
-
-    let mut stream = client
-        .pull_result(ref_msg.handle.clone())
-        .await
-        .map_err(|e| {
-            ManagerError::ExecutionFailed(
-                plugin_id.clone(),
-                format!(
-                    "pull_result RPC for '{}' (handle {}) failed: {}",
-                    ref_msg.result_name, ref_msg.handle, e
-                ),
-            )
-        })?;
-
-    let mut buf: Vec<u8> = Vec::with_capacity(ref_msg.size_bytes as usize);
-    loop {
-        match stream.message().await {
-            Ok(Some(chunk)) => {
-                buf.extend_from_slice(&chunk.data);
-                if chunk.is_last {
-                    break;
-                }
-            }
-            Ok(None) => break,
-            Err(status) => {
-                return Err(ManagerError::ExecutionFailed(
-                    plugin_id.clone(),
-                    format!(
-                        "pull_result stream error for '{}' (handle {}): {}",
-                        ref_msg.result_name, ref_msg.handle, status
-                    ),
-                ));
-            }
-        }
-    }
-
-    let format = match ProtoFormat::try_from(ref_msg.format) {
-        Ok(ProtoFormat::Json) => OutputFormat::Json,
-        _ => OutputFormat::Bytes,
-    };
-
-    info!(
-        plugin = %plugin_id,
-        result_name = %ref_msg.result_name,
-        bytes = buf.len(),
-        "pulled large result from guest plugin"
-    );
-
-    Ok(PluginOutput {
-        result_name: ref_msg.result_name.clone(),
-        data: buf,
-        format,
-    })
 }

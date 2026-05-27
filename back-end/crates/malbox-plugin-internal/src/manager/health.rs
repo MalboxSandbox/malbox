@@ -1,11 +1,3 @@
-//! Background health-check loop for running plugin instances.
-//!
-//! [`spawn_health_check_loop`] starts a `tokio::spawn` task that periodically
-//! inspects every running plugin instance. Host plugins are checked by polling
-//! `Child::try_wait()` to detect unexpected exits; guest plugins are checked
-//! via a gRPC `health_check` RPC with a 5-second timeout. Any plugin that
-//! fails its health check is transitioned to [`PluginLifecycle::Failed`].
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,13 +9,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
-use crate::registry::manifest::PluginTypeConfig;
+use crate::manager::runtime::PluginRuntime;
 use crate::registry::types::PluginId;
 
-/// Spawn a background task that periodically health-checks all running plugins.
-///
-/// The task loops on a fixed `interval`, checking every entry in `instances`.
-/// It exits cleanly when `shutdown_rx` receives a `true` value.
 pub fn spawn_health_check_loop(
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     interval: Duration,
@@ -42,13 +30,22 @@ pub fn spawn_health_check_loop(
             for entry in instances.iter() {
                 let plugin_id = entry.key();
                 let instance_lock = entry.value();
-                let mut instance = instance_lock.lock().await;
 
-                // Promote Starting host plugins to Ready once their process is alive.
+                // Use try_lock: if the lock is held, the plugin is actively
+                // executing a task (the handle holds the lock during
+                // execute_task). A contended lock means the plugin is alive
+                // by definition, so skipping is correct.
+                let mut instance = match instance_lock.try_lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        trace!(plugin = %plugin_id, "lock contended, skipping health check");
+                        continue;
+                    }
+                };
+
                 if instance.lifecycle.is_starting() {
-                    let plugin_type = instance.entry.manifest.plugin.plugin_type;
-                    if plugin_type == PluginTypeConfig::Host
-                        && check_host_health(&mut instance).await
+                    if let PluginRuntime::Host(_) = &instance.runtime
+                        && instance.runtime.check_health().await
                     {
                         debug!(plugin = %plugin_id, "host plugin process alive, promoting to Ready");
                         instance.lifecycle = PluginLifecycle::Ready;
@@ -60,21 +57,14 @@ pub fn spawn_health_check_loop(
                     continue;
                 }
 
-                let plugin_type = instance.entry.manifest.plugin.plugin_type;
-                let healthy = match plugin_type {
-                    PluginTypeConfig::Host => check_host_health(&mut instance).await,
-                    PluginTypeConfig::Guest => check_guest_health(&mut instance).await,
-                };
+                let healthy = instance.runtime.check_health().await;
 
                 if !healthy {
-                    let reason = format!(
-                        "{} plugin '{}' failed health check",
-                        match plugin_type {
-                            PluginTypeConfig::Host => "host",
-                            PluginTypeConfig::Guest => "guest",
-                        },
-                        plugin_id
-                    );
+                    let kind = match &instance.runtime {
+                        PluginRuntime::Host(_) => "host",
+                        PluginRuntime::Guest(_) => "guest",
+                    };
+                    let reason = format!("{} plugin '{}' failed health check", kind, plugin_id);
                     warn!(reason = %reason, "Plugin failed health check");
                     instance.lifecycle = PluginLifecycle::Failed { reason };
                 }
@@ -88,41 +78,4 @@ pub fn spawn_health_check_loop(
             );
         }
     })
-}
-
-/// Check whether a host plugin's child process is still alive.
-///
-/// Uses `Child::try_wait()` which is non-blocking:
-/// - `Ok(None)` means the process has not exited yet (healthy).
-/// - `Ok(Some(_))` means the process exited (unhealthy).
-/// - `Err(_)` means we failed to query the process (unhealthy).
-///
-/// Returns `false` if `instance.process` is `None`, which should not happen
-/// for a host plugin in a running lifecycle state.
-async fn check_host_health(instance: &mut PluginInstance) -> bool {
-    match instance.process {
-        Some(ref mut child) => match child.try_wait() {
-            Ok(None) => true,
-            Ok(Some(_)) => false,
-            Err(_) => false,
-        },
-        None => false,
-    }
-}
-
-/// Check whether a guest plugin is responsive via gRPC health check.
-///
-/// Calls `GrpcClient::health_check()` with a 5-second timeout.
-async fn check_guest_health(instance: &mut PluginInstance) -> bool {
-    let client = match instance.grpc_client {
-        Some(ref mut c) => c,
-        None => return false,
-    };
-
-    let timeout = Duration::from_secs(5);
-    match tokio::time::timeout(timeout, client.health_check()).await {
-        Ok(Ok(_)) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
 }
