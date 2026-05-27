@@ -27,6 +27,7 @@
 
 <div class="space-y-2">
 	{#if label}
+		<!-- svelte-ignore a11y_label_has_associated_control -->
 		<label use:root class="block text-sm font-medium text-[var(--color-text-primary)]">
 			{label}
 			{#if required}

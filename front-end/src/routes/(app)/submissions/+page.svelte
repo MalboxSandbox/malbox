@@ -1,6 +1,8 @@
 <script lang="ts">
 	import SubmissionsTable from '$lib/components/SubmissionsTable.svelte';
 	import FiltersModal from '$lib/components/FiltersModal.svelte';
+	import { goto } from '$app/navigation';
+	import { listTasks } from '$lib/api/tasks';
 	import type { PageData } from './$types';
 	import type { Task } from '$lib/api/types';
 
@@ -11,29 +13,67 @@
 	let { data }: Props = $props();
 
 	let searchQuery = $state('');
-	let activeFilter = $state<'all' | 'finished' | 'pending'>('all');
 	let showFilters = $state(false);
+	let loadingMore = $state(false);
+	let extraTasks = $state<Task[]>([]);
+	let nextCursor = $state<string | null>(null);
+	let hasMore = $state(false);
 
-	function matchesFilter(task: Task, filter: typeof activeFilter): boolean {
-		if (filter === 'all') return true;
-		if (filter === 'finished') return task.status === 'completed';
-		if (filter === 'pending') return task.status === 'pending' || task.status === 'running';
-		return true;
+	$effect(() => {
+		extraTasks = [];
+		nextCursor = data.tasks.next_cursor;
+		hasMore = data.tasks.has_more;
+	});
+
+	const activeFilter = $derived(data.filter as 'all' | 'finished' | 'pending');
+
+	function setFilter(filter: 'all' | 'finished' | 'pending') {
+		const qs = filter !== 'all' ? `?filter=${filter}` : '';
+		goto(`/submissions${qs}`, {
+			keepFocus: true,
+			noScroll: true
+		});
 	}
 
-	const filtered = $derived(() => {
-		let list = data.tasks;
-		list = list.filter((t) => matchesFilter(t, activeFilter));
-		const q = searchQuery.trim().toLowerCase();
-		if (q) {
-			list = list.filter(
-				(t) =>
-					t.target.toLowerCase().includes(q) ||
-					t.tags?.some((tag) => tag.toLowerCase().includes(q)) ||
-					t.created_on.includes(q)
-			);
+	function filterToStatus(filter: string): string | undefined {
+		switch (filter) {
+			case 'finished':
+				return 'completed';
+			case 'pending':
+				return 'pending,running,initializing,preparing_resources,stopping';
+			default:
+				return undefined;
 		}
-		return list;
+	}
+
+	async function loadMore() {
+		if (loadingMore || !nextCursor) return;
+		loadingMore = true;
+		try {
+			const page = await listTasks(globalThis.fetch, {
+				status: filterToStatus(activeFilter),
+				cursor: nextCursor,
+				limit: 50
+			});
+			extraTasks = [...extraTasks, ...page.items];
+			nextCursor = page.next_cursor;
+			hasMore = page.has_more;
+		} finally {
+			loadingMore = false;
+		}
+	}
+
+	const allTasks = $derived([...data.tasks.items, ...extraTasks]);
+
+	const filtered = $derived(() => {
+		const q = searchQuery.trim().toLowerCase();
+		if (!q) return allTasks;
+		return allTasks.filter(
+			(t) =>
+				t.target.toLowerCase().includes(q) ||
+				t.tags?.some((tag) => tag.toLowerCase().includes(q)) ||
+				t.created_on.includes(q)
+		);
 	});
 </script>
 
@@ -51,7 +91,7 @@
 		<div class="flex items-center gap-6">
 			<div class="flex items-center rounded-xl bg-[var(--color-bg-tertiary)] p-1.5">
 				<button
-					onclick={() => (activeFilter = 'all')}
+					onclick={() => setFilter('all')}
 					class="rounded-lg px-4 py-2.5 text-sm font-medium transition-colors {activeFilter ===
 					'all'
 						? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
@@ -60,7 +100,7 @@
 					All
 				</button>
 				<button
-					onclick={() => (activeFilter = 'finished')}
+					onclick={() => setFilter('finished')}
 					class="rounded px-4 py-1.5 text-sm font-medium transition-colors {activeFilter ===
 					'finished'
 						? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
@@ -69,7 +109,7 @@
 					Finished
 				</button>
 				<button
-					onclick={() => (activeFilter = 'pending')}
+					onclick={() => setFilter('pending')}
 					class="rounded px-4 py-1.5 text-sm font-medium transition-colors {activeFilter ===
 					'pending'
 						? 'bg-[var(--color-tab-active)] text-[var(--color-text-primary)]'
@@ -89,6 +129,22 @@
 	</div>
 
 	<SubmissionsTable tasks={filtered()} />
+
+	{#if hasMore}
+		<div class="flex justify-center">
+			<button
+				onclick={loadMore}
+				disabled={loadingMore}
+				class="rounded-xl bg-[var(--color-bg-secondary)] px-8 py-3 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+			>
+				{#if loadingMore}
+					Loading...
+				{:else}
+					Load More
+				{/if}
+			</button>
+		</div>
+	{/if}
 </div>
 
 <FiltersModal isOpen={showFilters} onClose={() => (showFilters = false)} onApply={() => {}} />

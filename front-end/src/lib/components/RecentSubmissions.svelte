@@ -93,6 +93,7 @@
 					<span class="text-[var(--color-text-primary)] text-sm">{submission.apiKey}</span>
 					<button
 						class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+						aria-label="Copy API key"
 					>
 						<svg
 							width="16"

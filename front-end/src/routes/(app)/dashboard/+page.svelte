@@ -35,7 +35,7 @@
 	<FileUpload />
 
 	<div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
-		<SubmissionStats tasks={data.tasks} />
+		<SubmissionStats counts={data.counts} />
 		<SystemStats machines={data.machines} />
 	</div>
 </div>
