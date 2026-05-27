@@ -5,10 +5,10 @@
 	import ArtifactPreview from './ArtifactPreview.svelte';
 	import { formatBytes } from '$lib/api/format';
 	import { previewKind } from './artifact';
-	import type { PluginReportView, Sample, KvPair, Block } from '$lib/api/types';
+	import type { PluginReportView, SinglePluginReport, Sample, KvPair, Block } from '$lib/api/types';
 
 	interface Props {
-		view: PluginReportView;
+		view: PluginReportView | SinglePluginReport;
 		sample?: Sample | null;
 	}
 	let { view, sample = null }: Props = $props();

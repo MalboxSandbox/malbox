@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { splitDateTime } from '$lib/api/format';
 	import type { Column } from '$lib/api/types';
+	import { contextmenu } from '$lib/actions/contextmenu';
+	import { truncateWithTail } from '$lib/utils/truncate';
 
 	interface Props {
 		columns: Column[];
@@ -13,6 +15,14 @@
 	let query = $state('');
 	let sortKey = $state<string | null>(null);
 	let sortDir = $state<'asc' | 'desc'>('asc');
+	let copiedCell = $state<string | null>(null);
+
+	async function copyCell(value: unknown, type: string | undefined, id: string) {
+		if (window.getSelection()?.toString()) return;
+		await navigator.clipboard.writeText(formatCell(value, type));
+		copiedCell = id;
+		setTimeout(() => (copiedCell = null), 1500);
+	}
 
 	function toggleSort(k: string) {
 		if (!sortable) return;
@@ -122,12 +132,29 @@
 						class="border-t border-[var(--color-border)]/30 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]/40"
 					>
 						{#each columns as c (c.key)}
+							{@const formatted = formatCell(row[c.key], c.type)}
+							{@const parts =
+								c.type === 'string' || !c.type
+									? truncateWithTail(formatted, 150, 15)
+									: { head: formatted, tail: '', truncated: false }}
 							<td
-								class="px-4 py-2 {cellAlign(c.type)} {c.type === 'string' || !c.type
-									? 'break-all'
-									: ''}"
+								class="px-4 py-2 {cellAlign(c.type)} cursor-copy"
+								onclick={() => copyCell(row[c.key], c.type, `${i}-${c.key}`)}
+								use:contextmenu={{
+									type: 'table-cell',
+									value: formatted,
+									metadata: { row, label: c.label }
+								}}
 							>
-								{formatCell(row[c.key], c.type)}
+								<span
+									class="transition-colors {c.type === 'string' || !c.type
+										? 'break-all'
+										: ''} {copiedCell === `${i}-${c.key}` ? 'text-[var(--color-accent)]' : ''}"
+								>
+									{parts.head}{#if parts.truncated}<span class="text-[var(--color-text-secondary)]"
+											>…</span
+										>{parts.tail}{/if}
+								</span>
 							</td>
 						{/each}
 					</tr>

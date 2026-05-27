@@ -4,6 +4,7 @@
 	import { previewKind } from './artifact';
 	import ArtifactPreview from './ArtifactPreview.svelte';
 	import type { ArtifactLink } from '$lib/api/types';
+	import { contextmenu } from '$lib/actions/contextmenu';
 
 	interface Props {
 		artifacts: ArtifactLink[];
@@ -109,6 +110,14 @@
 					{@const canPreview = previewKind(a.result_name, a.format) !== 'none'}
 					<div
 						class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-card)] px-3 py-2 text-xs text-[var(--color-text-primary)]"
+						use:contextmenu={{
+							type: 'artifact',
+							value: node.name,
+							metadata: {
+								downloadUrl: a.url,
+								onPreview: canPreview ? () => (previewArtifact = a) : undefined
+							}
+						}}
 					>
 						<span>{node.name}</span>
 						<span class="text-[var(--color-text-secondary)]">&middot;</span>
@@ -198,6 +207,14 @@
 							{@const canPreview = previewKind(a.result_name, a.format) !== 'none'}
 							<div
 								class="flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-[var(--color-bg-tertiary)]"
+								use:contextmenu={{
+									type: 'artifact',
+									value: fileName(a.result_name),
+									metadata: {
+										downloadUrl: a.url,
+										onPreview: canPreview ? () => (previewArtifact = a) : undefined
+									}
+								}}
 							>
 								<span class="w-4"></span>
 								<span class="truncate text-[var(--color-text-primary)]" title={a.result_name}>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CopyButton from '$lib/components/ui/CopyButton.svelte';
 	import type { Indicator } from '$lib/api/types';
+	import { contextmenu } from '$lib/actions/contextmenu';
 
 	interface Props {
 		items: Indicator[];
@@ -33,6 +34,7 @@
 						<li class="flex items-center gap-3 rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-2">
 							<span
 								class="min-w-0 flex-1 break-all font-mono text-xs text-[var(--color-text-primary)]"
+								use:contextmenu={{ type: 'indicator', value: ind.value, subtype: kind }}
 							>
 								{ind.value}
 							</span>

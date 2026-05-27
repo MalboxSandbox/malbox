@@ -2,6 +2,7 @@
 	import { formatBytes } from '$lib/api/format';
 	import { previewKind, previewLanguage, type PreviewKind } from './artifact';
 	import CopyButton from '$lib/components/ui/CopyButton.svelte';
+	import CodeViewer from '$lib/components/CodeViewer.svelte';
 	import type { ArtifactLink } from '$lib/api/types';
 
 	const MAX_TEXT_BYTES = 5 * 1024 * 1024;
@@ -27,6 +28,20 @@
 		const bsep = path.lastIndexOf('\\');
 		const idx = Math.max(sep, bsep);
 		return idx >= 0 ? path.slice(idx + 1) : path;
+	}
+
+	function pathSegments(path: string): string[] {
+		return path.split(/[/\\]/).filter(Boolean);
+	}
+
+	const segments = $derived(artifact ? pathSegments(artifact.result_name) : []);
+
+	let copiedPath = $state(false);
+
+	async function copyPath(path: string) {
+		await navigator.clipboard.writeText(path);
+		copiedPath = true;
+		setTimeout(() => (copiedPath = false), 1500);
 	}
 
 	$effect(() => {
@@ -101,12 +116,23 @@
 		{@const name = fileName(artifact.result_name)}
 		<div class="flex items-center gap-3 border-b border-[var(--color-border)]/50 px-5 py-3">
 			<div class="min-w-0 flex-1">
-				<h3
-					class="truncate text-sm font-medium text-[var(--color-text-primary)]"
-					title={artifact.result_name}
+				<button
+					type="button"
+					class="flex min-w-0 items-center gap-0 truncate text-sm"
+					title={copiedPath ? 'Copied!' : `Click to copy: ${artifact.result_name}`}
+					onclick={() => copyPath(artifact.result_name)}
 				>
-					{name}
-				</h3>
+					{#each segments as seg, i (i)}
+						{#if i > 0}
+							<span class="mx-1 text-[var(--color-text-secondary)]/50">&#8250;</span>
+						{/if}
+						{#if i === segments.length - 1}
+							<span class="font-medium text-[var(--color-text-primary)]">{seg}</span>
+						{:else}
+							<span class="text-[var(--color-text-secondary)]">{seg}</span>
+						{/if}
+					{/each}
+				</button>
 				<div class="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
 					<span class="uppercase">{artifact.format}</span>
 					<span>&middot;</span>
@@ -185,32 +211,13 @@
 					{error}
 				</div>
 			{:else if kind === 'json'}
-				<div class="relative">
-					{#if textContent}
-						<div class="absolute right-2 top-2">
-							<CopyButton value={prettyJson} size="sm" />
-						</div>
-					{/if}
-					<pre
-						class="overflow-x-auto rounded-lg bg-[var(--color-bg-primary)] p-4 font-mono text-xs leading-relaxed text-[var(--color-text-primary)]">{prettyJson}</pre>
-				</div>
+				{#if textContent}
+					<CodeViewer code={prettyJson} language="json" maxHeight="none" />
+				{/if}
 			{:else if kind === 'code'}
-				<div class="relative overflow-hidden rounded-lg bg-[var(--color-bg-primary)]">
-					<div class="flex items-center justify-between px-4 py-2">
-						{#if language}
-							<span class="font-mono text-[10px] uppercase text-[var(--color-text-secondary)]"
-								>{language}</span
-							>
-						{:else}
-							<span></span>
-						{/if}
-						{#if textContent}
-							<CopyButton value={textContent} size="sm" />
-						{/if}
-					</div>
-					<pre
-						class="overflow-x-auto border-t border-[var(--color-border)]/30 px-4 py-3 font-mono text-xs leading-relaxed text-[var(--color-text-primary)]">{textContent}</pre>
-				</div>
+				{#if textContent}
+					<CodeViewer code={textContent} {language} maxHeight="none" />
+				{/if}
 			{:else if kind === 'text'}
 				<div class="relative">
 					{#if textContent}

@@ -18,7 +18,6 @@
 	import Timeline from './blocks/Timeline.svelte';
 	import Graph from './blocks/Graph.svelte';
 	import Unknown from './blocks/Unknown.svelte';
-
 	interface Props {
 		block: Block;
 		artifacts: ArtifactLink[];

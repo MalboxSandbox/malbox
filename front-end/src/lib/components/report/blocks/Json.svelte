@@ -1,4 +1,6 @@
 <script lang="ts">
+	import CodeViewer from '$lib/components/CodeViewer.svelte';
+
 	interface Props {
 		data: unknown;
 		collapsed?: boolean;
@@ -30,7 +32,8 @@
 		<span>JSON</span>
 	</button>
 	{#if open}
-		<pre
-			class="overflow-x-auto border-t border-[var(--color-border)]/30 p-4 font-mono text-xs text-[var(--color-text-primary)]">{pretty}</pre>
+		<div class="border-t border-[var(--color-border)]/30">
+			<CodeViewer code={pretty} language="json" />
+		</div>
 	{/if}
 </div>
