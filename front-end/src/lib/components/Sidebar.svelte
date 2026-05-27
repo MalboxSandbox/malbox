@@ -4,8 +4,9 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { sidebar } from '$lib/stores/sidebar.svelte';
+	import { reportStore } from '$lib/stores/report.svelte';
 	import { icons, type IconName } from '$lib/icons';
-	import type { TaskReport, Section } from '$lib/api/types';
+	import type { Section } from '$lib/api/types';
 
 	function isArtifactSection(s: Section, artifactNames: Set<string>): boolean {
 		if (s.blocks && s.blocks.length === 1) {
@@ -18,15 +19,20 @@
 	const navItems: { href: string; icon: IconName; label: string }[] = [
 		{ href: '/dashboard', icon: 'home', label: 'Home' },
 		{ href: '/submissions', icon: 'upload', label: 'Submissions' },
-		{ href: '/machines', icon: 'machines', label: 'Machines' },
-		{ href: '/images', icon: 'images', label: 'Images' },
 		{ href: '/marketplace', icon: 'marketplace', label: 'Marketplace' },
-		{ href: '/automation', icon: 'api', label: 'Automation API' }
+		{ href: '/automation', icon: 'api', label: 'Automation API' },
+		{ href: '/workbench', icon: 'workbench', label: 'Workbench' }
 	];
 
 	const isActive = (href: string) => $page.url.pathname === href;
 
-	const report = $derived($page.data?.report as TaskReport | undefined);
+	const report = $derived(reportStore.current);
+	const successfulPlugins = $derived(report?.plugins.filter((p) => !p.failed) ?? []);
+	const failedPlugins = $derived(report?.plugins.filter((p) => p.failed) ?? []);
+	const failedNames = $derived(
+		failedPlugins.map((p) => p.report?.plugin.display_name ?? p.report?.plugin.id ?? p.plugin_name)
+	);
+	let failedExpanded = $state(false);
 	const summaryHref = $derived(report ? `/submissions/${report.task.id}` : null);
 	const activePlugin = $derived.by(() => {
 		const m = $page.url.pathname.match(/^\/submissions\/\d+\/p\/([^/]+)/);
@@ -151,7 +157,7 @@
 						</div>
 					{/if}
 				</a>
-				{#each report.plugins as p (p.plugin_name)}
+				{#each successfulPlugins as p (p.plugin_name)}
 					{@const displayName =
 						p.report?.plugin.display_name ?? p.report?.plugin.id ?? p.plugin_name}
 					{@const href = `${summaryHref}/p/${encodeURIComponent(p.plugin_name)}`}
@@ -192,6 +198,67 @@
 						{/if}
 					</div>
 				{/each}
+				{#if failedPlugins.length > 0}
+					<div>
+						<button
+							type="button"
+							onclick={() => (failedExpanded = !failedExpanded)}
+							class="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-[#8A8F94] hover:text-[#F4F4FF] transition-colors cursor-pointer
+							       {sidebar.collapsed ? 'justify-center px-0' : ''}"
+							title={sidebar.collapsed
+								? `${failedPlugins.length} failed: ${failedNames.join(', ')}`
+								: undefined}
+						>
+							<div
+								class="relative w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-red-500/10 text-red-400"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 16 16"
+									fill="currentColor"
+									class="size-4"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+										clip-rule="evenodd"
+									/>
+								</svg>
+								<span
+									class="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white"
+								>
+									{failedPlugins.length}
+								</span>
+							</div>
+							{#if !sidebar.collapsed}
+								<span class="text-sm font-medium truncate text-[#8A8F94]">Failed</span>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+									class="ml-auto size-4 shrink-0 text-[#8A8F94] transition-transform duration-200 {failedExpanded
+										? 'rotate-180'
+										: ''}"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+										clip-rule="evenodd"
+									/>
+								</svg>
+							{/if}
+						</button>
+						{#if !sidebar.collapsed && failedExpanded}
+							<div class="ml-8 mt-1 mb-1 space-y-0.5 border-l border-red-500/20 pl-6">
+								{#each failedNames as name (name)}
+									<div class="py-1 text-xs truncate text-[#8A8F94]" title={name}>
+										{name}
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</nav>

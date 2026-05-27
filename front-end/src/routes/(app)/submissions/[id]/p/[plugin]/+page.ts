@@ -1,10 +1,21 @@
 import { error } from '@sveltejs/kit';
+import { getPluginReport } from '$lib/api/tasks';
+import { isApiError } from '$lib/api/errors';
 import type { PageLoad } from './$types';
 
-export const load: PageLoad = async ({ params, parent }) => {
-	const { report } = await parent();
+export const load: PageLoad = async ({ params, parent, fetch }) => {
+	const { task } = await parent();
 	const name = decodeURIComponent(params.plugin);
-	const view = report.plugins.find((p) => p.plugin_name === name);
-	if (!view) throw error(404, `Plugin "${name}" not found for this task`);
-	return { view, sample: report.task.sample ?? null };
+
+	let view;
+	try {
+		view = await getPluginReport(fetch, task.id, name);
+	} catch (err) {
+		if (isApiError(err) && err.status === 404) {
+			throw error(404, `Plugin "${name}" not found for this task`);
+		}
+		throw err;
+	}
+
+	return { view, sample: task.sample ?? null };
 };
