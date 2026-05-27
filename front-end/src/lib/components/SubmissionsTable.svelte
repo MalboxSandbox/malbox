@@ -2,6 +2,7 @@
 	import type { Task } from '$lib/api/types';
 	import { splitDateTime, taskStatusLabel, isTerminalStatus } from '$lib/api/format';
 	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
+	import { contextmenu } from '$lib/actions/contextmenu';
 
 	interface Props {
 		tasks: Task[];
@@ -39,6 +40,11 @@
 			{@const dt = splitDateTime(task.created_on)}
 			<div
 				class="grid grid-cols-[180px_1fr_120px_140px_200px_150px] items-center gap-4 border-b border-[var(--color-border)] px-8 py-3 transition-colors last:border-b-0 hover:bg-[var(--color-bg-tertiary)]"
+				use:contextmenu={{
+					type: 'task',
+					value: task.target,
+					metadata: { taskId: task.id, status: task.status }
+				}}
 			>
 				<div class="flex flex-col gap-1">
 					<span class="text-sm font-medium text-[var(--color-text-primary)]">{dt.date}</span>
