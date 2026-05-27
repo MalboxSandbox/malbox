@@ -9,6 +9,7 @@
 	import { search } from '@codemirror/search';
 	import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 	import { keymap } from '@codemirror/view';
+	import { untrack } from 'svelte';
 	import { malboxEditorTheme } from '$lib/codemirror/theme';
 	import { loadLanguage } from '$lib/codemirror/languages';
 
@@ -85,7 +86,7 @@
 
 	$effect(() => {
 		if (!containerEl) return;
-		createView(containerEl);
+		untrack(() => createView(containerEl!));
 		return () => {
 			view?.destroy();
 			view = undefined;
