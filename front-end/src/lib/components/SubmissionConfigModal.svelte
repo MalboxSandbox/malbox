@@ -239,6 +239,8 @@
 <div use:portalled>
 	{#if $open}
 		<div use:overlay class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"></div>
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			use:content
 			class="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] px-5 py-4 max-h-[85vh] overflow-y-auto"
