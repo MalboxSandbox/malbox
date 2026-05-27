@@ -1,16 +1,44 @@
-import gzipPkg from 'zlibjs/bin/gzip.min.js';
-import gunzipPkg from 'zlibjs/bin/gunzip.min.js';
-import rawdeflatePkg from 'zlibjs/bin/rawdeflate.min.js';
-import rawinflatePkg from 'zlibjs/bin/rawinflate.min.js';
-import zlibPkg from 'zlibjs/bin/zlib.min.js';
-
-const { Zlib: GzipZlib } = gzipPkg;
-const { Zlib: GunzipZlib } = gunzipPkg;
-const { Zlib: RawDeflateZlib } = rawdeflatePkg;
-const { Zlib: RawInflateZlib } = rawinflatePkg;
-const { Zlib: ZlibMod } = zlibPkg;
 import type { TransformDefinition } from '../types';
 import { TransformError } from '../types';
+
+// zlibjs uses a UMD/IIFE pattern that Rollup can't statically analyze for
+// named exports, so we lazy-load via dynamic import to avoid SSR build failures.
+interface ZlibModules {
+	Gzip: new (data: Uint8Array) => { compress(): Uint8Array };
+	Gunzip: new (data: Uint8Array) => { decompress(): Uint8Array };
+	RawDeflate: new (data: Uint8Array) => { compress(): Uint8Array };
+	RawInflate: new (data: Uint8Array) => { decompress(): Uint8Array };
+	Inflate: new (data: Uint8Array) => { decompress(): Uint8Array };
+	Deflate: new (data: Uint8Array) => { compress(): Uint8Array };
+}
+
+let _cached: ZlibModules | null = null;
+
+async function zlib(): Promise<ZlibModules> {
+	if (_cached) return _cached;
+	const [gzip, gunzip, rawdeflate, rawinflate, zmod] = await Promise.all([
+		import('zlibjs/bin/gzip.min.js'),
+		import('zlibjs/bin/gunzip.min.js'),
+		import('zlibjs/bin/rawdeflate.min.js'),
+		import('zlibjs/bin/rawinflate.min.js'),
+		import('zlibjs/bin/zlib.min.js')
+	]);
+	const unwrap = (m: Record<string, unknown>) => (m.Zlib ?? (m.default as Record<string, unknown>)?.Zlib) as Record<string, unknown>;
+	const g = unwrap(gzip);
+	const u = unwrap(gunzip);
+	const rd = unwrap(rawdeflate);
+	const ri = unwrap(rawinflate);
+	const z = unwrap(zmod);
+	_cached = {
+		Gzip: g.Gzip as ZlibModules['Gzip'],
+		Gunzip: u.Gunzip as ZlibModules['Gunzip'],
+		RawDeflate: rd.RawDeflate as ZlibModules['RawDeflate'],
+		RawInflate: ri.RawInflate as ZlibModules['RawInflate'],
+		Inflate: z.Inflate as ZlibModules['Inflate'],
+		Deflate: z.Deflate as ZlibModules['Deflate']
+	};
+	return _cached;
+}
 
 function gzipDeflateOffset(data: Uint8Array): number {
 	if (data.length < 10 || data[0] !== 0x1f || data[1] !== 0x8b) return -1;
@@ -46,13 +74,14 @@ export const gunzip: TransformDefinition = {
 	},
 
 	async apply(input) {
+		const z = await zlib();
 		try {
-			return new GunzipZlib.Gunzip(input).decompress();
+			return new z.Gunzip(input).decompress();
 		} catch (e) {
 			const offset = gzipDeflateOffset(input);
 			if (offset > 0) {
 				try {
-					return new RawInflateZlib.RawInflate(input.subarray(offset)).decompress();
+					return new z.RawInflate(input.subarray(offset)).decompress();
 				} catch {
 					// fall through to original error
 				}
@@ -74,7 +103,8 @@ export const gzip: TransformDefinition = {
 	inverse: 'gunzip',
 
 	async apply(input) {
-		return new GzipZlib.Gzip(input).compress();
+		const z = await zlib();
+		return new z.Gzip(input).compress();
 	}
 };
 
@@ -95,8 +125,9 @@ export const inflate: TransformDefinition = {
 	},
 
 	async apply(input) {
+		const z = await zlib();
 		try {
-			return new RawInflateZlib.RawInflate(input).decompress();
+			return new z.RawInflate(input).decompress();
 		} catch (e) {
 			throw new TransformError(
 				'invalid_input',
@@ -115,7 +146,8 @@ export const deflate: TransformDefinition = {
 	inverse: 'inflate',
 
 	async apply(input) {
-		return new RawDeflateZlib.RawDeflate(input).compress();
+		const z = await zlib();
+		return new z.RawDeflate(input).compress();
 	}
 };
 
@@ -186,8 +218,9 @@ export const zlibDecompress: TransformDefinition = {
 	},
 
 	async apply(input) {
+		const z = await zlib();
 		try {
-			return new ZlibMod.Inflate(input).decompress();
+			return new z.Inflate(input).decompress();
 		} catch (e) {
 			throw new TransformError(
 				'invalid_input',
@@ -206,7 +239,8 @@ export const zlibCompress: TransformDefinition = {
 	inverse: 'zlib-decompress',
 
 	async apply(input) {
-		return new ZlibMod.Deflate(input).compress();
+		const z = await zlib();
+		return new z.Deflate(input).compress();
 	}
 };
 
