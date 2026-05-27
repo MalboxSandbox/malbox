@@ -2,7 +2,7 @@ use crate::http::{AppState, Result, error::Error};
 use axum::body::Bytes;
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Path, State},
     routing::post,
 };
 use axum_macros::debug_handler;
@@ -10,16 +10,21 @@ use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
 use magic::cookie::DatabasePaths;
 use malbox_database::repositories::{
     machinery::MachinePlatform,
-    samples::{Sample, SampleEntity, insert_sample},
+    samples::{Sample, SampleEntity, fetch_sample_by_id, insert_sample},
     tasks::{Task, TaskState, insert_task},
 };
 use malbox_utils::hashing::*;
+use serde::Deserialize;
 use time::{OffsetDateTime, PrimitiveDateTime};
 use tracing::info;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/tasks/create/file", post(create_task_from_file))
+        .route(
+            "/v1/tasks/create/sample/{sample_id}",
+            post(create_task_from_sample),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024 * 10000000))
 }
 
@@ -29,7 +34,6 @@ struct TaskResponse {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 struct FileInfo {
     name: String,
     size: i64,
@@ -39,27 +43,18 @@ struct FileInfo {
     sha256: String,
     sha512: String,
     crc32: String,
-    ssdeep: String,
+    _ssdeep: String,
 }
 
 #[derive(TryFromMultipart)]
-#[allow(dead_code)]
 struct CreateTaskRequest {
     #[form_data(limit = "unlimited")]
     file: FieldData<Bytes>,
-    package: Option<String>,
-    module: Option<String>,
     timeout: Option<i64>,
     priority: Option<i64>,
-    options: Option<String>,
-    machine: Option<String>, // needs to be checked via typed struct or conditions instead of String
     platform: Option<String>,
     tags: Option<String>,
-    custom: Option<String>,
     owner: Option<String>,
-    memory: Option<bool>,
-    unique: Option<bool>,
-    enforce_timeout: Option<bool>,
     /// Override the sample filename used on the guest VM.
     /// If not set, the original uploaded filename is used.
     target_filename: Option<String>,
@@ -87,21 +82,20 @@ async fn create_task_from_file(
     let sample = create_sample(&state, &file_info).await?;
     let task = create_task(&state, &request, &file_info, sample.id).await?;
 
-    let task_id = task.id.expect("Task must have an ID");
+    let task_id = task
+        .id
+        .ok_or_else(|| Error::Internal("Task ID not returned from database".into()))?;
     tracing::Span::current().record("task_id", task_id);
 
-    // Send task to scheduler for processing
     state
         .task_tx
-        .send(task.clone())
+        .send(task)
         .await
         .map_err(|e| Error::Internal(format!("Failed to send task to scheduler: {}", e)))?;
 
     info!(task_id, "Task submitted to scheduler");
 
-    Ok(Json(TaskResponse {
-        task_id: task.id.unwrap(),
-    }))
+    Ok(Json(TaskResponse { task_id }))
 }
 
 fn get_file_info(
@@ -110,7 +104,9 @@ fn get_file_info(
     let file_type = {
         let cookie = magic::Cookie::open(magic::cookie::Flags::default())
             .map_err(|e| format!("Failed to open magic cookie: {}", e))?;
-        let cookie = cookie.load(&DatabasePaths::default()).unwrap();
+        let cookie = cookie
+            .load(&DatabasePaths::default())
+            .map_err(|e| format!("Failed to load magic database: {}", e))?;
         cookie
             .buffer(&file.contents)
             .map_err(|e| format!("Failed to analyze file type: {}", e))?
@@ -130,7 +126,7 @@ fn get_file_info(
         sha256: get_sha256(&mut file.contents.to_vec()),
         sha512: get_sha512(&mut file.contents.to_vec()),
         crc32: get_crc32(&mut file.contents.to_vec()),
-        ssdeep: "not-available".to_string(),
+        _ssdeep: "not-available".to_string(),
     })
 }
 
@@ -146,7 +142,9 @@ async fn create_sample(state: &AppState, file_info: &FileInfo) -> Result<SampleE
         ssdeep: "not-available".to_string(),
     };
 
-    Ok(insert_sample(&state.pool, sample).await.unwrap())
+    insert_sample(&state.pool, sample)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to insert sample: {}", e)))
 }
 
 async fn create_task(
@@ -193,7 +191,7 @@ async fn create_task(
             .clone()
             .map(|tags_str| tags_str.split(',').map(|s| s.trim().to_string()).collect()),
         owner: request.owner.clone(),
-        enforce_timeout: Some(request.enforce_timeout.unwrap_or(false)),
+        enforce_timeout: Some(true),
         created_on: current_primitive_datetime,
         started_on: None,
         completed_on: None,
@@ -207,5 +205,115 @@ async fn create_task(
         snapshot_id,
     };
 
-    Ok(insert_task(&state.pool, task).await.unwrap())
+    insert_task(&state.pool, task)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to insert task: {}", e)))
+}
+
+#[derive(Deserialize)]
+struct RescanRequest {
+    timeout: Option<i64>,
+    priority: Option<i64>,
+    platform: Option<String>,
+    tags: Option<String>,
+    owner: Option<String>,
+    target_filename: Option<String>,
+    plugins: Option<String>,
+    snapshot_id: Option<String>,
+}
+
+#[tracing::instrument(skip_all, fields(task_id = tracing::field::Empty, sample_id = sample_id), err)]
+#[debug_handler]
+async fn create_task_from_sample(
+    State(state): State<AppState>,
+    Path(sample_id): Path<i64>,
+    Json(request): Json<RescanRequest>,
+) -> Result<Json<TaskResponse>> {
+    let sample = fetch_sample_by_id(&state.pool, sample_id)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to fetch sample: {}", e)))?
+        .ok_or(Error::NotFound)?;
+
+    if !state
+        .sample_store
+        .exists(&sample.sha256)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to check sample store: {}", e)))?
+    {
+        return Err(Error::unprocessable_entity([(
+            "sample",
+            "Sample file no longer exists on disk",
+        )]));
+    }
+
+    let utc_now = OffsetDateTime::now_utc();
+    let current_primitive_datetime = PrimitiveDateTime::new(utc_now.date(), utc_now.time());
+
+    let plugins: Vec<String> = request
+        .plugins
+        .as_ref()
+        .map(|p| {
+            p.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let snapshot_id = request
+        .snapshot_id
+        .as_ref()
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+    let target = request
+        .target_filename
+        .unwrap_or_else(|| sample.sha256.clone());
+
+    let task = Task {
+        id: None,
+        target,
+        timeout: request.timeout.unwrap_or(300),
+        priority: request.priority.unwrap_or(1),
+        platform: match request.platform.as_deref() {
+            Some("windows") => Some(MachinePlatform::Windows),
+            Some("linux") => Some(MachinePlatform::Linux),
+            Some(_) => Some(MachinePlatform::Windows),
+            None => None,
+        },
+        tags: request
+            .tags
+            .map(|tags_str| tags_str.split(',').map(|s| s.trim().to_string()).collect()),
+        owner: request.owner,
+        enforce_timeout: Some(true),
+        created_on: current_primitive_datetime,
+        started_on: None,
+        completed_on: None,
+        status: TaskState::Pending,
+        sample_id: Some(sample.id),
+        machine_cpus: None,
+        machine_id: None,
+        machine_memory: None,
+        plugins,
+        profile: None,
+        snapshot_id,
+    };
+
+    let task = insert_task(&state.pool, task)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to insert task: {}", e)))?;
+
+    let task_id = task
+        .id
+        .ok_or_else(|| Error::Internal("Task ID not returned from database".into()))?;
+    tracing::Span::current().record("task_id", task_id);
+
+    state
+        .task_tx
+        .send(task)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to send task to scheduler: {}", e)))?;
+
+    info!(task_id, "Rescan task submitted to scheduler");
+
+    Ok(Json(TaskResponse { task_id }))
 }

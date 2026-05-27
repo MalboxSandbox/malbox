@@ -1,14 +1,16 @@
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, State},
     http::{StatusCode, header},
     response::IntoResponse,
     routing::get,
 };
 use malbox_database::repositories::task_results::{
-    ResultFormat, fetch_task_result, fetch_task_results,
+    ResultFormat, ResultRole, fetch_task_result, fetch_task_results,
 };
 use serde::Serialize;
+use tokio_util::io::ReaderStream;
 
 use super::super::AppState;
 use super::resolve_result_path;
@@ -20,8 +22,8 @@ struct TaskResultResponse {
     plugin_name: String,
     result_name: String,
     format: String,
+    role: String,
     size_bytes: i64,
-    file_path: String,
     created_on: String,
 }
 
@@ -58,41 +60,74 @@ async fn get_task_result_content(
 
     let abs_path = resolve_result_path(&state.config, &result);
 
-    let bytes = match tokio::fs::read(&abs_path).await {
-        Ok(b) => b,
-        Err(e) => {
+    let canonical = match tokio::fs::canonicalize(&abs_path).await {
+        Ok(p) => p,
+        Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": format!("failed to read result file: {e}"),
-                    "path": abs_path.display().to_string(),
-                })),
+                Json(serde_json::json!({"error": "result file unavailable"})),
             )
                 .into_response();
         }
     };
+
+    let data_dir = match tokio::fs::canonicalize(&state.config.paths.data_dir).await {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "result file unavailable"})),
+            )
+                .into_response();
+        }
+    };
+
+    if !canonical.starts_with(&data_dir) {
+        tracing::warn!(
+            result_id,
+            path = %canonical.display(),
+            "path traversal blocked: result path escapes data directory"
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "result file unavailable"})),
+        )
+            .into_response();
+    }
+
+    let file = match tokio::fs::File::open(&canonical).await {
+        Ok(f) => f,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "result file unavailable"})),
+            )
+                .into_response();
+        }
+    };
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
 
     let content_type = match result.format {
         ResultFormat::Json => "application/json",
         ResultFormat::Bytes => "application/octet-stream",
     };
 
-    let disposition = format!(
-        "inline; filename=\"{}.{}\"",
-        result.result_name,
-        match result.format {
-            ResultFormat::Json => "json",
-            ResultFormat::Bytes => "bin",
-        }
-    );
+    let ext = match result.format {
+        ResultFormat::Json => "json",
+        ResultFormat::Bytes => "bin",
+    };
+    let disposition = format!("inline; filename=\"{}.{}\"", result.result_name, ext);
 
     (
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, content_type.to_string()),
             (header::CONTENT_DISPOSITION, disposition),
+            (header::CONTENT_LENGTH, result.size_bytes.to_string()),
         ],
-        bytes,
+        body,
     )
         .into_response()
 }
@@ -107,9 +142,9 @@ async fn get_task_results(State(state): State<AppState>, Path(id): Path<i32>) ->
                     task_id: r.task_id,
                     plugin_name: r.plugin_name,
                     result_name: r.result_name,
-                    format: format!("{:?}", r.format).to_lowercase(),
+                    format: format_name(r.format),
+                    role: role_name(r.role),
                     size_bytes: r.size_bytes,
-                    file_path: r.file_path,
                     created_on: r.created_on.to_string(),
                 })
                 .collect();
@@ -121,4 +156,20 @@ async fn get_task_results(State(state): State<AppState>, Path(id): Path<i32>) ->
         )
             .into_response(),
     }
+}
+
+fn format_name(f: ResultFormat) -> String {
+    match f {
+        ResultFormat::Json => "json",
+        ResultFormat::Bytes => "bytes",
+    }
+    .to_string()
+}
+
+fn role_name(r: ResultRole) -> String {
+    match r {
+        ResultRole::Report => "report",
+        ResultRole::Artifact => "artifact",
+    }
+    .to_string()
 }

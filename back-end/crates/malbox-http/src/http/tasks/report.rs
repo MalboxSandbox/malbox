@@ -1,15 +1,14 @@
-//! `GET /v1/tasks/{id}/report` — the unified, frontend-renderable view of a
-//! task's outputs.
+//! Task report endpoints - tiered by response weight.
 //!
-//! Returns one [`PluginReportView`] per plugin that contributed results.
-//! If a plugin produced a structured report envelope (a `PluginResult::Json`
-//! with `result_name == REPORT_RESULT_NAME`, tagged `role = 'report'` by the
-//! scheduler), we deserialize and return it verbatim. Otherwise we synthesize
-//! a minimal envelope so the frontend contract is uniform.
-//!
-//! An `aggregate` section rolls up cross-plugin state (worst verdict wins,
-//! deduped indicators and TTPs) so the task summary page can render without
-//! re-reading each plugin's envelope.
+//! * `GET /v1/tasks/{id}/report/summary` - Lightweight aggregate + per-plugin
+//!   metadata. No full report sections returned. Suitable for the task overview.
+//! * `GET /v1/tasks/{id}/report` - Full aggregate with indicators/TTPs plus
+//!   per-plugin report envelopes (sections stripped for weight). Use for the
+//!   combined view.
+//! * `GET /v1/tasks/{id}/report/plugins/{name}` - Complete report envelope
+//!   for a single plugin including all sections. One disk read.
+//! * `GET /v1/tasks/{id}/report/indicators` - Aggregated IOCs across plugins.
+//! * `GET /v1/tasks/{id}/report/ttps` - Aggregated TTPs across plugins.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +21,7 @@ use axum::{
 };
 use malbox_database::repositories::{
     task_results::{ResultFormat, ResultRole, TaskResult, fetch_task_results},
-    tasks::fetch_task,
+    tasks::{TaskState, fetch_task},
 };
 use malbox_plugin_sdk::report::{
     ArtifactRef, Block, Classification, Indicator, PluginInfo, Report, SCHEMA_VERSION, Section,
@@ -35,14 +34,30 @@ use super::get::{TaskResponse, build_task_response};
 use super::resolve_result_path;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/v1/tasks/{id}/report", get(get_task_report))
+    Router::new()
+        .route("/v1/tasks/{id}/report/summary", get(get_report_summary))
+        .route("/v1/tasks/{id}/report", get(get_task_report))
+        .route(
+            "/v1/tasks/{id}/report/plugins/{plugin_name}",
+            get(get_plugin_report),
+        )
+        .route(
+            "/v1/tasks/{id}/report/indicators",
+            get(get_report_indicators),
+        )
+        .route("/v1/tasks/{id}/report/ttps", get(get_report_ttps))
 }
 
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
 #[derive(Serialize)]
-struct TaskReportResponse {
-    task: TaskResponse,
-    aggregate: AggregateView,
-    plugins: Vec<PluginReportView>,
+struct ArtifactLink {
+    result_name: String,
+    format: String,
+    size_bytes: i64,
+    url: String,
 }
 
 #[derive(Serialize, Default)]
@@ -56,31 +71,163 @@ struct AggregateView {
     report_count: u32,
 }
 
-#[derive(Serialize)]
-struct PluginReportView {
+struct ParsedPlugin {
     plugin_name: String,
-    /// Parsed or synthesized envelope. `None` only when parsing a real
-    /// report file fails AND there's no artifact to fall back on.
-    report: Option<serde_json::Value>,
-    /// `true` when the envelope was assembled from raw outputs rather than
-    /// a plugin-authored `report` row.
+    report: Option<Report>,
     synthesized: bool,
+    failed: bool,
     artifacts: Vec<ArtifactLink>,
 }
 
+// ---------------------------------------------------------------------------
+// GET /v1/tasks/{id}/report/summary
+// ---------------------------------------------------------------------------
+
 #[derive(Serialize)]
-struct ArtifactLink {
-    result_name: String,
-    format: String,
-    size_bytes: i64,
-    url: String,
+struct PluginSummary {
+    plugin_name: String,
+    has_report: bool,
+    synthesized: bool,
+    failed: bool,
+    artifact_count: usize,
+}
+
+#[derive(Serialize)]
+struct SummaryAggregateView {
+    verdict: Option<String>,
+    score: Option<u8>,
+    classifications: BTreeMap<String, u32>,
+    indicator_count: usize,
+    ttp_count: usize,
+    plugin_count: u32,
+    report_count: u32,
+}
+
+#[derive(Serialize)]
+struct ReportSummaryResponse {
+    task: TaskResponse,
+    aggregate: SummaryAggregateView,
+    plugins: Vec<PluginSummary>,
+}
+
+async fn get_report_summary(
+    State(state): State<AppState>,
+    Path(task_id): Path<i32>,
+) -> axum::response::Response {
+    let (task, parsed) = match load_task_plugins(&state, task_id).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let agg = aggregate_across(&parsed);
+
+    let plugins: Vec<PluginSummary> = parsed
+        .iter()
+        .map(|p| PluginSummary {
+            plugin_name: p.plugin_name.clone(),
+            has_report: p.report.is_some(),
+            synthesized: p.synthesized,
+            failed: p.failed,
+            artifact_count: p.artifacts.len(),
+        })
+        .collect();
+
+    let summary_agg = SummaryAggregateView {
+        verdict: agg.verdict,
+        score: agg.score,
+        classifications: agg.classifications,
+        indicator_count: agg.indicators.len(),
+        ttp_count: agg.ttps.len(),
+        plugin_count: agg.plugin_count,
+        report_count: agg.report_count,
+    };
+
+    let response = ReportSummaryResponse {
+        task: build_task_response(&state.pool, task).await,
+        aggregate: summary_agg,
+        plugins,
+    };
+
+    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/tasks/{id}/report (full - but sections stripped from envelopes)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct TaskReportResponse {
+    task: TaskResponse,
+    aggregate: AggregateView,
+    plugins: Vec<PluginReportView>,
+}
+
+#[derive(Serialize)]
+struct PluginReportView {
+    plugin_name: String,
+    report: Option<serde_json::Value>,
+    synthesized: bool,
+    failed: bool,
+    artifacts: Vec<ArtifactLink>,
 }
 
 async fn get_task_report(
     State(state): State<AppState>,
     Path(task_id): Path<i32>,
 ) -> axum::response::Response {
-    // 1. Task must exist.
+    let (task, parsed) = match load_task_plugins(&state, task_id).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let aggregate = aggregate_across(&parsed);
+
+    let plugins: Vec<PluginReportView> = parsed
+        .into_iter()
+        .map(|p| {
+            let report_value = p.report.map(|r| {
+                let stripped = Report {
+                    sections: vec![],
+                    ..r
+                };
+                serde_json::to_value(stripped).unwrap_or(serde_json::Value::Null)
+            });
+            PluginReportView {
+                plugin_name: p.plugin_name,
+                report: report_value,
+                synthesized: p.synthesized,
+                failed: p.failed,
+                artifacts: p.artifacts,
+            }
+        })
+        .collect();
+
+    let response = TaskReportResponse {
+        task: build_task_response(&state.pool, task).await,
+        aggregate,
+        plugins,
+    };
+
+    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/tasks/{id}/report/plugins/{plugin_name}
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct SinglePluginReportResponse {
+    plugin_name: String,
+    report: Option<serde_json::Value>,
+    synthesized: bool,
+    failed: bool,
+    artifacts: Vec<ArtifactLink>,
+}
+
+async fn get_plugin_report(
+    State(state): State<AppState>,
+    Path((task_id, plugin_name)): Path<(i32, String)>,
+) -> axum::response::Response {
     let task = match fetch_task(&state.pool, task_id).await {
         Ok(Some(t)) => t,
         Ok(None) => {
@@ -93,13 +240,143 @@ async fn get_task_report(
         Err(e) => return internal_error(e.to_string()),
     };
 
-    // 2. All result rows for this task.
     let rows = match fetch_task_results(&state.pool, task_id).await {
         Ok(r) => r,
         Err(e) => return internal_error(e.to_string()),
     };
 
-    // 3. Group by plugin_name (stable order via BTreeMap).
+    let plugin_rows: Vec<TaskResult> = rows
+        .into_iter()
+        .filter(|r| r.plugin_name == plugin_name)
+        .collect();
+
+    if plugin_rows.is_empty() {
+        if is_terminal(&task.status) && task.plugins.contains(&plugin_name) {
+            let response = SinglePluginReportResponse {
+                plugin_name,
+                report: None,
+                synthesized: false,
+                failed: true,
+                artifacts: vec![],
+            };
+            return (StatusCode::OK, Json(serde_json::json!(response))).into_response();
+        }
+
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("No results for plugin '{}'", plugin_name)})),
+        )
+            .into_response();
+    }
+
+    let parsed = build_parsed_plugin(&state, task_id, plugin_name, plugin_rows).await;
+
+    let report_value = parsed
+        .report
+        .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null));
+
+    let response = SinglePluginReportResponse {
+        plugin_name: parsed.plugin_name,
+        report: report_value,
+        synthesized: parsed.synthesized,
+        failed: parsed.failed,
+        artifacts: parsed.artifacts,
+    };
+
+    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/tasks/{id}/report/indicators
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct IndicatorsResponse {
+    indicators: Vec<Indicator>,
+    total: usize,
+}
+
+async fn get_report_indicators(
+    State(state): State<AppState>,
+    Path(task_id): Path<i32>,
+) -> axum::response::Response {
+    let (_, parsed) = match load_task_plugins(&state, task_id).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let agg = aggregate_across(&parsed);
+    let total = agg.indicators.len();
+
+    let response = IndicatorsResponse {
+        indicators: agg.indicators,
+        total,
+    };
+
+    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/tasks/{id}/report/ttps
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct TtpsResponse {
+    ttps: Vec<Ttp>,
+    total: usize,
+}
+
+async fn get_report_ttps(
+    State(state): State<AppState>,
+    Path(task_id): Path<i32>,
+) -> axum::response::Response {
+    let (_, parsed) = match load_task_plugins(&state, task_id).await {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let agg = aggregate_across(&parsed);
+    let total = agg.ttps.len();
+
+    let response = TtpsResponse {
+        ttps: agg.ttps,
+        total,
+    };
+
+    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+async fn load_task_plugins(
+    state: &AppState,
+    task_id: i32,
+) -> std::result::Result<
+    (
+        malbox_database::repositories::tasks::Task,
+        Vec<ParsedPlugin>,
+    ),
+    axum::response::Response,
+> {
+    let task = match fetch_task(&state.pool, task_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": format!("Task {} not found", task_id)})),
+            )
+                .into_response());
+        }
+        Err(e) => return Err(internal_error(e.to_string())),
+    };
+
+    let rows = match fetch_task_results(&state.pool, task_id).await {
+        Ok(r) => r,
+        Err(e) => return Err(internal_error(e.to_string())),
+    };
+
     let mut by_plugin: BTreeMap<String, Vec<TaskResult>> = BTreeMap::new();
     for row in rows {
         by_plugin
@@ -108,33 +385,34 @@ async fn get_task_report(
             .push(row);
     }
 
-    // 4. Build one view per plugin.
-    let mut plugin_views = Vec::with_capacity(by_plugin.len());
+    let mut parsed = Vec::with_capacity(by_plugin.len());
     for (plugin_name, rows) in by_plugin {
-        plugin_views.push(build_plugin_view(&state, task_id, plugin_name, rows).await);
+        parsed.push(build_parsed_plugin(state, task_id, plugin_name, rows).await);
     }
 
-    // 5. Aggregate across plugins.
-    let aggregate = aggregate_across(&plugin_views);
+    if is_terminal(&task.status) {
+        for name in &task.plugins {
+            if !parsed.iter().any(|p| p.plugin_name == *name) {
+                parsed.push(ParsedPlugin {
+                    plugin_name: name.clone(),
+                    report: None,
+                    synthesized: false,
+                    failed: true,
+                    artifacts: vec![],
+                });
+            }
+        }
+    }
 
-    let response = TaskReportResponse {
-        task: build_task_response(&state.pool, task).await,
-        aggregate,
-        plugins: plugin_views,
-    };
-
-    (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+    Ok((task, parsed))
 }
 
-async fn build_plugin_view(
+async fn build_parsed_plugin(
     state: &AppState,
     task_id: i32,
     plugin_name: String,
     rows: Vec<TaskResult>,
-) -> PluginReportView {
-    // Partition report row(s) from artifact rows. If a plugin mistakenly
-    // produced multiple report rows, use the first and treat the rest as
-    // artifacts — better than losing data.
+) -> ParsedPlugin {
     let mut report_row: Option<TaskResult> = None;
     let mut artifact_rows: Vec<TaskResult> = Vec::new();
     for row in rows {
@@ -155,42 +433,35 @@ async fn build_plugin_view(
         })
         .collect();
 
-    let (report_json, synthesized) = match report_row {
-        Some(row) => match load_and_parse_report(state, &row).await {
-            Some(v) => (Some(v), false),
-            // Parse/read failed — fall through to synthesis so the frontend
-            // still gets a usable envelope for this plugin.
-            None => (Some(synthesize(&plugin_name, &artifact_rows)), true),
+    let (report, synthesized) = match report_row {
+        Some(row) => match load_report(state, &row).await {
+            Some(r) => (Some(r), false),
+            None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
         },
-        None => (Some(synthesize(&plugin_name, &artifact_rows)), true),
+        None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
     };
 
-    PluginReportView {
+    ParsedPlugin {
         plugin_name,
-        report: report_json,
+        report,
         synthesized,
+        failed: false,
         artifacts,
     }
 }
 
-async fn load_and_parse_report(state: &AppState, row: &TaskResult) -> Option<serde_json::Value> {
+async fn load_report(state: &AppState, row: &TaskResult) -> Option<Report> {
     let path = resolve_result_path(&state.config, row);
     let bytes = tokio::fs::read(&path).await.ok()?;
-    serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+    serde_json::from_slice::<Report>(&bytes).ok()
 }
 
-/// Build a minimal `Report` envelope for a plugin that didn't produce one.
-/// Each artifact becomes a section with either a JSON block (for JSON outputs)
-/// or a Download block (for binary outputs).
-fn synthesize(plugin_name: &str, artifacts: &[TaskResult]) -> serde_json::Value {
+fn synthesize_report(plugin_name: &str, artifacts: &[TaskResult]) -> Report {
     let sections = artifacts
         .iter()
         .map(|a| {
             let block = match a.format {
                 ResultFormat::Json => Block::Json {
-                    // We don't read artifact JSON here — the client can fetch
-                    // it via the content URL. For a compact synthesized view,
-                    // point to the artifact instead of inlining.
                     data: serde_json::json!({ "$ref": a.result_name }),
                     collapsed: true,
                 },
@@ -212,7 +483,7 @@ fn synthesize(plugin_name: &str, artifacts: &[TaskResult]) -> serde_json::Value 
         .map(|a| ArtifactRef::new(a.result_name.clone(), "other"))
         .collect();
 
-    let report = Report {
+    Report {
         schema_version: SCHEMA_VERSION,
         plugin: PluginInfo {
             id: plugin_name.to_string(),
@@ -226,12 +497,10 @@ fn synthesize(plugin_name: &str, artifacts: &[TaskResult]) -> serde_json::Value 
         summary: None,
         sections,
         raw: None,
-    };
-
-    serde_json::to_value(report).unwrap_or(serde_json::Value::Null)
+    }
 }
 
-fn aggregate_across(plugins: &[PluginReportView]) -> AggregateView {
+fn aggregate_across(plugins: &[ParsedPlugin]) -> AggregateView {
     let mut out = AggregateView {
         plugin_count: plugins.len() as u32,
         ..Default::default()
@@ -243,12 +512,7 @@ fn aggregate_across(plugins: &[PluginReportView]) -> AggregateView {
     let mut seen_ttps: BTreeSet<String> = BTreeSet::new();
 
     for pv in plugins {
-        let Some(v) = pv.report.as_ref() else {
-            continue;
-        };
-        // Parse the envelope back into a typed `Report` for folding. Unknown
-        // or extra fields are ignored (serde default behavior for our types).
-        let Ok(rep) = serde_json::from_value::<Report>(v.clone()) else {
+        let Some(rep) = &pv.report else {
             continue;
         };
         if !pv.synthesized {
@@ -259,27 +523,27 @@ fn aggregate_across(plugins: &[PluginReportView]) -> AggregateView {
             classification,
             score,
             ..
-        }) = rep.verdict
+        }) = &rep.verdict
         {
-            let key = classification_label(classification);
+            let key = classification_label(*classification);
             *out.classifications.entry(key).or_insert(0) += 1;
             worst = Some(match worst {
                 Some(w) if w.severity() >= classification.severity() => w,
-                _ => classification,
+                _ => *classification,
             });
             if let Some(s) = score {
-                max_score = Some(max_score.map_or(s, |m| m.max(s)));
+                max_score = Some(max_score.map_or(*s, |m| m.max(*s)));
             }
         }
 
-        for ind in rep.indicators {
+        for ind in &rep.indicators {
             if seen_iocs.insert((ind.kind.clone(), ind.value.clone())) {
-                out.indicators.push(ind);
+                out.indicators.push(ind.clone());
             }
         }
-        for ttp in rep.ttps {
+        for ttp in &rep.ttps {
             if seen_ttps.insert(ttp.id.clone()) {
-                out.ttps.push(ttp);
+                out.ttps.push(ttp.clone());
             }
         }
     }
@@ -297,6 +561,13 @@ fn classification_label(c: Classification) -> String {
         Classification::Unknown => "unknown",
     }
     .to_string()
+}
+
+fn is_terminal(s: &TaskState) -> bool {
+    matches!(
+        s,
+        TaskState::Completed | TaskState::Failed | TaskState::Canceled
+    )
 }
 
 fn format_name(f: ResultFormat) -> String {
@@ -319,14 +590,13 @@ fn internal_error(msg: String) -> axum::response::Response {
 mod tests {
     use super::*;
     use malbox_plugin_sdk::report::{Confidence, ReportBuilder};
-    use serde_json::json;
 
-    /// Helper: build a `PluginReportView` holding a pre-built report.
-    fn pv(plugin: &str, report: Report, synthesized: bool) -> PluginReportView {
-        PluginReportView {
+    fn pp(plugin: &str, report: Report, synthesized: bool) -> ParsedPlugin {
+        ParsedPlugin {
             plugin_name: plugin.into(),
-            report: Some(serde_json::to_value(report).unwrap()),
+            report: Some(report),
             synthesized,
+            failed: false,
             artifacts: vec![],
         }
     }
@@ -343,7 +613,7 @@ mod tests {
             .verdict(Classification::Suspicious, Some(50), None)
             .build();
 
-        let agg = aggregate_across(&[pv("a", a, false), pv("b", b, false), pv("c", c, false)]);
+        let agg = aggregate_across(&[pp("a", a, false), pp("b", b, false), pp("c", c, false)]);
         assert_eq!(agg.verdict.as_deref(), Some("malicious"));
         assert_eq!(agg.score, Some(80));
         assert_eq!(agg.classifications.get("malicious"), Some(&1));
@@ -366,10 +636,8 @@ mod tests {
             .ttp(Ttp::new("T1027", "Obfuscated Files"))
             .build();
 
-        let agg = aggregate_across(&[pv("a", a, false), pv("b", b, false)]);
-        // 3 unique IOCs: sha256/deadbeef, ipv4/1.2.3.4, domain/evil.tld
+        let agg = aggregate_across(&[pp("a", a, false), pp("b", b, false)]);
         assert_eq!(agg.indicators.len(), 3);
-        // 2 unique TTPs
         assert_eq!(agg.ttps.len(), 2);
         let ttp_ids: BTreeSet<_> = agg.ttps.iter().map(|t| t.id.as_str()).collect();
         assert!(ttp_ids.contains("T1055"));
@@ -379,10 +647,10 @@ mod tests {
     #[test]
     fn aggregate_handles_no_verdicts() {
         let a = ReportBuilder::new("a", "1").build();
-        let agg = aggregate_across(&[pv("a", a, true)]);
+        let agg = aggregate_across(&[pp("a", a, true)]);
         assert!(agg.verdict.is_none());
         assert!(agg.score.is_none());
-        assert_eq!(agg.report_count, 0); // synthesized doesn't count
+        assert_eq!(agg.report_count, 0);
         assert_eq!(agg.plugin_count, 1);
     }
 
@@ -413,17 +681,12 @@ mod tests {
                 created_on: OffsetDateTime::now_utc(),
             },
         ];
-        let v = synthesize("x", &artifacts);
-        // Envelope round-trips into a Report.
-        let r: Report = serde_json::from_value(v.clone()).unwrap();
+        let r = synthesize_report("x", &artifacts);
         assert_eq!(r.plugin.id, "x");
         assert_eq!(r.sections.len(), 2);
-        // JSON artifact → json block referencing the artifact name.
         assert!(matches!(r.sections[0].blocks[0], Block::Json { .. }));
-        // Bytes artifact → download block.
         assert!(matches!(r.sections[1].blocks[0], Block::Download { .. }));
-        // Artifact refs enumerated.
         assert_eq!(r.artifacts.len(), 2);
-        assert_eq!(v["schema_version"], json!(SCHEMA_VERSION));
+        assert_eq!(r.schema_version, SCHEMA_VERSION);
     }
 }

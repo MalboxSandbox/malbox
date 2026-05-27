@@ -16,7 +16,10 @@ mod error;
 mod images;
 mod machines;
 mod plugins;
+mod recipes;
+mod samples;
 mod tasks;
+mod transforms;
 
 pub use error::Error;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -90,9 +93,18 @@ fn api_router() -> Router<AppState> {
         .merge(tasks::get::router())
         .merge(tasks::report::router())
         .merge(tasks::results::router())
+        .merge(samples::router())
         .merge(images::router())
         .merge(machines::router())
         .merge(plugins::router())
+        .merge(recipes::create::router())
+        .merge(recipes::get::router())
+        .merge(recipes::update::router())
+        .merge(recipes::delete::router())
+        .merge(transforms::create::router())
+        .merge(transforms::get::router())
+        .merge(transforms::update::router())
+        .merge(transforms::delete::router())
 }
 
 async fn root() -> &'static str {
