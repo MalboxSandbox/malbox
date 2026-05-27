@@ -18,6 +18,10 @@ pub enum DatabaseError {
     ProvisionRun(#[from] ProvisionRunError),
     #[error("{0}")]
     TaskResult(#[from] TaskResultError),
+    #[error("{0}")]
+    Recipe(#[from] RecipeError),
+    #[error("{0}")]
+    CustomTransform(#[from] CustomTransformError),
 }
 
 #[derive(Error, Debug)]
@@ -182,6 +186,60 @@ pub enum TaskResultError {
     #[error("Failed to fetch results for task {task_id}: {source}")]
     FetchFailed {
         task_id: i32,
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum RecipeError {
+    #[error("Failed to insert recipe '{name}': {message}: {source}")]
+    InsertFailed {
+        name: String,
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch recipe: {source}")]
+    FetchFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to update recipe: {message}: {source}")]
+    UpdateFailed {
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to delete recipe: {source}")]
+    DeleteFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum CustomTransformError {
+    #[error("Failed to insert transform '{name}': {message}: {source}")]
+    InsertFailed {
+        name: String,
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch transform: {source}")]
+    FetchFailed {
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to update transform: {message}: {source}")]
+    UpdateFailed {
+        message: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to delete transform: {source}")]
+    DeleteFailed {
         #[source]
         source: sqlx::Error,
     },

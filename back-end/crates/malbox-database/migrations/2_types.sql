@@ -44,3 +44,14 @@ create type task_result_role as enum (
     'report',
     'artifact'
 );
+
+create type recipe_scope as enum (
+    'personal',
+    'shared'
+);
+
+create type transform_kind as enum (
+    'yaml',
+    'js',
+    'wasm'
+);

@@ -97,6 +97,45 @@ pub async fn insert_sample(pool: &PgPool, sample: Sample) -> Result<SampleEntity
     }
 }
 
+pub async fn fetch_sample_by_hash(
+    pool: &PgPool,
+    hash_type: &str,
+    hash_value: &str,
+) -> Result<Option<SampleEntity>> {
+    let column = match hash_type {
+        "md5" => "md5",
+        "sha1" => "sha1",
+        "sha256" => "sha256",
+        "sha512" => "sha512",
+        _ => {
+            return Err(SampleError::FetchFailed {
+                hash: hash_value.to_string(),
+                message: format!("Unsupported hash type: {}", hash_type),
+                source: sqlx::Error::Protocol(format!("unsupported hash type: {}", hash_type)),
+            }
+            .into());
+        }
+    };
+
+    let query = format!(
+        r#"SELECT id::bigint, file_size::bigint, file_type, md5, crc32, sha1, sha256, sha512, ssdeep, created_at, updated_at FROM "samples" WHERE {} = $1"#,
+        column
+    );
+
+    sqlx::query_as::<_, SampleEntity>(&query)
+        .bind(hash_value)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            SampleError::FetchFailed {
+                hash: hash_value.to_string(),
+                message: format!("Failed to fetch sample by {}", hash_type),
+                source: e,
+            }
+            .into()
+        })
+}
+
 pub async fn fetch_sample_by_id(pool: &PgPool, id: i64) -> Result<Option<SampleEntity>> {
     let id_i32 = id as i32;
     query_as!(
