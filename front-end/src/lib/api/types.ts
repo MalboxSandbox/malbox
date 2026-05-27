@@ -7,6 +7,7 @@ export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cance
 export type Platform = 'windows' | 'linux';
 export type Arch = 'x64' | 'x86';
 export type ResultFormat = 'json' | 'bytes';
+export type ResultRole = 'report' | 'artifact';
 export type PluginType = 'guest' | 'host';
 
 export interface Sample {
@@ -29,12 +30,23 @@ export interface Task {
 	priority: number;
 	owner: string | null;
 	machine_id: number | null;
+	plugins: string[];
 	tags: string[] | null;
 	created_on: string;
+	started_on: string | null;
 	completed_on: string | null;
-	/** File metadata when the task was submitted as a file upload. Null for
-	 * URL or hash submissions. */
 	sample?: Sample;
+}
+
+export interface PaginatedTasks {
+	items: Task[];
+	next_cursor: string | null;
+	has_more: boolean;
+}
+
+export interface TaskCounts {
+	total: number;
+	by_status: Record<string, number>;
 }
 
 export interface TaskResult {
@@ -43,8 +55,8 @@ export interface TaskResult {
 	plugin_name: string;
 	result_name: string;
 	format: ResultFormat;
+	role: ResultRole;
 	size_bytes: number;
-	file_path: string;
 	created_on: string;
 }
 
@@ -176,6 +188,17 @@ export interface CreateTaskFromFileRequest {
 	tags?: string;
 	owner?: string;
 	enforce_timeout?: boolean;
+	target_filename?: string;
+	plugins?: string;
+	snapshot_id?: string;
+}
+
+export interface RescanSampleRequest {
+	timeout?: number;
+	priority?: number;
+	platform?: string;
+	tags?: string;
+	owner?: string;
 	target_filename?: string;
 	plugins?: string;
 	snapshot_id?: string;
@@ -339,6 +362,7 @@ export interface ArtifactLink {
 
 export interface PluginReportView {
 	plugin_name: string;
+	failed?: boolean;
 	report: Report | null;
 	synthesized: boolean;
 	artifacts: ArtifactLink[];
@@ -354,8 +378,93 @@ export interface AggregateView {
 	report_count: number;
 }
 
+// Full report (sections stripped from plugin envelopes)
 export interface TaskReport {
 	task: Task;
 	aggregate: AggregateView;
 	plugins: PluginReportView[];
+}
+
+// Lightweight summary (no full indicator/ttp lists, just counts)
+export interface PluginSummary {
+	plugin_name: string;
+	has_report: boolean;
+	synthesized: boolean;
+	failed: boolean;
+	artifact_count: number;
+}
+
+export interface SummaryAggregateView {
+	verdict?: Classification;
+	score?: number;
+	classifications: Record<string, number>;
+	indicator_count: number;
+	ttp_count: number;
+	plugin_count: number;
+	report_count: number;
+}
+
+export interface TaskReportSummary {
+	task: Task;
+	aggregate: SummaryAggregateView;
+	plugins: PluginSummary[];
+}
+
+// Single plugin full report (with sections)
+export interface SinglePluginReport {
+	plugin_name: string;
+	report: Report | null;
+	synthesized: boolean;
+	failed: boolean;
+	artifacts: ArtifactLink[];
+}
+
+export interface IndicatorsResponse {
+	indicators: Indicator[];
+	total: number;
+}
+
+export interface TtpsResponse {
+	ttps: Ttp[];
+	total: number;
+}
+
+// Sample lookup
+export interface SampleLookup {
+	sample: Sample & { id: number };
+	task_ids: number[];
+}
+
+export type RecipeScope = 'personal' | 'shared';
+
+export interface RecipeStep {
+	transform_id: string;
+	params: Record<string, string | number | boolean>;
+}
+
+export interface Recipe {
+	id: string;
+	name: string;
+	description: string | null;
+	author: string;
+	scope: RecipeScope;
+	tags: string[];
+	steps: RecipeStep[];
+	created_on: string;
+	updated_at: string | null;
+}
+
+export type TransformKind = 'yaml' | 'js' | 'wasm';
+
+export interface CustomTransform {
+	id: string;
+	transform_id: string;
+	name: string;
+	category: string;
+	kind: TransformKind;
+	content: string;
+	enabled: boolean;
+	git_synced: boolean;
+	created_on: string;
+	updated_at: string | null;
 }
