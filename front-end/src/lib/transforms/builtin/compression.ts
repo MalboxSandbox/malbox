@@ -23,7 +23,8 @@ async function zlib(): Promise<ZlibModules> {
 		import('zlibjs/bin/rawinflate.min.js'),
 		import('zlibjs/bin/zlib.min.js')
 	]);
-	const unwrap = (m: Record<string, unknown>) => (m.Zlib ?? (m.default as Record<string, unknown>)?.Zlib) as Record<string, unknown>;
+	const unwrap = (m: Record<string, unknown>) =>
+		(m.Zlib ?? (m.default as Record<string, unknown>)?.Zlib) as Record<string, unknown>;
 	const g = unwrap(gzip);
 	const u = unwrap(gunzip);
 	const rd = unwrap(rawdeflate);
