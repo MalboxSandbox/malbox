@@ -2,12 +2,15 @@ import type { ContextPayload } from '$lib/components/context-menu/types';
 import { contextMenuStore } from '$lib/stores/contextMenu.svelte';
 import { resolveMenuItems } from '$lib/context-menu/registry';
 
-type ContextMenuParam = ContextPayload & { selectionOnly?: boolean };
+type ContextMenuParam = (ContextPayload & { selectionOnly?: boolean }) | undefined;
 
 export function contextmenu(node: HTMLElement, param: ContextMenuParam) {
 	let currentParam = param;
 
 	function handleContextMenu(e: MouseEvent) {
+		// No payload means this element opts out: let the native menu through.
+		if (!currentParam) return;
+
 		const selection = window.getSelection()?.toString().trim();
 
 		if (currentParam.selectionOnly && !selection) return;
