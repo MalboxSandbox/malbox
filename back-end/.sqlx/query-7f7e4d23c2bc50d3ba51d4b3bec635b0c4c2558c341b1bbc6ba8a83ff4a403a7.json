@@ -1,0 +1,129 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT ON (pr.plugin_name)\n            pr.id, pr.task_id, pr.plugin_name, pr.display_name, pr.plugin_version,\n            pr.classification AS \"classification: DbClassification\",\n            pr.score,\n            pr.confidence AS \"confidence: DbConfidence\",\n            pr.labels, pr.indicators, pr.ttps, pr.summary,\n            pr.section_count, pr.artifact_count, pr.created_on\n        FROM plugin_reports pr\n        JOIN tasks t ON t.id = pr.task_id\n        WHERE t.sample_id = $1\n          AND t.status IN ('completed', 'failed', 'canceled')\n        ORDER BY pr.plugin_name, t.created_on DESC, pr.task_id DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "plugin_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "plugin_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "classification: DbClassification",
+        "type_info": {
+          "Custom": {
+            "name": "classification",
+            "kind": {
+              "Enum": [
+                "clean",
+                "unknown",
+                "suspicious",
+                "malicious"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "confidence: DbConfidence",
+        "type_info": {
+          "Custom": {
+            "name": "confidence",
+            "kind": {
+              "Enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "indicators",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "ttps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "section_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "artifact_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7f7e4d23c2bc50d3ba51d4b3bec635b0c4c2558c341b1bbc6ba8a83ff4a403a7"
+}

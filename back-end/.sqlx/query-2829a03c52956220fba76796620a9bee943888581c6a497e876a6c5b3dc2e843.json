@@ -1,0 +1,129 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, task_id, plugin_name, display_name, plugin_version,\n            classification AS \"classification: DbClassification\",\n            score,\n            confidence AS \"confidence: DbConfidence\",\n            labels, indicators, ttps, summary,\n            section_count, artifact_count, created_on\n        FROM plugin_reports\n        WHERE task_id = $1\n        ORDER BY plugin_name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "plugin_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "plugin_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "classification: DbClassification",
+        "type_info": {
+          "Custom": {
+            "name": "classification",
+            "kind": {
+              "Enum": [
+                "clean",
+                "unknown",
+                "suspicious",
+                "malicious"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "confidence: DbConfidence",
+        "type_info": {
+          "Custom": {
+            "name": "confidence",
+            "kind": {
+              "Enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "labels",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "indicators",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "ttps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "section_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "artifact_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_on",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2829a03c52956220fba76796620a9bee943888581c6a497e876a6c5b3dc2e843"
+}

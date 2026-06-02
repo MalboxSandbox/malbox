@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(DISTINCT pr.task_id) AS \"count!\"\n        FROM plugin_reports pr\n        JOIN tasks t ON t.id = pr.task_id\n        WHERE t.sample_id = $1\n          AND t.status IN ('completed', 'failed', 'canceled')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "04d3e79325065b1e074a8186a294f4ab58efa89e916ef8d7c44c78deed6c555b"
+}

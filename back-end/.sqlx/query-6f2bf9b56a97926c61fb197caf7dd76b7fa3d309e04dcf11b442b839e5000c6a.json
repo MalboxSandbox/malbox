@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM \"samples\" WHERE id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "file_size",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "file_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "md5",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "crc32",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "sha1",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "sha256",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "sha512",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "ssdeep",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6f2bf9b56a97926c61fb197caf7dd76b7fa3d309e04dcf11b442b839e5000c6a"
+}

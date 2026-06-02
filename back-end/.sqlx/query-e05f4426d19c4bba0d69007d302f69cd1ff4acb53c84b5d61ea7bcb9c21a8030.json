@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            sv.sample_id, sv.classification AS \"classification: DbClassification\",\n            sv.score, sv.indicator_count, sv.ttp_count, sv.plugin_names,\n            sv.task_count, sv.last_task_id, sv.updated_on\n        FROM sample_verdicts sv\n        JOIN samples s ON s.id = sv.sample_id\n        WHERE s.sha256 = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sample_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "classification: DbClassification",
+        "type_info": {
+          "Custom": {
+            "name": "classification",
+            "kind": {
+              "Enum": [
+                "clean",
+                "unknown",
+                "suspicious",
+                "malicious"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "indicator_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "ttp_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "plugin_names",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "task_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_task_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_on",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "e05f4426d19c4bba0d69007d302f69cd1ff4acb53c84b5d61ea7bcb9c21a8030"
+}

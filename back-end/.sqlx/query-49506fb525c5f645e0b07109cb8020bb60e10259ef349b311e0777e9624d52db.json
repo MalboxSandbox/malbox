@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO sample_verdicts (\n            sample_id, classification, score,\n            indicator_count, ttp_count, plugin_names,\n            task_count, last_task_id, updated_on\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())\n        ON CONFLICT (sample_id) DO UPDATE SET\n            classification  = EXCLUDED.classification,\n            score           = EXCLUDED.score,\n            indicator_count = EXCLUDED.indicator_count,\n            ttp_count       = EXCLUDED.ttp_count,\n            plugin_names    = EXCLUDED.plugin_names,\n            task_count      = EXCLUDED.task_count,\n            last_task_id    = EXCLUDED.last_task_id,\n            updated_on      = EXCLUDED.updated_on\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        {
+          "Custom": {
+            "name": "classification",
+            "kind": {
+              "Enum": [
+                "clean",
+                "unknown",
+                "suspicious",
+                "malicious"
+              ]
+            }
+          }
+        },
+        "Int2",
+        "Int4",
+        "Int4",
+        "TextArray",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "49506fb525c5f645e0b07109cb8020bb60e10259ef349b311e0777e9624d52db"
+}
