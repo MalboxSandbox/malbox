@@ -84,7 +84,7 @@
 
 				<div>
 					<a
-						href="/submissions/{task.id}"
+						href="/samples/{task.sample?.sha256 ?? ''}?run={task.id}"
 						class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-bg-card)] px-4 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-tertiary)]"
 					>
 						{isTerminalStatus(task.status) ? 'See result' : 'View'}

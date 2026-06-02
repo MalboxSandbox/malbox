@@ -3,16 +3,11 @@
 	import { cubicOut } from 'svelte/easing';
 	import { invalidate, goto } from '$app/navigation';
 	import { toasts } from '$lib/stores/toasts.svelte';
-	import {
-		createTaskFromFile,
-		createTaskFromUrl,
-		lookupSample,
-		rescanSample
-	} from '$lib/api/tasks';
+	import { createTaskFromFile, createTaskFromUrl, lookupSample } from '$lib/api/tasks';
+	import { looksLikeHash, resolveHashToSample } from '$lib/api/submission';
 	import { isApiError } from '$lib/api/errors';
-	import { formatBytes } from '$lib/api/format';
 	import SubmissionConfigModal from '$lib/components/SubmissionConfigModal.svelte';
-	import type { Platform, SampleLookup } from '$lib/api/types';
+	import type { Platform } from '$lib/api/types';
 
 	let activeTab = $state<'file' | 'url'>('file');
 	let urlInput = $state('');
@@ -21,7 +16,6 @@
 	let submitting = $state(false);
 	let dragOver = $state(false);
 
-	let hashLookup = $state<SampleLookup | null>(null);
 	let lookingUp = $state(false);
 	let lookupNotFound = $state(false);
 
@@ -82,74 +76,91 @@
 		};
 	}
 
+	async function computeSha256(file: File): Promise<string> {
+		const buffer = await file.arrayBuffer();
+		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+		return Array.from(new Uint8Array(hashBuffer))
+			.map((b) => b.toString(16).padStart(2, '0'))
+			.join('');
+	}
+
 	async function submitFile() {
 		if (!selectedFile || submitting) return;
 		submitting = true;
+
+		let redirectTo: string | null = null;
 		try {
-			const { task_id } = await createTaskFromFile(fetch, {
-				file: selectedFile,
-				...(submissionConfig.timeout !== null && { timeout: submissionConfig.timeout }),
-				...(submissionConfig.vmMode !== 'no-vm' && {
-					platform: submissionConfig.vmMode as Platform
-				}),
-				...(submissionConfig.tags.length > 0 && { tags: submissionConfig.tags.join(',') }),
-				...(submissionConfig.plugins.length > 0 && {
-					plugins: submissionConfig.plugins.join(',')
-				}),
-				...(submissionConfig.snapshotId !== null && {
-					snapshot_id: submissionConfig.snapshotId
-				}),
-				priority: submissionConfig.priority
-			});
-			toasts.push({ kind: 'success', message: `Task #${task_id} submitted.` });
-			await invalidate('malbox:tasks');
-			selectedFile = null;
-			if (fileInput) fileInput.value = '';
-			submissionConfig = defaultConfig();
-			goto(`/submissions/${task_id}`);
+			const fileHash = await computeSha256(selectedFile);
+			let existing;
+			try {
+				existing = await lookupSample(fetch, 'sha256', fileHash);
+			} catch {
+				existing = null;
+			}
+
+			if (existing && existing.task_ids.length > 0) {
+				selectedFile = null;
+				if (fileInput) fileInput.value = '';
+				submitting = false;
+				toasts.push({ kind: 'info', message: 'Sample already analyzed.' });
+				window.location.href = `/samples/${existing.sample.sha256}`;
+				return;
+			} else {
+				const { task_id, sha256 } = await createTaskFromFile(fetch, {
+					file: selectedFile,
+					...(submissionConfig.timeout !== null && { timeout: submissionConfig.timeout }),
+					...(submissionConfig.vmMode !== 'no-vm' && {
+						platform: submissionConfig.vmMode as Platform
+					}),
+					...(submissionConfig.tags.length > 0 && {
+						tags: submissionConfig.tags.join(',')
+					}),
+					...(submissionConfig.plugins.length > 0 && {
+						plugins: submissionConfig.plugins.join(',')
+					}),
+					...(submissionConfig.snapshotId !== null && {
+						snapshot_id: submissionConfig.snapshotId
+					}),
+					priority: submissionConfig.priority
+				});
+				toasts.push({ kind: 'success', message: `Task #${task_id} submitted.` });
+				await invalidate('malbox:tasks');
+				submissionConfig = defaultConfig();
+				redirectTo = `/samples/${sha256}?run=${task_id}`;
+			}
 		} catch (err) {
 			const msg = isApiError(err) ? err.message : 'Upload failed.';
 			toasts.push({ kind: 'error', message: msg });
 		} finally {
+			selectedFile = null;
+			if (fileInput) fileInput.value = '';
 			submitting = false;
 		}
-	}
 
-	function looksLikeHash(s: string): boolean {
-		return /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$|^[a-fA-F0-9]{128}$/.test(
-			s.trim()
-		);
-	}
-
-	function hashType(s: string): 'md5' | 'sha1' | 'sha256' | 'sha512' {
-		const len = s.trim().length;
-		if (len === 32) return 'md5';
-		if (len === 40) return 'sha1';
-		if (len === 128) return 'sha512';
-		return 'sha256';
+		if (redirectTo) goto(redirectTo);
 	}
 
 	function clearLookup() {
-		hashLookup = null;
 		lookupNotFound = false;
 	}
 
 	async function submitUrlOrHash() {
 		const value = urlInput.trim();
-		if (!value || submitting) return;
+		if (!value || submitting || lookingUp) return;
 
+		// A hash is a lookup, not a submission: resolve it and jump straight to the
+		// sample page if we have it on file.
 		if (looksLikeHash(value)) {
 			lookingUp = true;
-			clearLookup();
+			lookupNotFound = false;
 			try {
-				const result = await lookupSample(fetch, hashType(value), value);
-				hashLookup = result;
-			} catch (err) {
-				if (isApiError(err) && err.status === 404) {
+				const outcome = await resolveHashToSample(fetch, value);
+				if (outcome.status === 'found') {
+					goto(outcome.href);
+				} else if (outcome.status === 'not_found') {
 					lookupNotFound = true;
 				} else {
-					const msg = isApiError(err) ? err.message : 'Lookup failed.';
-					toasts.push({ kind: 'error', message: msg });
+					toasts.push({ kind: 'error', message: outcome.message });
 				}
 			} finally {
 				lookingUp = false;
@@ -172,31 +183,6 @@
 					? 'URL submission is not yet implemented on the back-end.'
 					: err.message
 				: 'Submission failed.';
-			toasts.push({ kind: 'error', message: msg });
-		} finally {
-			submitting = false;
-		}
-	}
-
-	async function reanalyze() {
-		if (!hashLookup || submitting) return;
-		submitting = true;
-		try {
-			const optionalFields = buildOptionalFields();
-			const { task_id } = await rescanSample(fetch, hashLookup.sample.id, {
-				...optionalFields,
-				...(submissionConfig.vmMode !== 'no-vm' && {
-					platform: submissionConfig.vmMode
-				})
-			});
-			toasts.push({ kind: 'success', message: `Re-analysis task #${task_id} submitted.` });
-			await invalidate('malbox:tasks');
-			urlInput = '';
-			clearLookup();
-			submissionConfig = defaultConfig();
-			goto(`/submissions/${task_id}`);
-		} catch (err) {
-			const msg = isApiError(err) ? err.message : 'Re-analysis failed.';
 			toasts.push({ kind: 'error', message: msg });
 		} finally {
 			submitting = false;
@@ -394,101 +380,6 @@
 								{/if}
 							</button>
 						</div>
-
-						<!-- Hash lookup result -->
-						{#if hashLookup}
-							<div
-								class="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-5"
-								transition:fly={{ y: 10, duration: 200, easing: cubicOut }}
-							>
-								<div class="mb-3 flex items-center justify-between">
-									<h3 class="text-sm font-medium text-[var(--color-accent)]">
-										Sample found in database
-									</h3>
-									<button
-										type="button"
-										onclick={clearLookup}
-										class="text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-									>
-										Dismiss
-									</button>
-								</div>
-
-								<dl class="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-xs">
-									<dt class="text-[var(--color-text-secondary)]">Type</dt>
-									<dd class="text-[var(--color-text-primary)]">
-										{hashLookup.sample.file_type}
-									</dd>
-									<dt class="text-[var(--color-text-secondary)]">Size</dt>
-									<dd class="text-[var(--color-text-primary)]">
-										{formatBytes(hashLookup.sample.file_size)}
-									</dd>
-									<dt class="text-[var(--color-text-secondary)]">SHA-256</dt>
-									<dd class="truncate font-mono text-[var(--color-text-primary)]">
-										{hashLookup.sample.sha256}
-									</dd>
-								</dl>
-
-								{#if hashLookup.task_ids.length > 0}
-									<div class="mb-4">
-										<p class="mb-2 text-xs text-[var(--color-text-secondary)]">
-											Previously analyzed in {hashLookup.task_ids.length} task{hashLookup.task_ids
-												.length === 1
-												? ''
-												: 's'}:
-										</p>
-										<div class="flex flex-wrap gap-2">
-											{#each hashLookup.task_ids.slice(0, 10) as taskId (taskId)}
-												<a
-													href="/submissions/{taskId}"
-													class="rounded-lg bg-[var(--color-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/10"
-												>
-													Task #{taskId}
-												</a>
-											{/each}
-											{#if hashLookup.task_ids.length > 10}
-												<span class="px-2 py-1.5 text-xs text-[var(--color-text-secondary)]">
-													+{hashLookup.task_ids.length - 10} more
-												</span>
-											{/if}
-										</div>
-									</div>
-								{/if}
-
-								<button
-									class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-									disabled={submitting}
-									onclick={reanalyze}
-								>
-									{#if submitting}
-										<svg
-											class="h-4 w-4 animate-spin"
-											viewBox="0 0 24 24"
-											fill="none"
-											aria-hidden="true"
-										>
-											<circle
-												cx="12"
-												cy="12"
-												r="10"
-												stroke="currentColor"
-												stroke-width="4"
-												opacity="0.25"
-											/>
-											<path
-												d="M4 12a8 8 0 018-8"
-												stroke="currentColor"
-												stroke-width="4"
-												stroke-linecap="round"
-											/>
-										</svg>
-										Submitting…
-									{:else}
-										Re-analyze this sample
-									{/if}
-								</button>
-							</div>
-						{/if}
 
 						{#if lookupNotFound}
 							<div

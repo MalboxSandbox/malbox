@@ -20,10 +20,13 @@
 	interface Props {
 		config: SubmissionConfig;
 		onApply: (config: SubmissionConfig) => void;
+		triggerLabel?: string;
+		triggerClass?: string;
+		triggerIcon?: import('svelte').Snippet;
 	}
 
 	// eslint-disable-next-line svelte/no-unused-props -- platform is output-only, derived from vmMode
-	let { config, onApply }: Props = $props();
+	let { config, onApply, triggerLabel, triggerClass, triggerIcon }: Props = $props();
 
 	let draftTimeout = $state<number | null>(null);
 	let draftTags = $state<string[]>([]);
@@ -227,11 +230,19 @@
 <button
 	use:trigger
 	type="button"
-	class="relative inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-2.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]"
+	class={triggerClass ??
+		'relative inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-2.5 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-card)] hover:text-[var(--color-text-primary)]'}
 	title="Submission options"
 >
-	<Icon path={icons.settings} class="size-4" />
-	{#if hasActiveConfig}
+	{#if triggerIcon}
+		{@render triggerIcon()}
+	{:else}
+		<Icon path={icons.settings} class="size-4" />
+	{/if}
+	{#if triggerLabel}
+		{triggerLabel}
+	{/if}
+	{#if !triggerLabel && hasActiveConfig}
 		<span class="absolute -top-1 -right-1 size-2.5 rounded-full bg-[var(--color-accent)]"></span>
 	{/if}
 </button>
