@@ -5,8 +5,9 @@
 	interface Props {
 		view: PluginReportView;
 		taskId: number;
+		sha256?: string;
 	}
-	let { view, taskId }: Props = $props();
+	let { view, taskId, sha256 }: Props = $props();
 
 	const report = $derived(view.report);
 	const displayName = $derived(
@@ -33,7 +34,9 @@
 	</div>
 {:else}
 	<a
-		href={`/submissions/${taskId}/p/${encodeURIComponent(view.plugin_name)}`}
+		href={sha256
+			? `/samples/${sha256}/runs/${taskId}/p/${encodeURIComponent(view.plugin_name)}`
+			: `/submissions/${taskId}/p/${encodeURIComponent(view.plugin_name)}`}
 		class="group flex flex-col gap-3 rounded-2xl bg-[var(--color-bg-secondary)] p-5 transition-colors hover:bg-[var(--color-bg-tertiary)]"
 	>
 		<div class="flex items-start justify-between gap-3">

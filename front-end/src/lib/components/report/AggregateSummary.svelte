@@ -296,7 +296,7 @@
 				{#if successfulPlugins.length > 0}
 					<div class="grid gap-4 md:grid-cols-2">
 						{#each successfulPlugins as v (v.plugin_name)}
-							<PluginTile view={v} taskId={task.id} />
+							<PluginTile view={v} taskId={task.id} sha256={task.sample?.sha256} />
 						{/each}
 					</div>
 				{/if}

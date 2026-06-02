@@ -10,8 +10,9 @@
 	interface Props {
 		view: PluginReportView | SinglePluginReport;
 		sample?: Sample | null;
+		compact?: boolean;
 	}
-	let { view, sample = null }: Props = $props();
+	let { view, sample = null, compact = false }: Props = $props();
 
 	const report = $derived(view.report);
 	const schemaWarning = $derived(report && report.schema_version > 1);
@@ -94,27 +95,42 @@
 	const pill =
 		'rounded bg-[var(--color-bg-tertiary)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]';
 
+	const cardRound = $derived(compact ? 'rounded-xl' : 'rounded-2xl');
+	const padHead = $derived(compact ? 'p-5' : 'p-8');
+	const padSection = $derived(compact ? 'px-5 py-4' : 'px-8 py-6');
+	const outerGap = $derived(compact ? 'space-y-3' : 'space-y-6');
+
 	let previewArtifact = $state<(typeof view.artifacts)[number] | null>(null);
 </script>
 
-<div class="space-y-6">
-	<div class="rounded-2xl bg-[var(--color-bg-secondary)]">
+<div class={outerGap}>
+	<div class="{cardRound} bg-[var(--color-bg-secondary)]">
 		<!-- Header -->
-		<div class="p-8">
+		<div class={padHead}>
 			<div class="flex items-start justify-between gap-4">
 				<div class="min-w-0">
-					<div class="flex items-baseline gap-2.5">
-						<h1 class="text-2xl font-semibold text-[var(--color-text-primary)]">
-							{displayName}
-						</h1>
+					<div class="flex items-baseline gap-2">
+						{#if compact}
+							<h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+								{displayName}
+							</h3>
+						{:else}
+							<h1 class="text-2xl font-semibold text-[var(--color-text-primary)]">
+								{displayName}
+							</h1>
+						{/if}
 						{#if report?.plugin.version}
-							<span class="text-sm text-[var(--color-text-secondary)]">
+							<span
+								class="{compact ? 'text-[10px]' : 'text-sm'} text-[var(--color-text-secondary)]"
+							>
 								v{report.plugin.version}
 							</span>
 						{/if}
 					</div>
 					{#if report?.summary}
-						<p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+						<p
+							class="{compact ? 'mt-1 text-xs' : 'mt-2 text-sm'} text-[var(--color-text-secondary)]"
+						>
 							{report.summary}
 						</p>
 					{/if}
@@ -128,7 +144,7 @@
 			</div>
 
 			{#if hasTags}
-				<div class="mt-4 flex flex-wrap items-center gap-2">
+				<div class="{compact ? 'mt-3' : 'mt-4'} flex flex-wrap items-center gap-2">
 					{#if view.synthesized}
 						<span class={pill}>synthesized</span>
 					{/if}
@@ -157,7 +173,7 @@
 
 		<!-- Detection tables from overview -->
 		{#if overviewTableBlocks.length > 0}
-			<div class="space-y-4 border-t border-[var(--color-border)]/20 px-8 py-6">
+			<div class="space-y-4 border-t border-[var(--color-border)]/20 {padSection}">
 				{#each overviewTableBlocks as block, i (i)}
 					<BlockRenderer {block} artifacts={view.artifacts} />
 				{/each}
@@ -166,7 +182,7 @@
 
 		<!-- Other overview blocks -->
 		{#if overviewOtherBlocks.length > 0}
-			<div class="space-y-4 border-t border-[var(--color-border)]/20 px-8 py-6">
+			<div class="space-y-4 border-t border-[var(--color-border)]/20 {padSection}">
 				{#each overviewOtherBlocks as block, i (i)}
 					<BlockRenderer {block} artifacts={view.artifacts} />
 				{/each}
@@ -175,7 +191,7 @@
 
 		<!-- Artifacts -->
 		{#if view.artifacts.length > 0}
-			<div class="border-t border-[var(--color-border)]/20 px-8 py-6">
+			<div class="border-t border-[var(--color-border)]/20 {padSection}">
 				<div class="space-y-0.5">
 					{#each view.artifacts as a (a.result_name)}
 						{@const canPreview = previewKind(a.result_name, a.format) !== 'none'}
@@ -254,18 +270,48 @@
 				</div>
 			</div>
 		{/if}
+
+		<!-- Compact: remaining sections render inside the same card -->
+		{#if compact}
+			{#if !report}
+				<div
+					class="border-t border-[var(--color-border)]/20 {padSection} text-xs text-[var(--color-text-secondary)]"
+				>
+					This plugin did not produce a readable report.
+				</div>
+			{:else}
+				{#each remainingSections as s (s.id)}
+					<div
+						id="section-{s.id}"
+						class="space-y-3 border-t border-[var(--color-border)]/20 {padSection}"
+					>
+						<h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
+							{s.title}
+						</h3>
+						<div class="space-y-3">
+							{#each s.blocks ?? [] as block, i (i)}
+								<BlockRenderer {block} artifacts={view.artifacts} />
+							{/each}
+						</div>
+					</div>
+				{/each}
+			{/if}
+		{/if}
 	</div>
 
-	{#if !report}
-		<div
-			class="rounded-2xl bg-[var(--color-bg-secondary)] p-8 text-sm text-[var(--color-text-secondary)]"
-		>
-			This plugin did not produce a readable report.
-		</div>
-	{:else if remainingSections.length > 0}
-		{#each remainingSections as s (s.id)}
-			<Section section={s} artifacts={view.artifacts} />
-		{/each}
+	<!-- Standalone: remaining sections as separate cards -->
+	{#if !compact}
+		{#if !report}
+			<div
+				class="rounded-2xl bg-[var(--color-bg-secondary)] p-8 text-sm text-[var(--color-text-secondary)]"
+			>
+				This plugin did not produce a readable report.
+			</div>
+		{:else if remainingSections.length > 0}
+			{#each remainingSections as s (s.id)}
+				<Section section={s} artifacts={view.artifacts} />
+			{/each}
+		{/if}
 	{/if}
 </div>
 

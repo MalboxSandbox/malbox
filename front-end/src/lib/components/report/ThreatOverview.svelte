@@ -2,6 +2,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { slide } from 'svelte/transition';
 	import CopyButton from '$lib/components/ui/CopyButton.svelte';
+	import { contextmenu } from '$lib/actions/contextmenu';
 	import type { Indicator, Ttp } from '$lib/api/types';
 
 	interface Props {
@@ -166,7 +167,10 @@
 													? 'border-t border-[var(--color-border)]/20'
 													: ''}"
 											>
-												<span class="min-w-0 break-all text-sm text-[var(--color-text-primary)]">
+												<span
+													class="min-w-0 break-all text-sm text-[var(--color-text-primary)]"
+													use:contextmenu={{ type: 'indicator', value: ind.value, subtype: kind }}
+												>
 													{ind.value}
 												</span>
 												<CopyButton value={ind.value} size="sm" />
