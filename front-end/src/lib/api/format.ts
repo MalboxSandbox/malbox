@@ -19,8 +19,14 @@ export function taskStatusLabel(status: TaskStatus): string {
 	switch (status) {
 		case 'pending':
 			return 'Pending';
+		case 'initializing':
+			return 'Initializing';
+		case 'preparing_resources':
+			return 'Preparing';
 		case 'running':
 			return 'Running';
+		case 'stopping':
+			return 'Stopping';
 		case 'completed':
 			return 'Finished';
 		case 'failed':

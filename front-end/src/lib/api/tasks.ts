@@ -5,10 +5,7 @@ import type {
 	TaskCounts,
 	TaskResult,
 	TaskReport,
-	TaskReportSummary,
 	SinglePluginReport,
-	IndicatorsResponse,
-	TtpsResponse,
 	SampleLookup,
 	CreateTaskFromFileRequest,
 	CreateTaskFromUrlRequest,
@@ -64,14 +61,6 @@ export async function getTaskReport(fetchFn: FetchLike, id: number): Promise<Tas
 	return requestJson<TaskReport>(fetchFn, `/v1/tasks/${id}/report`);
 }
 
-// Lightweight summary (no sections, no full indicator lists)
-export async function getTaskReportSummary(
-	fetchFn: FetchLike,
-	id: number
-): Promise<TaskReportSummary> {
-	return requestJson<TaskReportSummary>(fetchFn, `/v1/tasks/${id}/report/summary`);
-}
-
 // Full report for a single plugin (with sections)
 export async function getPluginReport(
 	fetchFn: FetchLike,
@@ -82,19 +71,6 @@ export async function getPluginReport(
 		fetchFn,
 		`/v1/tasks/${taskId}/report/plugins/${encodeURIComponent(pluginName)}`
 	);
-}
-
-// Aggregated indicators across all plugins
-export async function getReportIndicators(
-	fetchFn: FetchLike,
-	taskId: number
-): Promise<IndicatorsResponse> {
-	return requestJson<IndicatorsResponse>(fetchFn, `/v1/tasks/${taskId}/report/indicators`);
-}
-
-// Aggregated TTPs across all plugins
-export async function getReportTtps(fetchFn: FetchLike, taskId: number): Promise<TtpsResponse> {
-	return requestJson<TtpsResponse>(fetchFn, `/v1/tasks/${taskId}/report/ttps`);
 }
 
 /** Returns the raw Response so callers can choose JSON, blob, or download URL. */
@@ -120,14 +96,14 @@ export async function lookupSample(
 ): Promise<SampleLookup> {
 	return requestJson<SampleLookup>(
 		fetchFn,
-		`/v1/samples/lookup?${hashType}=${encodeURIComponent(hashValue)}`
+		`/v1/samples?${hashType}=${encodeURIComponent(hashValue)}`
 	);
 }
 
 export async function createTaskFromFile(
 	fetchFn: FetchLike,
 	req: CreateTaskFromFileRequest
-): Promise<{ task_id: number }> {
+): Promise<{ task_id: number; sha256: string }> {
 	const form = new FormData();
 	form.append('file', req.file, req.file.name);
 	if (req.package !== undefined) form.append('package', req.package);
@@ -142,20 +118,23 @@ export async function createTaskFromFile(
 	if (req.plugins !== undefined) form.append('plugins', req.plugins);
 	if (req.snapshot_id !== undefined) form.append('snapshot_id', req.snapshot_id);
 
-	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/file', {
-		method: 'POST',
-		body: form
-	});
+	const res = await requestJson<{ task_id: number; sample: { sha256: string } }>(
+		fetchFn,
+		'/v1/tasks',
+		{ method: 'POST', body: form }
+	);
+	return { task_id: res.task_id, sha256: res.sample.sha256 };
 }
 
 export async function createTaskFromUrl(
 	fetchFn: FetchLike,
 	req: CreateTaskFromUrlRequest
 ): Promise<{ task_id: number }> {
-	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/url', {
+	const { url, ...rest } = req;
+	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(req)
+		body: JSON.stringify({ source: { url }, ...rest })
 	});
 }
 
@@ -163,10 +142,11 @@ export async function createTaskFromHash(
 	fetchFn: FetchLike,
 	req: CreateTaskFromHashRequest
 ): Promise<{ task_id: number }> {
-	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks/create/hash', {
+	const { hash, ...rest } = req;
+	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(req)
+		body: JSON.stringify({ source: { hash }, ...rest })
 	});
 }
 
@@ -174,10 +154,15 @@ export async function rescanSample(
 	fetchFn: FetchLike,
 	sampleId: number,
 	req: RescanSampleRequest = {}
-): Promise<{ task_id: number }> {
-	return requestJson<{ task_id: number }>(fetchFn, `/v1/tasks/create/sample/${sampleId}`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(req)
-	});
+): Promise<{ task_id: number; sha256: string }> {
+	const res = await requestJson<{ task_id: number; sample: { sha256: string } }>(
+		fetchFn,
+		'/v1/tasks',
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ source: { sample_id: sampleId }, ...req })
+		}
+	);
+	return { task_id: res.task_id, sha256: res.sample.sha256 };
 }

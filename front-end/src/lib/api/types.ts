@@ -3,7 +3,15 @@
 // `unknown`-like records here and will be tightened against live responses
 // in the relevant route tasks (machines list, machine detail, images).
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
+export type TaskStatus =
+	| 'pending'
+	| 'initializing'
+	| 'preparing_resources'
+	| 'running'
+	| 'stopping'
+	| 'completed'
+	| 'failed'
+	| 'canceled';
 export type Platform = 'windows' | 'linux';
 export type Arch = 'x64' | 'x86';
 export type ResultFormat = 'json' | 'bytes';
@@ -366,6 +374,7 @@ export interface PluginReportView {
 	report: Report | null;
 	synthesized: boolean;
 	artifacts: ArtifactLink[];
+	source_task_id?: number;
 }
 
 export interface AggregateView {
@@ -385,34 +394,10 @@ export interface TaskReport {
 	plugins: PluginReportView[];
 }
 
-// Lightweight summary (no full indicator/ttp lists, just counts)
-export interface PluginSummary {
-	plugin_name: string;
-	has_report: boolean;
-	synthesized: boolean;
-	failed: boolean;
-	artifact_count: number;
-}
-
-export interface SummaryAggregateView {
-	verdict?: Classification;
-	score?: number;
-	classifications: Record<string, number>;
-	indicator_count: number;
-	ttp_count: number;
-	plugin_count: number;
-	report_count: number;
-}
-
-export interface TaskReportSummary {
-	task: Task;
-	aggregate: SummaryAggregateView;
-	plugins: PluginSummary[];
-}
-
 // Single plugin full report (with sections)
 export interface SinglePluginReport {
 	plugin_name: string;
+	task_id: number;
 	report: Report | null;
 	synthesized: boolean;
 	failed: boolean;
@@ -433,6 +418,54 @@ export interface TtpsResponse {
 export interface SampleLookup {
 	sample: Sample & { id: number };
 	task_ids: number[];
+}
+
+// --- Sample-centric types (cross-task aggregation)
+
+export interface TaskSummary {
+	id: number;
+	status: TaskStatus;
+	platform: string;
+	plugins: string[];
+	timeout: number;
+	owner: string | null;
+	tags: string[] | null;
+	created_on: string;
+	started_on: string | null;
+	completed_on: string | null;
+}
+
+export interface SampleInfo {
+	id: number;
+	file_size: number;
+	file_type: string;
+	md5: string;
+	crc32: string;
+	sha1: string;
+	sha256: string;
+	sha512: string;
+	ssdeep: string;
+}
+
+export interface SampleAggregate {
+	worst_verdict: string | null;
+	worst_score: number | null;
+	indicator_count: number;
+	ttp_count: number;
+	plugin_names: string[];
+	task_count: number;
+}
+
+export interface SampleOverviewResponse {
+	sample: SampleInfo;
+	tasks: TaskSummary[];
+	aggregate: SampleAggregate;
+}
+
+export interface SampleReportResponse {
+	sample: SampleInfo;
+	aggregate: AggregateView;
+	plugins: PluginReportView[];
 }
 
 export type RecipeScope = 'personal' | 'shared';
