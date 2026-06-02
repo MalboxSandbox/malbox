@@ -6,15 +6,6 @@
 	import { sidebar } from '$lib/stores/sidebar.svelte';
 	import { reportStore } from '$lib/stores/report.svelte';
 	import { icons, type IconName } from '$lib/icons';
-	import type { Section } from '$lib/api/types';
-
-	function isArtifactSection(s: Section, artifactNames: Set<string>): boolean {
-		if (s.blocks && s.blocks.length === 1) {
-			const t = s.blocks[0].type;
-			if (t === 'download' || t === 'json') return true;
-		}
-		return artifactNames.has(s.title);
-	}
 
 	const navItems: { href: string; icon: IconName; label: string }[] = [
 		{ href: '/dashboard', icon: 'home', label: 'Home' },
@@ -24,21 +15,153 @@
 		{ href: '/workbench', icon: 'workbench', label: 'Workbench' }
 	];
 
+	const reportSections: { id: string; label: string; icon: IconName }[] = [
+		{ id: 'overview', label: 'Overview', icon: 'summary' },
+		{ id: 'verdicts', label: 'Verdicts', icon: 'chart' }
+	];
+
 	const isActive = (href: string) => $page.url.pathname === href;
 
-	const report = $derived(reportStore.current);
-	const successfulPlugins = $derived(report?.plugins.filter((p) => !p.failed) ?? []);
-	const failedPlugins = $derived(report?.plugins.filter((p) => p.failed) ?? []);
-	const failedNames = $derived(
-		failedPlugins.map((p) => p.report?.plugin.display_name ?? p.report?.plugin.id ?? p.plugin_name)
-	);
-	let failedExpanded = $state(false);
-	const summaryHref = $derived(report ? `/submissions/${report.task.id}` : null);
-	const activePlugin = $derived.by(() => {
-		const m = $page.url.pathname.match(/^\/submissions\/\d+\/p\/([^/]+)/);
-		return m ? decodeURIComponent(m[1]) : null;
+	const samplePage = $derived(reportStore.samplePage);
+	const activePlugins = $derived(reportStore.activePlugins);
+
+	const successfulPlugins = $derived(activePlugins.filter((p) => !p.failed));
+
+	const dynamicSections = $derived.by(() => {
+		const sections = [...reportSections];
+		for (const p of successfulPlugins) {
+			if (p.report?.sections && p.report.sections.length > 0) {
+				const name = p.report.plugin.display_name ?? p.report.plugin.id ?? p.plugin_name;
+				sections.push({ id: `plugin-${p.plugin_name}`, label: name, icon: 'plugin' as IconName });
+			}
+		}
+		if (samplePage) {
+			sections.push({ id: 'indicators', label: 'Indicators', icon: 'lookup' as IconName });
+			sections.push({ id: 'mitre', label: 'MITRE ATT&CK', icon: 'system' as IconName });
+		}
+		return sections;
 	});
-	const onSummary = $derived(summaryHref !== null && $page.url.pathname === summaryHref);
+
+	let activeSectionId = $state('overview');
+
+	// A section counts as "current" once its top scrolls above this line (px from
+	// the top of the scroll area), leaving room for the section heading.
+	const SPY_OFFSET = 130;
+
+	// While a click-triggered smooth scroll is in flight we pin the highlight to the
+	// clicked target instead of letting it walk through every section we pass.
+	let programmatic = false;
+	let programmaticTarget: string | null = null;
+	let programmaticTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// The report content scrolls inside <main> (overflow-auto), not the window, so
+	// resolve the nearest scrollable ancestor rather than assuming the document.
+	function findScroller(el: HTMLElement): HTMLElement {
+		let node: HTMLElement | null = el.parentElement;
+		while (node) {
+			const overflowY = getComputedStyle(node).overflowY;
+			if (
+				(overflowY === 'auto' || overflowY === 'scroll') &&
+				node.scrollHeight > node.clientHeight
+			) {
+				return node;
+			}
+			node = node.parentElement;
+		}
+		return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+	}
+
+	function scrollToSection(id: string) {
+		const el = document.getElementById(`section-${id}`);
+		if (!el) return;
+		activeSectionId = id;
+		programmatic = true;
+		programmaticTarget = id;
+		clearTimeout(programmaticTimer);
+		programmaticTimer = setTimeout(() => {
+			programmatic = false;
+			programmaticTarget = null;
+		}, 1200);
+		el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	// Reset to the first section when navigating to a different sample.
+	let lastSha: string | null = null;
+	$effect(() => {
+		const sha = samplePage?.sha256 ?? null;
+		if (sha !== lastSha) {
+			lastSha = sha;
+			activeSectionId = 'overview';
+		}
+	});
+
+	// Scroll-spy: highlight whichever section currently sits near the top of the
+	// scroll area. Re-evaluated on scroll (rAF-throttled) and when the list changes.
+	$effect(() => {
+		if (!samplePage) return;
+		const order = dynamicSections.map((s) => s.id);
+		if (order.length === 0) return;
+
+		let scroller: HTMLElement | null = null;
+		let queued = false;
+
+		function settle(current: string) {
+			if (programmatic) {
+				// Stay pinned to the click target until we actually reach it.
+				if (current === programmaticTarget) {
+					programmatic = false;
+					programmaticTarget = null;
+					clearTimeout(programmaticTimer);
+				}
+				return;
+			}
+			activeSectionId = current;
+		}
+
+		function recompute() {
+			queued = false;
+			const els = order
+				.map((id) => ({ id, el: document.getElementById(`section-${id}`) }))
+				.filter((s): s is { id: string; el: HTMLElement } => s.el !== null);
+			if (els.length === 0) return;
+
+			scroller ??= findScroller(els[0].el);
+
+			// At the bottom the last section may be too short to reach the line, so
+			// snap to it once the scroll area can't go any further.
+			if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+				settle(els[els.length - 1].id);
+				return;
+			}
+
+			let current = els[0].id;
+			let bestTop = -Infinity;
+			for (const { id, el } of els) {
+				const top = el.getBoundingClientRect().top;
+				if (top <= SPY_OFFSET && top > bestTop) {
+					bestTop = top;
+					current = id;
+				}
+			}
+			settle(current);
+		}
+
+		function onScroll() {
+			if (queued) return;
+			queued = true;
+			requestAnimationFrame(recompute);
+		}
+
+		const raf = requestAnimationFrame(recompute);
+		// Capture phase so this one window-level listener also catches scroll events
+		// from the inner <main> scroller (scroll doesn't bubble).
+		window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+
+		return () => {
+			cancelAnimationFrame(raf);
+			window.removeEventListener('scroll', onScroll, true);
+		};
+	});
 </script>
 
 <aside
@@ -123,142 +246,36 @@
 			{/each}
 		</div>
 
-		{#if report && summaryHref}
+		<!-- Report sections (when on sample page) -->
+		{#if samplePage}
 			{#if !sidebar.collapsed}
 				<div class="text-xs font-medium text-[var(--color-text-secondary)] px-3 mt-6 mb-3">
-					Submission
+					Report
 				</div>
 			{:else}
 				<div class="my-3 mx-2 border-t border-[var(--color-border)]"></div>
 			{/if}
 			<div class="space-y-2">
-				<a
-					href={summaryHref}
-					class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
-					       {sidebar.collapsed ? 'justify-center px-0' : ''}
-					       {onSummary ? 'text-[#F4F4FF]' : 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
-					title={sidebar.collapsed ? 'Summary' : undefined}
-				>
-					<div
-						class="w-10 h-10 rounded-xl flex items-center justify-center transition-colors shrink-0
-						       {onSummary ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
+				{#each dynamicSections as item (item.id)}
+					<button
+						type="button"
+						onclick={() => scrollToSection(item.id)}
+						class="flex items-center gap-3 px-3 py-2 rounded-lg text-left w-full transition-colors
+							{sidebar.collapsed ? 'justify-center px-0' : ''}
+							{activeSectionId === item.id ? 'text-[#F4F4FF]' : 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
+						title={sidebar.collapsed ? item.label : undefined}
 					>
-						<Icon path={icons.summary} />
-					</div>
-					{#if !sidebar.collapsed}
-						<div class="min-w-0">
-							<span class="text-sm font-medium">Summary</span>
-							<div
-								class="truncate text-xs text-[var(--color-text-secondary)]"
-								title={report.task.target}
-							>
-								{report.task.target}
-							</div>
+						<div
+							class="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-colors
+								{activeSectionId === item.id ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
+						>
+							<Icon path={icons[item.icon]} />
 						</div>
-					{/if}
-				</a>
-				{#each successfulPlugins as p (p.plugin_name)}
-					{@const displayName =
-						p.report?.plugin.display_name ?? p.report?.plugin.id ?? p.plugin_name}
-					{@const href = `${summaryHref}/p/${encodeURIComponent(p.plugin_name)}`}
-					{@const active = activePlugin === p.plugin_name}
-					<div>
-						<a
-							{href}
-							class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
-							       {sidebar.collapsed ? 'justify-center px-0' : ''}
-							       {active ? 'text-[#F4F4FF]' : 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
-							title={sidebar.collapsed ? displayName : undefined}
-						>
-							<div
-								class="w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-colors
-								       {active ? 'bg-[#1D2342] text-[#516CF9]' : 'bg-[#25272C] text-[#8A8F94]'}"
-							>
-								<Icon path={icons.plugin} />
-							</div>
-							{#if !sidebar.collapsed}
-								<span class="text-sm font-medium truncate">{displayName}</span>
-							{/if}
-						</a>
-						{#if !sidebar.collapsed && active && p.report?.sections && p.report.sections.filter((s) => !p.synthesized || !isArtifactSection(s, new Set(p.artifacts.map((a) => a.result_name)))).length > 0}
-							<div class="ml-8 mt-2 mb-1 space-y-1 border-l border-[var(--color-border)] pl-6">
-								{#each p.report.sections.filter((s) => !p.synthesized || !isArtifactSection(s, new Set(p.artifacts.map((a) => a.result_name)))) as s (s.id)}
-									{@const secHref = `${href}#section-${s.id}`}
-									{@const secActive = $page.url.hash === `#section-${s.id}`}
-									<a
-										href={secHref}
-										class="block py-1.5 rounded text-sm truncate transition-colors
-										       {secActive ? 'text-[var(--color-text-primary)]' : 'text-[#8A8F94] hover:text-[#F4F4FF]'}"
-										title={s.title}
-									>
-										{s.title}
-									</a>
-								{/each}
-							</div>
+						{#if !sidebar.collapsed}
+							<span class="text-sm font-medium truncate">{item.label}</span>
 						{/if}
-					</div>
+					</button>
 				{/each}
-				{#if failedPlugins.length > 0}
-					<div>
-						<button
-							type="button"
-							onclick={() => (failedExpanded = !failedExpanded)}
-							class="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-[#8A8F94] hover:text-[#F4F4FF] transition-colors cursor-pointer
-							       {sidebar.collapsed ? 'justify-center px-0' : ''}"
-							title={sidebar.collapsed
-								? `${failedPlugins.length} failed: ${failedNames.join(', ')}`
-								: undefined}
-						>
-							<div
-								class="relative w-10 h-10 shrink-0 rounded-xl flex items-center justify-center bg-red-500/10 text-red-400"
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 16 16"
-									fill="currentColor"
-									class="size-4"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-								<span
-									class="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white"
-								>
-									{failedPlugins.length}
-								</span>
-							</div>
-							{#if !sidebar.collapsed}
-								<span class="text-sm font-medium truncate text-[#8A8F94]">Failed</span>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="ml-auto size-4 shrink-0 text-[#8A8F94] transition-transform duration-200 {failedExpanded
-										? 'rotate-180'
-										: ''}"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-							{/if}
-						</button>
-						{#if !sidebar.collapsed && failedExpanded}
-							<div class="ml-8 mt-1 mb-1 space-y-0.5 border-l border-red-500/20 pl-6">
-								{#each failedNames as name (name)}
-									<div class="py-1 text-xs truncate text-[#8A8F94]" title={name}>
-										{name}
-									</div>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
 			</div>
 		{/if}
 	</nav>
