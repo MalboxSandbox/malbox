@@ -81,12 +81,6 @@ impl ReportShowcase {
             .section("raw-config", "Extracted Configuration", build_json_section)
             .section("pe-header", "PE Header Hex Dump", build_hex_section)
             .section("artifacts", "Artifacts", build_artifact_section)
-            .section("iocs", "Indicators of Compromise", |s| {
-                build_iocs_section(s, &indicators)
-            })
-            .section("mitre", "MITRE ATT&CK Coverage", |s| {
-                build_ttps_section(s, &ttps)
-            })
             .section("process-tree", "Process Tree", build_tree_section)
             .section("timeline", "Behavioral Timeline", build_timeline_section)
             .section(
@@ -421,19 +415,6 @@ fn build_artifact_section(s: SectionBuilder) -> SectionBuilder {
         .heading(3, "Network Capture")
         .markdown("Full PCAP from the sandbox network tap covering the 60-second detonation window:")
         .download("network_capture", "Download network capture (PCAP)")
-}
-
-fn build_iocs_section(s: SectionBuilder, indicators: &[Indicator]) -> SectionBuilder {
-    s.markdown("All indicators extracted during static and dynamic analysis:")
-        .iocs(indicators.iter().cloned())
-}
-
-fn build_ttps_section(s: SectionBuilder, ttps: &[Ttp]) -> SectionBuilder {
-    s.markdown(
-        "MITRE ATT&CK techniques observed during behavioral analysis. \
-         Each technique includes supporting evidence from the sandbox execution.",
-    )
-    .ttps(ttps.iter().cloned())
 }
 
 fn build_tree_section(s: SectionBuilder) -> SectionBuilder {
