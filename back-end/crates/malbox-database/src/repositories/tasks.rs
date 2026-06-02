@@ -218,23 +218,14 @@ pub async fn fetch_tasks_page(pool: &PgPool, filter: &TaskFilter) -> Result<Task
     );
 
     if let Some(statuses) = &filter.statuses {
-        let literals: Vec<&str> = statuses.iter().map(task_state_sql).collect();
-        qb.push(" AND status = ANY(ARRAY[");
-        for (i, lit) in literals.iter().enumerate() {
-            if i > 0 {
-                qb.push(",");
-            }
-            qb.push(format!("'{}'::task_state", lit));
-        }
-        qb.push("])");
+        qb.push(" AND status = ANY(");
+        qb.push_bind(statuses.as_slice());
+        qb.push(")");
     }
 
     if let Some(platform) = &filter.platform {
-        let lit = match platform {
-            MachinePlatform::Windows => "windows",
-            MachinePlatform::Linux => "linux",
-        };
-        qb.push(format!(" AND platform = '{}'::machine_platform", lit));
+        qb.push(" AND platform = ");
+        qb.push_bind(platform.clone());
     }
 
     if let Some(owner) = &filter.owner {
@@ -297,23 +288,14 @@ pub async fn count_tasks(pool: &PgPool, filter: &TaskFilter) -> Result<TaskCount
         QueryBuilder::new("SELECT status::text, COUNT(*) as count FROM tasks WHERE TRUE");
 
     if let Some(statuses) = &filter.statuses {
-        let literals: Vec<&str> = statuses.iter().map(task_state_sql).collect();
-        qb.push(" AND status = ANY(ARRAY[");
-        for (i, lit) in literals.iter().enumerate() {
-            if i > 0 {
-                qb.push(",");
-            }
-            qb.push(format!("'{}'::task_state", lit));
-        }
-        qb.push("])");
+        qb.push(" AND status = ANY(");
+        qb.push_bind(statuses.as_slice());
+        qb.push(")");
     }
 
     if let Some(platform) = &filter.platform {
-        let lit = match platform {
-            MachinePlatform::Windows => "windows",
-            MachinePlatform::Linux => "linux",
-        };
-        qb.push(format!(" AND platform = '{}'::machine_platform", lit));
+        qb.push(" AND platform = ");
+        qb.push_bind(platform.clone());
     }
 
     if let Some(owner) = &filter.owner {
@@ -380,17 +362,29 @@ pub async fn fetch_tasks_by_sample_id(pool: &PgPool, sample_id: i64) -> Result<V
     Ok(rows.into_iter().filter_map(|r| r.id).collect())
 }
 
-fn task_state_sql(state: &TaskState) -> &'static str {
-    match state {
-        TaskState::Pending => "pending",
-        TaskState::Initializing => "initializing",
-        TaskState::PreparingResources => "preparing_resources",
-        TaskState::Running => "running",
-        TaskState::Stopping => "stopping",
-        TaskState::Completed => "completed",
-        TaskState::Failed => "failed",
-        TaskState::Canceled => "canceled",
-    }
+pub async fn fetch_tasks_for_sample(pool: &PgPool, sample_id: i64) -> Result<Vec<Task>> {
+    Ok(query_as!(
+        Task,
+        r#"
+        SELECT id, target, plugins, profile,
+               platform AS "platform: MachinePlatform",
+               timeout, enforce_timeout, priority,
+               machine_id, machine_memory, machine_cpus,
+               created_on, started_on, completed_on,
+               status AS "status!: TaskState",
+               sample_id, owner, tags, snapshot_id
+        FROM tasks
+        WHERE sample_id = $1
+        ORDER BY created_on DESC
+        "#,
+        sample_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| TaskError::FetchFailed {
+        message: "Failed to fetch tasks for sample".to_string(),
+        source: e,
+    })?)
 }
 
 pub async fn update_task_status(pool: &PgPool, id: i32, status: TaskState) -> Result<Task> {

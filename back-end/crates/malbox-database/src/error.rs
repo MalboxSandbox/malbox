@@ -19,6 +19,10 @@ pub enum DatabaseError {
     #[error("{0}")]
     TaskResult(#[from] TaskResultError),
     #[error("{0}")]
+    PluginReport(#[from] PluginReportError),
+    #[error("{0}")]
+    SampleVerdict(#[from] SampleVerdictError),
+    #[error("{0}")]
     Recipe(#[from] RecipeError),
     #[error("{0}")]
     CustomTransform(#[from] CustomTransformError),
@@ -186,6 +190,44 @@ pub enum TaskResultError {
     #[error("Failed to fetch results for task {task_id}: {source}")]
     FetchFailed {
         task_id: i32,
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum PluginReportError {
+    #[error("Failed to insert plugin report for task {task_id} ({plugin_name}): {source}")]
+    InsertFailed {
+        task_id: i32,
+        plugin_name: String,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch plugin reports for task {task_id}: {source}")]
+    FetchFailed {
+        task_id: i32,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch plugin reports for sample {sample_id}: {source}")]
+    FetchForSampleFailed {
+        sample_id: i64,
+        #[source]
+        source: sqlx::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum SampleVerdictError {
+    #[error("Failed to upsert verdict for sample {sample_id}: {source}")]
+    UpsertFailed {
+        sample_id: i64,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch verdict for sample: {source}")]
+    FetchFailed {
         #[source]
         source: sqlx::Error,
     },

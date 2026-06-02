@@ -154,3 +154,28 @@ pub async fn fetch_sample_by_id(pool: &PgPool, id: i64) -> Result<Option<SampleE
         .into()
     })
 }
+
+/// Batch-load samples by id. Used by the task list to attach sample info
+/// without an N+1 (one query per page instead of one per row).
+/// Returns only the rows that exist; callers map by id.
+pub async fn fetch_samples_by_ids(pool: &PgPool, ids: &[i64]) -> Result<Vec<SampleEntity>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids_i32: Vec<i32> = ids.iter().map(|&i| i as i32).collect();
+    query_as!(
+        SampleEntity,
+        r#"SELECT * FROM "samples" WHERE id = ANY($1)"#,
+        &ids_i32
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        SampleError::FetchFailed {
+            hash: String::new(),
+            message: "Failed to batch-fetch samples by ids".to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
