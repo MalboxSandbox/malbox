@@ -11,6 +11,7 @@ malbox-config = { path = "../malbox-config" }
 malbox-machinery = { path = "../malbox-machinery" }
 malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
+malbox-plugin-sdk = { path = "../malbox-plugin-sdk" }
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
 malbox-utils = { path = "../malbox-utils" }
 serde_json.workspace = true

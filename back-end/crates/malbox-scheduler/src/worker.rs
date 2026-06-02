@@ -21,6 +21,10 @@ use crate::task::cancel::TaskCancellationRegistry;
 use crate::task::queue::TaskQueue;
 use crate::task::store::TaskStore;
 use crate::task::types::TaskKind;
+use malbox_database::repositories::plugin_reports::{
+    self, DbClassification, DbConfidence, InsertPluginReport,
+};
+use malbox_database::repositories::sample_verdicts::{self, UpsertSampleVerdict};
 use malbox_database::repositories::samples::fetch_sample_by_id;
 use malbox_database::repositories::task_results::{
     self, ResultFormat as DbResultFormat, ResultRole,
@@ -42,6 +46,23 @@ use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
+
+fn sdk_classification(c: malbox_plugin_sdk::report::Classification) -> DbClassification {
+    match c {
+        malbox_plugin_sdk::report::Classification::Clean => DbClassification::Clean,
+        malbox_plugin_sdk::report::Classification::Unknown => DbClassification::Unknown,
+        malbox_plugin_sdk::report::Classification::Suspicious => DbClassification::Suspicious,
+        malbox_plugin_sdk::report::Classification::Malicious => DbClassification::Malicious,
+    }
+}
+
+fn sdk_confidence(c: malbox_plugin_sdk::report::Confidence) -> DbConfidence {
+    match c {
+        malbox_plugin_sdk::report::Confidence::Low => DbConfidence::Low,
+        malbox_plugin_sdk::report::Confidence::Medium => DbConfidence::Medium,
+        malbox_plugin_sdk::report::Confidence::High => DbConfidence::High,
+    }
+}
 
 /// Extra time the host waits beyond the plugin's own analysis budget before
 /// declaring the task timed out.
@@ -362,6 +383,16 @@ impl Worker {
                 error!(task_id, error = %e, "Failed to update task state to Stopping");
             }
 
+            // Recompute sample verdict after plugins ran (host-only path).
+            if matches!(
+                work_result,
+                Ok(TaskOutcome::Completed)
+                    | Ok(TaskOutcome::PluginsFailed)
+                    | Ok(TaskOutcome::TimedOut { .. })
+            ) {
+                self.recompute_sample_verdict(&task).await;
+            }
+
             // Final state based on outcome (same pattern as the VM path)
             match &work_result {
                 Ok(TaskOutcome::Completed) => {
@@ -500,6 +531,16 @@ impl Worker {
 
         if let Err(e) = self.machine_pool.release(machine_id).await {
             error!(task_id, machine_id, error = %e, "Failed to release machine");
+        }
+
+        // Recompute sample verdict after plugins ran (VM path).
+        if matches!(
+            work_result,
+            Ok(TaskOutcome::Completed)
+                | Ok(TaskOutcome::PluginsFailed)
+                | Ok(TaskOutcome::TimedOut { .. })
+        ) {
+            self.recompute_sample_verdict(&task).await;
         }
 
         // --- Post-cleanup: set final task state based on outcome ---
@@ -851,6 +892,13 @@ impl Worker {
                             "Failed to insert task result into DB"
                         );
                     }
+
+                    if matches!(db_role, ResultRole::Report)
+                        && matches!(db_format, DbResultFormat::Json)
+                    {
+                        self.extract_plugin_report(task_id, plugin_name, outputs, &output.data)
+                            .await;
+                    }
                 }
                 Err(e) => {
                     error!(
@@ -862,6 +910,147 @@ impl Worker {
                     );
                 }
             }
+        }
+    }
+
+    async fn extract_plugin_report(
+        &self,
+        task_id: i32,
+        plugin_name: &str,
+        outputs: &[PluginOutput],
+        report_data: &[u8],
+    ) {
+        let report = match serde_json::from_slice::<malbox_plugin_sdk::report::Report>(report_data)
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(task_id, plugin_name, error = %e, "Failed to parse report for metadata extraction");
+                return;
+            }
+        };
+
+        let artifact_count = outputs
+            .iter()
+            .filter(|o| o.result_name != malbox_plugin_transport::REPORT_RESULT_NAME)
+            .count() as i32;
+
+        let labels: Vec<String> = report
+            .verdict
+            .as_ref()
+            .map(|v| v.labels.clone())
+            .unwrap_or_default();
+
+        let indicators_json = serde_json::to_value(&report.indicators).unwrap_or_default();
+        let ttps_json = serde_json::to_value(&report.ttps).unwrap_or_default();
+
+        let params = InsertPluginReport {
+            task_id,
+            plugin_name,
+            display_name: report.plugin.display_name.as_deref(),
+            plugin_version: &report.plugin.version,
+            classification: report
+                .verdict
+                .as_ref()
+                .map(|v| sdk_classification(v.classification)),
+            score: report
+                .verdict
+                .as_ref()
+                .and_then(|v| v.score.map(|s| s as i16)),
+            confidence: report
+                .verdict
+                .as_ref()
+                .and_then(|v| v.confidence.map(sdk_confidence)),
+            labels: &labels,
+            indicators: &indicators_json,
+            ttps: &ttps_json,
+            summary: report.summary.as_deref(),
+            section_count: report.sections.len() as i32,
+            artifact_count,
+        };
+
+        if let Err(e) = plugin_reports::insert_plugin_report(self.task_store.pool(), &params).await
+        {
+            error!(task_id, plugin_name, error = %e, "Failed to insert plugin report metadata");
+        }
+    }
+
+    async fn recompute_sample_verdict(&self, task: &malbox_database::repositories::tasks::Task) {
+        let Some(sample_id) = task.sample_id else {
+            return;
+        };
+        let pool = self.task_store.pool();
+
+        let reports = match plugin_reports::fetch_latest_plugin_reports_for_sample(pool, sample_id)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!(sample_id, error = %e, "Failed to fetch latest plugin reports for verdict");
+                return;
+            }
+        };
+
+        let task_count =
+            match plugin_reports::count_reported_tasks_for_sample(pool, sample_id).await {
+                Ok(n) => n as i32,
+                Err(e) => {
+                    error!(sample_id, error = %e, "Failed to count reported tasks for verdict");
+                    return;
+                }
+            };
+
+        let mut worst: Option<DbClassification> = None;
+        let mut max_score: Option<i16> = None;
+        let mut plugin_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut seen_iocs: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        let mut seen_ttps: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+        for r in &reports {
+            plugin_set.insert(r.plugin_name.clone());
+
+            if let Some(c) = r.classification {
+                worst = Some(match worst {
+                    Some(w) if w.severity() >= c.severity() => w,
+                    _ => c,
+                });
+            }
+            if let Some(s) = r.score {
+                max_score = Some(max_score.map_or(s, |m| m.max(s)));
+            }
+
+            if let Some(arr) = r.indicators.as_array() {
+                for ind in arr {
+                    if let (Some(k), Some(v)) = (ind["kind"].as_str(), ind["value"].as_str()) {
+                        seen_iocs.insert((k.to_string(), v.to_string()));
+                    }
+                }
+            }
+            if let Some(arr) = r.ttps.as_array() {
+                for ttp in arr {
+                    if let Some(id) = ttp["id"].as_str() {
+                        seen_ttps.insert(id.to_string());
+                    }
+                }
+            }
+        }
+
+        let mut names: Vec<String> = plugin_set.into_iter().collect();
+        names.sort();
+
+        let params = UpsertSampleVerdict {
+            sample_id,
+            classification: worst,
+            score: max_score,
+            indicator_count: seen_iocs.len() as i32,
+            ttp_count: seen_ttps.len() as i32,
+            plugin_names: &names,
+            task_count,
+            last_task_id: task.id,
+        };
+
+        if let Err(e) = sample_verdicts::upsert_sample_verdict(pool, &params).await {
+            error!(sample_id, error = %e, "Failed to upsert sample verdict");
         }
     }
 
