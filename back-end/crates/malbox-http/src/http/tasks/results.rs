@@ -14,6 +14,8 @@ use tokio_util::io::ReaderStream;
 
 use super::super::AppState;
 use super::resolve_result_path;
+use crate::http::report_service::format_name;
+use crate::http::{Result, error::Error};
 
 #[derive(Serialize)]
 struct TaskResultResponse {
@@ -43,18 +45,10 @@ async fn get_task_result_content(
     let result = match fetch_task_result(&state.pool, result_id).await {
         Ok(Some(r)) if r.task_id == task_id => r,
         Ok(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "result not found"})),
-            )
-                .into_response();
+            return Error::NotFound.into_response();
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response();
+            return Error::Internal(e.to_string()).into_response();
         }
     };
 
@@ -63,22 +57,14 @@ async fn get_task_result_content(
     let canonical = match tokio::fs::canonicalize(&abs_path).await {
         Ok(p) => p,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "result file unavailable"})),
-            )
-                .into_response();
+            return Error::Internal("result file unavailable".to_string()).into_response();
         }
     };
 
     let data_dir = match tokio::fs::canonicalize(&state.config.paths.data_dir).await {
         Ok(p) => p,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "result file unavailable"})),
-            )
-                .into_response();
+            return Error::Internal("result file unavailable".to_string()).into_response();
         }
     };
 
@@ -88,21 +74,13 @@ async fn get_task_result_content(
             path = %canonical.display(),
             "path traversal blocked: result path escapes data directory"
         );
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "result file unavailable"})),
-        )
-            .into_response();
+        return Error::Forbidden.into_response();
     }
 
     let file = match tokio::fs::File::open(&canonical).await {
         Ok(f) => f,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "result file unavailable"})),
-            )
-                .into_response();
+            return Error::Internal("result file unavailable".to_string()).into_response();
         }
     };
 
@@ -132,38 +110,27 @@ async fn get_task_result_content(
         .into_response()
 }
 
-async fn get_task_results(State(state): State<AppState>, Path(id): Path<i32>) -> impl IntoResponse {
-    match fetch_task_results(&state.pool, id).await {
-        Ok(results) => {
-            let response: Vec<TaskResultResponse> = results
-                .into_iter()
-                .map(|r| TaskResultResponse {
-                    id: r.id,
-                    task_id: r.task_id,
-                    plugin_name: r.plugin_name,
-                    result_name: r.result_name,
-                    format: format_name(r.format),
-                    role: role_name(r.role),
-                    size_bytes: r.size_bytes,
-                    created_on: r.created_on.to_string(),
-                })
-                .collect();
-            (StatusCode::OK, Json(serde_json::json!(response))).into_response()
-        }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": e.to_string()})),
-        )
-            .into_response(),
-    }
-}
-
-fn format_name(f: ResultFormat) -> String {
-    match f {
-        ResultFormat::Json => "json",
-        ResultFormat::Bytes => "bytes",
-    }
-    .to_string()
+async fn get_task_results(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<Json<Vec<TaskResultResponse>>> {
+    let results = fetch_task_results(&state.pool, id)
+        .await
+        .map_err(|e| Error::Internal(e.to_string()))?;
+    let response: Vec<TaskResultResponse> = results
+        .into_iter()
+        .map(|r| TaskResultResponse {
+            id: r.id,
+            task_id: r.task_id,
+            plugin_name: r.plugin_name,
+            result_name: r.result_name,
+            format: format_name(r.format),
+            role: role_name(r.role),
+            size_bytes: r.size_bytes,
+            created_on: r.created_on.to_string(),
+        })
+        .collect();
+    Ok(Json(response))
 }
 
 fn role_name(r: ResultRole) -> String {

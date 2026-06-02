@@ -12,11 +12,13 @@ use tokio_util::sync::CancellationToken;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::{Level, info};
 
+mod dto;
 mod error;
 mod images;
 mod machines;
 mod plugins;
 mod recipes;
+pub(crate) mod report_service;
 mod samples;
 mod tasks;
 mod transforms;
