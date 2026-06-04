@@ -33,7 +33,7 @@ jobs:
     - name: Build release binaries (Linux)
       run: >
         nix develop ..#backend --command
-        cargo build --release
+        cargo build --release --locked
         --manifest-path Cargo.toml
         -p malbox -p malboxctl
 
@@ -124,9 +124,40 @@ jobs:
         name: cpp-sdk-windows-x64
         path: back-end/malbox-plugin-sdk-cpp-*-windows-x64.tar.gz
 
+  build-frontend:
+    name: Build front-end SPA
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: front-end
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - uses: DeterminateSystems/magic-nix-cache-action@v14
+
+    - name: Build SPA
+      run: nix develop ..#frontend --command bash -c "pnpm install --frozen-lockfile && pnpm build"
+
+    - name: Package SPA
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        tar czf "malbox-web-${VERSION}.tar.gz" -C build .
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: frontend-web
+        path: front-end/malbox-web-*.tar.gz
+
   release:
     name: Create GitHub Release
-    needs: [build-backend, build-cpp-sdk-linux, build-cpp-sdk-windows]
+    needs: [build-backend, build-cpp-sdk-linux, build-cpp-sdk-windows, build-frontend]
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -164,8 +195,16 @@ jobs:
       run: |
         VERSION="${GITHUB_REF_NAME}"
 
+        # Mark as prerelease only when the tag carries a pre-release suffix
+        # (e.g. v0.2.0-alpha.1), so the flag agrees with the tag semantics
+        # the installer's stable/nightly channels are based on.
+        PRERELEASE_FLAG=""
+        if [[ "${VERSION}" == *-* ]]; then
+          PRERELEASE_FLAG="--prerelease"
+        fi
+
         gh release create "${VERSION}" \
           --title "${VERSION}" \
-          --prerelease \
+          ${PRERELEASE_FLAG} \
           --notes "${CHANGELOG}" \
           artifacts/*.tar.gz artifacts/*.sha256
