@@ -2,14 +2,7 @@ use crate::commands::Command;
 use clap::Parser;
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
-use malbox_config::{
-    Config, Environment, LogLevel,
-    core::{AnalysisConfig, DatabaseConfig, GeneralConfig, HttpConfig, PlatformAnalysisConfig},
-    machinery::MachineryConfig,
-    providers::ProvidersConfig,
-    storage::PathConfig,
-};
-use std::collections::HashMap;
+use malbox_config::{Config, storage::PathConfig};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -54,7 +47,7 @@ impl Command for InitArgs {
         }
 
         // Generate default configuration
-        let config = create_default_config(paths)?;
+        let config = Config::with_defaults(paths);
 
         // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
@@ -103,71 +96,4 @@ fn check_existing_config(paths: &PathConfig) -> Option<PathBuf> {
     }
 
     None
-}
-
-/// Create a default configuration with sensible defaults
-fn create_default_config(paths: PathConfig) -> Result<Config> {
-    let general = GeneralConfig {
-        environment: Environment::Development,
-        log_level: LogLevel::Info,
-        debug: false,
-        max_workers: 4,
-        min_workers: 1,
-        idle_timeout_ms: 60_000,
-    };
-
-    let http = HttpConfig {
-        host: "127.0.0.1".to_string(),
-        port: 8080,
-        tls_enabled: false,
-        cert_path: None,
-        key_path: None,
-        cors_origins: vec!["http://localhost:5173".to_string()],
-        max_upload_size: 100 * 1024 * 1024, // 100 MB
-    };
-
-    let database = DatabaseConfig {
-        host: "localhost".to_string(),
-        port: 5432,
-    };
-
-    let providers = ProvidersConfig {
-        enabled: vec![],
-        default: None,
-        configs: HashMap::new(),
-    };
-
-    let machinery = MachineryConfig::default();
-
-    let analysis = AnalysisConfig {
-        timeout: 300,
-        max_vms: 5,
-        default_profile: "default".to_string(),
-        windows: PlatformAnalysisConfig {
-            default_profile: "win10_default".to_string(),
-            timeout: Some(300),
-            max_vms: Some(3),
-        },
-        linux: PlatformAnalysisConfig {
-            default_profile: "ubuntu_default".to_string(),
-            timeout: Some(300),
-            max_vms: Some(2),
-        },
-    };
-
-    let config = Config {
-        paths,
-        general,
-        http,
-        database,
-        providers,
-        machinery,
-        images: None,
-        guest_access: None,
-        plugins: Default::default(),
-        analysis,
-        machines: Vec::new(),
-    };
-
-    Ok(config)
 }

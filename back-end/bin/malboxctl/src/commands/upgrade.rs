@@ -9,8 +9,8 @@ use malbox_installer::error::InstallError;
 use malbox_installer::github::GitHubClient;
 use malbox_installer::manifest::Manifest;
 
-const GITHUB_OWNER: &str = "malboxapp";
-const GITHUB_REPO: &str = "malbox";
+const GITHUB_OWNER: &str = malbox_installer::GITHUB_OWNER;
+const GITHUB_REPO: &str = malbox_installer::GITHUB_REPO;
 
 #[derive(Parser)]
 #[command(about = "Upgrade Malbox to the latest version")]
@@ -66,7 +66,8 @@ impl Command for UpgradeCommand {
             reconfigure,
         };
 
-        let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO);
+        let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
+            .map_err(|e| malbox_cli_common::error::CliError::CommandFailed(e.to_string()))?;
         let progress = CliProgress::new();
 
         match malbox_installer::upgrade::run(&upgrade_config, &github, &manifest_path, &progress)
