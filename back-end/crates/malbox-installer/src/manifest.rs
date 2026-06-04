@@ -1,4 +1,5 @@
 use crate::error::{InstallError, Step};
+use crate::github::Channel;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -9,11 +10,15 @@ pub struct Manifest {
     pub installed_at: String,
     pub updated_at: String,
     pub arch: String,
-    pub nix: String,
+    /// Release channel upgrades follow. Manifests written before channels
+    /// existed default to nightly, matching the previous upgrade behavior.
+    #[serde(default)]
+    pub channel: Channel,
     pub daemon: DaemonManifest,
     pub frontend: FrontendManifest,
     pub postgres: PostgresManifest,
     pub systemd: SystemdManifest,
+    pub cli: CliManifest,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_completed_step: Option<Step>,
 }
@@ -27,13 +32,25 @@ pub struct DaemonManifest {
     pub path: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev_path: Option<PathBuf>,
+    /// Version the `prev_path` backup was taken from, restored on rollback.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_version: Option<String>,
     pub providers: Vec<String>,
+    #[serde(default)]
+    pub provisioners: Vec<String>,
+    /// Cargo features the installed binaries were built with. Replayed
+    /// verbatim when an upgrade has to compile from source.
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontendManifest {
     pub source: String,
     pub path: PathBuf,
+    /// Previous front-end bundle kept for rollback (`web.prev`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,10 +66,20 @@ pub struct SystemdManifest {
     pub unit: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliManifest {
+    pub path: PathBuf,
+}
+
 impl Manifest {
     pub fn load(path: &Path) -> crate::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|_| InstallError::ManifestNotFound(path.to_path_buf()))?;
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(InstallError::ManifestNotFound(path.to_path_buf()));
+            }
+            Err(e) => return Err(e.into()),
+        };
         serde_json::from_str(&content).map_err(|e| InstallError::Manifest(e.to_string()))
     }
 
@@ -81,9 +108,10 @@ impl Manifest {
     }
 
     pub fn default_path() -> PathBuf {
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.config"))
-            .join("malbox");
-        config_dir.join("manifest.json")
+        dirs::config_dir()
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+            .unwrap_or_else(|| PathBuf::from("/etc"))
+            .join("malbox")
+            .join("manifest.json")
     }
 }

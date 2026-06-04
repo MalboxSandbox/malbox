@@ -1,9 +1,18 @@
+use crate::github::Channel;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallConfig {
-    pub nix: NixStrategy,
+    /// Virtualization providers enabled in the generated daemon config
+    /// (e.g. "libvirt").
     pub providers: Vec<String>,
+    /// Machine provisioners compiled into the daemon (e.g. "ansible").
+    pub provisioners: Vec<String>,
+    /// Cargo feature set the daemon binaries carry. Recorded in the manifest
+    /// so upgrades can replay a from-source build with identical features.
+    pub features: Vec<String>,
+    /// Release channel this installation tracks.
+    pub channel: Channel,
     pub daemon: DaemonSource,
     pub frontend: FrontendSource,
     pub postgres: PostgresStrategy,
@@ -11,16 +20,12 @@ pub struct InstallConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NixStrategy {
-    Install,
-    Existing,
-    Skip,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonSource {
-    Prebuilt { url: String },
-    Compile { features: Vec<String> },
+    Prebuilt {
+        url: String,
+    },
+    /// Build from the release source tarball with `InstallConfig::features`.
+    Compile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

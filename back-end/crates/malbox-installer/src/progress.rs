@@ -15,3 +15,16 @@ impl InstallProgress for NoopProgress {
     fn completed(&self, _step: Step) {}
     fn failed(&self, _step: Step, _error: &InstallError) {}
 }
+
+/// Report a step failure to the progress sink without disturbing the error
+/// flow. Keeps the orchestrators free of repeated `if let Err` blocks.
+pub(crate) fn observe<T>(
+    step: Step,
+    progress: &dyn InstallProgress,
+    result: crate::Result<T>,
+) -> crate::Result<T> {
+    if let Err(error) = &result {
+        progress.failed(step, error);
+    }
+    result
+}

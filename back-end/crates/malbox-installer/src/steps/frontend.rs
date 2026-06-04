@@ -1,74 +1,106 @@
 use crate::config::FrontendSource;
-use crate::error::{InstallError, Step};
-use crate::github::GitHubClient;
+use crate::error::{InstallError, Step, StepCtx};
+use crate::github::{GitHubClient, Release};
 use crate::progress::InstallProgress;
 use std::path::{Path, PathBuf};
+
+pub struct FrontendResult {
+    pub path: PathBuf,
+    /// Previous bundle, kept as `web.prev` for rollback. `None` on a fresh
+    /// install.
+    pub prev_path: Option<PathBuf>,
+}
 
 pub async fn execute(
     source: &FrontendSource,
     data_dir: &Path,
     github: &GitHubClient,
-    release_tag: &str,
+    release: &Release,
     progress: &dyn InstallProgress,
-) -> crate::Result<PathBuf> {
+) -> crate::Result<FrontendResult> {
     progress.started(Step::Frontend, "Installing front-end assets");
 
     let web_dir = data_dir.join("web");
-    tokio::fs::create_dir_all(&web_dir).await?;
+    // Stage into a sibling directory and swap via renames: the daemon never
+    // serves a half-extracted bundle, stale assets from previous versions
+    // don't accumulate, and the old bundle stays around for rollback.
+    let staging = data_dir.join("web.new");
+    if staging.exists() {
+        tokio::fs::remove_dir_all(&staging)
+            .await
+            .step_ctx(Step::Frontend, "failed to clear staging directory")?;
+    }
+    tokio::fs::create_dir_all(&staging).await?;
 
     match source {
         FrontendSource::Prebuilt { url } => {
-            progress.progress(Step::Frontend, 10, "Downloading prebuilt front-end assets");
-            let bytes = github.download_asset(url).await?;
+            let bytes = crate::steps::download_with_progress(
+                github,
+                release,
+                url,
+                "front-end assets",
+                Step::Frontend,
+                10..70,
+                progress,
+            )
+            .await?;
 
             progress.progress(Step::Frontend, 80, "Extracting front-end assets");
-            let decoder = flate2::read::GzDecoder::new(bytes.as_slice());
-            let mut archive = tar::Archive::new(decoder);
-            archive
-                .unpack(&web_dir)
-                .map_err(|e| InstallError::StepFailed {
-                    step: Step::Frontend,
-                    message: format!("failed to extract frontend assets: {e}"),
-                })?;
+            crate::archive::extract_tarball(&bytes, &staging, Step::Frontend)?;
         }
         FrontendSource::Compile => {
+            crate::steps::ensure_tool(
+                "pnpm",
+                "install Node.js and pnpm to build the front-end from source",
+                Step::Frontend,
+            )
+            .await?;
+
             progress.progress(Step::Frontend, 10, "Fetching source for front-end build");
-            let source_url = format!(
-                "https://github.com/malboxapp/malbox/archive/refs/tags/{}.tar.gz",
-                release_tag
-            );
-            let bytes = github.download_asset(&source_url).await?;
+            let source_url = release.source_archive_url(github.owner(), github.repo());
+            let bytes = github.download_asset(&source_url, &mut |_, _| {}).await?;
 
-            let tmp_dir = tempfile::tempdir().map_err(|e| InstallError::StepFailed {
-                step: Step::Frontend,
-                message: format!("failed to create temp dir: {e}"),
-            })?;
+            let tmp_dir =
+                tempfile::tempdir().step_ctx(Step::Frontend, "failed to create temp dir")?;
 
-            let decoder = flate2::read::GzDecoder::new(bytes.as_slice());
-            let mut archive = tar::Archive::new(decoder);
-            archive
-                .unpack(tmp_dir.path())
-                .map_err(|e| InstallError::StepFailed {
-                    step: Step::Frontend,
-                    message: format!("failed to extract source: {e}"),
-                })?;
+            crate::archive::extract_tarball(&bytes, tmp_dir.path(), Step::Frontend)?;
+            let source_dir = crate::archive::find_extracted_dir(tmp_dir.path(), Step::Frontend)?;
+            let frontend_dir = source_dir.join("front-end");
 
-            let frontend_dir = tmp_dir.path().join("front-end");
-
-            progress.progress(Step::Frontend, 20, "Installing npm dependencies");
-            run_cmd("npm", &["install"], &frontend_dir, Step::Frontend).await?;
+            progress.progress(Step::Frontend, 20, "Installing pnpm dependencies");
+            run_cmd("pnpm", &["install"], &frontend_dir, Step::Frontend).await?;
 
             progress.progress(Step::Frontend, 50, "Building front-end");
-            run_cmd("npm", &["run", "build"], &frontend_dir, Step::Frontend).await?;
+            run_cmd("pnpm", &["run", "build"], &frontend_dir, Step::Frontend).await?;
 
             progress.progress(Step::Frontend, 90, "Copying build output");
             let build_output = frontend_dir.join("build");
-            copy_dir_recursive(&build_output, &web_dir).await?;
+            copy_dir_recursive(&build_output, &staging).await?;
         }
     }
 
+    // Swap the staged bundle in.
+    let prev = data_dir.join("web.prev");
+    if prev.exists() {
+        tokio::fs::remove_dir_all(&prev)
+            .await
+            .step_ctx(Step::Frontend, "failed to remove old backup bundle")?;
+    }
+    let had_previous = web_dir.exists();
+    if had_previous {
+        tokio::fs::rename(&web_dir, &prev)
+            .await
+            .step_ctx(Step::Frontend, "failed to back up current bundle")?;
+    }
+    tokio::fs::rename(&staging, &web_dir)
+        .await
+        .step_ctx(Step::Frontend, "failed to activate new bundle")?;
+
     progress.completed(Step::Frontend);
-    Ok(web_dir)
+    Ok(FrontendResult {
+        path: web_dir,
+        prev_path: had_previous.then_some(prev),
+    })
 }
 
 async fn run_cmd(cmd: &str, args: &[&str], cwd: &Path, step: Step) -> crate::Result<()> {
@@ -77,10 +109,7 @@ async fn run_cmd(cmd: &str, args: &[&str], cwd: &Path, step: Step) -> crate::Res
         .current_dir(cwd)
         .status()
         .await
-        .map_err(|e| InstallError::StepFailed {
-            step,
-            message: format!("failed to run {cmd}: {e}"),
-        })?;
+        .step_ctx(step, &format!("failed to run {cmd}"))?;
 
     if !status.success() {
         return Err(InstallError::StepFailed {

@@ -1,11 +1,13 @@
-use crate::error::{InstallError, Step};
+use crate::error::{Step, StepCtx};
 use crate::progress::InstallProgress;
+use malbox_config::{CliConfig, Config, Environment, PathConfig};
 use std::path::{Path, PathBuf};
 
 pub async fn execute(
     config_dir: &Path,
     providers: &[String],
     postgres_url: &str,
+    web_dir: &Path,
     progress: &dyn InstallProgress,
 ) -> crate::Result<PathBuf> {
     progress.started(Step::Config, "Generating default configuration");
@@ -15,70 +17,35 @@ pub async fn execute(
     let config_path = config_dir.join("malbox.toml");
 
     if config_path.exists() {
+        progress.progress(Step::Config, 100, "Keeping existing configuration");
         progress.completed(Step::Config);
         return Ok(config_path);
     }
 
-    let default_provider = providers.first().map(|s| s.as_str()).unwrap_or("");
+    // Build a typed Config and serialize it rather than templating TOML by
+    // hand: the result is guaranteed to round-trip through the daemon's
+    // strict (deny_unknown_fields) loader.
+    let paths = PathConfig::new().step_ctx(Step::Config, "failed to resolve XDG paths")?;
+    let mut config = Config::with_defaults(paths);
+    config.general.environment = Environment::Production;
+    config.http.web_dir = Some(web_dir.display().to_string());
+    // Same-origin SPA serving needs no CORS allowances.
+    config.http.cors_origins.clear();
+    config.database.host = postgres_url.to_string();
+    config.providers.enabled = providers.to_vec();
+    config.providers.default = providers.first().cloned();
 
-    let enabled_list = providers
-        .iter()
-        .map(|p| format!("\"{}\"", p))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let config_content = format!(
-        r#"[general]
-environment = "production"
-log_level = "info"
-debug = false
-max_workers = 4
-min_workers = 1
-idle_timeout_ms = 60000
-
-[http]
-host = "127.0.0.1"
-port = 8080
-tls_enabled = false
-cors_origins = ["http://localhost:5173"]
-max_upload_size = 104857600
-
-[database]
-host = "{postgres_url}"
-port = 5432
-
-[providers]
-enabled = [{enabled_list}]
-default = "{default_provider}"
-
-[analysis]
-timeout = 300
-max_vms = 5
-default_profile = "default"
-
-[analysis.windows]
-default_profile = "win10_default"
-timeout = 300
-max_vms = 3
-
-[analysis.linux]
-default_profile = "ubuntu_default"
-timeout = 300
-max_vms = 2
-"#
-    );
-
-    tokio::fs::write(&config_path, config_content)
+    let config_toml =
+        toml::to_string_pretty(&config).step_ctx(Step::Config, "failed to serialize config")?;
+    tokio::fs::write(&config_path, config_toml)
         .await
-        .map_err(|e| InstallError::StepFailed {
-            step: Step::Config,
-            message: format!("failed to write config: {e}"),
-        })?;
+        .step_ctx(Step::Config, "failed to write config")?;
 
     let cli_config_path = config_dir.join("cli.toml");
     if !cli_config_path.exists() {
-        let cli_config = "[api]\nurl = \"http://127.0.0.1:8080\"\n";
-        tokio::fs::write(&cli_config_path, cli_config).await?;
+        let cli_toml = toml::to_string_pretty(&CliConfig::default())
+            .step_ctx(Step::Config, "failed to serialize CLI config")?;
+        tokio::fs::write(&cli_config_path, cli_toml).await?;
     }
 
     progress.completed(Step::Config);

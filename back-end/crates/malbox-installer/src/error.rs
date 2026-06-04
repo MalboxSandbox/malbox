@@ -3,7 +3,6 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Step {
-    Nix,
     Daemon,
     Frontend,
     Postgres,
@@ -14,7 +13,6 @@ pub enum Step {
 impl std::fmt::Display for Step {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Step::Nix => write!(f, "nix"),
             Step::Daemon => write!(f, "daemon"),
             Step::Frontend => write!(f, "frontend"),
             Step::Postgres => write!(f, "postgres"),
@@ -41,6 +39,12 @@ pub enum InstallError {
     #[error("github API error: {0}")]
     GitHub(String),
 
+    #[error("checksum mismatch for {asset} - the download may be corrupted or tampered with")]
+    ChecksumMismatch { asset: String },
+
+    #[error("environment error: {0}")]
+    Environment(String),
+
     #[error("network error: {0}")]
     Network(#[from] reqwest::Error),
 
@@ -52,3 +56,18 @@ pub enum InstallError {
 }
 
 pub type Result<T> = std::result::Result<T, InstallError>;
+
+/// Attach step context to any error, converting it into a `StepFailed`.
+/// Keeps the step modules free of repetitive `map_err` blocks.
+pub(crate) trait StepCtx<T> {
+    fn step_ctx(self, step: Step, what: &str) -> Result<T>;
+}
+
+impl<T, E: std::fmt::Display> StepCtx<T> for std::result::Result<T, E> {
+    fn step_ctx(self, step: Step, what: &str) -> Result<T> {
+        self.map_err(|e| InstallError::StepFailed {
+            step,
+            message: format!("{what}: {e}"),
+        })
+    }
+}
