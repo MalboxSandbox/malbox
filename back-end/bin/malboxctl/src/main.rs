@@ -14,10 +14,6 @@ use commands::{Cli, Command, Commands};
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let config = malbox_config::load_config().await?;
-    let cli_config =
-        malbox_config::cli::load_cli_config().map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
-
     let cli = Cli::parse();
 
     let log_level = match &cli.command {
@@ -34,10 +30,15 @@ async fn main() -> Result<()> {
     };
     init_tracing(log_level);
 
+    // The daemon config is deliberately NOT loaded here: commands that need
+    // it load it lazily, so first-run commands (`install`, `config init`,
+    // completions) work before any configuration exists. The CLI config
+    // already falls back to defaults when absent.
+    let cli_config =
+        malbox_config::cli::load_cli_config().map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
     let api_url = cli.api_url.as_deref().unwrap_or(&cli_config.api.url);
 
     let ctx = Context {
-        config: config.clone(),
         api: ApiClient::new(api_url),
         format: cli.format.clone(),
         verbose: cli.verbose,

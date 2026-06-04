@@ -16,7 +16,17 @@ pub struct StartArgs {
 }
 
 impl Command for StartArgs {
-    async fn execute(self, ctx: &Context) -> Result<()> {
+    async fn execute(self, _ctx: &Context) -> Result<()> {
+        // Loaded lazily (not in main) so configless commands keep working;
+        // for the daemon a missing config is a hard, actionable error.
+        let config = malbox_config::load_config().await.map_err(|e| match e {
+            malbox_config::ConfigError::NotFound => CliError::CommandFailed(
+                "no configuration found - run `malboxctl install` (or `malboxctl config init`) first"
+                    .to_string(),
+            ),
+            e => CliError::CommandFailed(e.to_string()),
+        })?;
+
         let shutdown_token = CancellationToken::new();
 
         let signal_token = shutdown_token.clone();
@@ -40,7 +50,7 @@ impl Command for StartArgs {
             std::process::exit(1);
         });
 
-        let config = ctx.config.clone();
+        let config = config.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         std::thread::spawn(move || {
