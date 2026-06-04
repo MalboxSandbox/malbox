@@ -3,11 +3,16 @@ name = "malboxctl"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["provider-libvirt", "provisioner-ansible"]
+provider-libvirt = ["malbox-daemon/provider-libvirt"]
+provisioner-ansible = ["malbox-daemon/provisioner-ansible"]
+
 [dependencies]
 malbox-cli-common = { path = "../../crates/malbox-cli-common" }
 malbox-config = { path = "../../crates/malbox-config" }
 malbox-installer = { path = "../../crates/malbox-installer" }
-malbox-daemon = { path = "../../crates/malbox-daemon" }
+malbox-daemon = { path = "../../crates/malbox-daemon", default-features = false }
 malbox-tracing = { path = "../../crates/malbox-tracing" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
