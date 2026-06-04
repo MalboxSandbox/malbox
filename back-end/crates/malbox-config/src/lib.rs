@@ -39,7 +39,19 @@ pub async fn load_config() -> Result<&'static Config, ConfigError> {
 async fn load_config_internal() -> Result<Config, ConfigError> {
     let paths = PathConfig::new()?;
 
-    let config_path = if let Some(path) = find_user_config(&paths) {
+    // An explicit override (also set by the installer's systemd unit) takes
+    // precedence over discovery. A broken override fails loudly instead of
+    // silently falling back to another config.
+    let config_path = if let Some(path) = env_config_override() {
+        if !path.exists() {
+            return Err(ConfigError::PathError {
+                message: "MALBOX_CONFIG points to a file that does not exist".to_string(),
+                path,
+            });
+        }
+        debug!(path = %path.display(), "Loaded config from MALBOX_CONFIG");
+        path
+    } else if let Some(path) = find_user_config(&paths) {
         debug!(path = %path.display(), "Loaded user config");
         path
     } else if let Some(path) = find_system_config() {
@@ -68,6 +80,12 @@ async fn load_config_internal() -> Result<Config, ConfigError> {
     debug!("Using paths: {:#?}", config.paths);
 
     Ok(config)
+}
+
+fn env_config_override() -> Option<PathBuf> {
+    std::env::var_os("MALBOX_CONFIG")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn find_user_config(paths: &PathConfig) -> Option<PathBuf> {

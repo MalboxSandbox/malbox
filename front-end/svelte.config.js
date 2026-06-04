@@ -1,5 +1,5 @@
 import { preprocessMeltUI, sequence } from '@melt-ui/pp';
-import adapter from '@sveltejs/adapter-auto';
+import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 /** @type {import('@sveltejs/kit').Config}*/
 const config = {
@@ -7,10 +7,12 @@ const config = {
 	// for more information about preprocessors
 	preprocess: sequence([vitePreprocess(), preprocessMeltUI()]),
 	kit: {
-		// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter()
+		// Single-page app: `adapter-static` with a fallback document emits a
+		// client-rendered bundle (`build/`) that the Rust daemon serves directly.
+		// SSR is disabled in the root +layout.ts; routing happens in the browser.
+		adapter: adapter({
+			fallback: 'index.html'
+		})
 	}
 };
 export default config;

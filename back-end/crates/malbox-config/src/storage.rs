@@ -15,6 +15,17 @@ pub struct PathConfig {
     pub state_dir: PathBuf,
 }
 
+impl Default for PathConfig {
+    fn default() -> Self {
+        Self {
+            config_dir: default_config_dir(),
+            cache_dir: default_cache_dir(),
+            data_dir: default_data_dir(),
+            state_dir: default_state_dir(),
+        }
+    }
+}
+
 // NOTE: Should probably be handled somewhere else, not malbox-config
 impl PathConfig {
     pub fn new() -> Result<Self, ConfigError> {

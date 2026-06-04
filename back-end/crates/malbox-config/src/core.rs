@@ -8,12 +8,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Filesystem layout. The loader always overwrites this with the
+    /// XDG-derived paths, so config files may omit the section entirely.
+    #[serde(default)]
     pub paths: PathConfig,
     pub general: GeneralConfig,
     pub http: HttpConfig,
     pub database: DatabaseConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
+    #[serde(default)]
     pub machinery: MachineryConfig,
     #[serde(default)]
     pub images: Option<ImagesConfig>,
@@ -22,8 +26,64 @@ pub struct Config {
     #[serde(default)]
     pub plugins: PluginsConfig,
     pub analysis: AnalysisConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub machines: Vec<MachineConfig>,
+}
+
+impl Config {
+    /// Stock defaults shared by `malboxctl config init` and the installer.
+    ///
+    /// Callers tweak the returned value (environment, database URL, web dir,
+    /// providers) instead of hand-writing TOML, so generated configuration
+    /// can never drift from the schema the daemon parses.
+    pub fn with_defaults(paths: PathConfig) -> Self {
+        Self {
+            paths,
+            general: GeneralConfig {
+                environment: Environment::Development,
+                log_level: LogLevel::Info,
+                debug: false,
+                max_workers: default_max_workers(),
+                min_workers: default_min_workers(),
+                idle_timeout_ms: default_idle_timeout_ms(),
+            },
+            http: HttpConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8080,
+                tls_enabled: false,
+                cert_path: None,
+                key_path: None,
+                cors_origins: vec!["http://localhost:5173".to_string()],
+                max_upload_size: 100 * 1024 * 1024,
+                web_dir: None,
+            },
+            database: DatabaseConfig {
+                host: "postgres://localhost/malbox_db".to_string(),
+                port: 5432,
+            },
+            providers: ProvidersConfig::default(),
+            machinery: MachineryConfig::default(),
+            images: None,
+            guest_access: None,
+            plugins: PluginsConfig::default(),
+            analysis: AnalysisConfig {
+                timeout: 300,
+                max_vms: 5,
+                default_profile: "default".to_string(),
+                windows: PlatformAnalysisConfig {
+                    default_profile: "win10_default".to_string(),
+                    timeout: Some(300),
+                    max_vms: Some(3),
+                },
+                linux: PlatformAnalysisConfig {
+                    default_profile: "ubuntu_default".to_string(),
+                    timeout: Some(300),
+                    max_vms: Some(2),
+                },
+            },
+            machines: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,11 +115,18 @@ pub struct HttpConfig {
     pub cors_origins: Vec<String>,
     #[serde(default)]
     pub max_upload_size: usize,
+    /// Directory of the built front-end SPA to serve (same-origin) alongside
+    /// the API. When unset the daemon runs API-only - e.g. in development,
+    /// where Vite serves the UI and proxies `/v1` to the daemon.
+    #[serde(default)]
+    pub web_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
+    /// Full PostgreSQL connection string (e.g.
+    /// `postgres://user@host:5432/malbox_db`), passed verbatim to the pool.
     pub host: String,
     pub port: u16,
 }
