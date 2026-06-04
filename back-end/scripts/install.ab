@@ -1,7 +1,9 @@
 import { split } from "std/text"
 
 let GITHUB_REPO = "DualHorizon/malbox"
-let BINARY_NAME = "malbox"
+let BINARY_NAME = "malboxctl"
+// Pinned so a curl|bash bootstrap never pulls a moving, unreviewed dependency.
+let GUM_VERSION = "0.17.0"
 let GUM_TMP_DIR = ""
 
 let COLOR_ACCENT = "#516cf9"
@@ -31,18 +33,8 @@ fun ensure_gum() {
             }
         }
 
-        const gum_release_json = $curl -sSfL "https://api.github.com/repos/charmbracelet/gum/releases/latest"$ failed {
-            echo("Error: could not fetch gum release info")
-            exit(1)
-        }
-
-        const gum_tag = $printf "%s" "{gum_release_json}" | grep "tag_name" | head -1 | sed 's/.*: *"v//;s/".*//'$ failed {
-            echo("Error: could not determine gum version")
-            exit(1)
-        }
-
-        const gum_asset = "gum_{gum_tag}_Linux_{gum_arch}.tar.gz"
-        const gum_url = "https://github.com/charmbracelet/gum/releases/download/v{gum_tag}/{gum_asset}"
+        const gum_asset = "gum_{GUM_VERSION}_Linux_{gum_arch}.tar.gz"
+        const gum_url = "https://github.com/charmbracelet/gum/releases/download/v{GUM_VERSION}/{gum_asset}"
 
         GUM_TMP_DIR = trust $mktemp -d$
 
@@ -126,42 +118,35 @@ fun choose_channel(): Text {
 }
 
 fun fetch_release(channel: Text): Text {
-    if channel == "stable" {
-        const release_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest stable release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases/latest"$ failed {
-            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not fetch release information (no stable release found)"$
-            exit(1)
-        }
-
-        const tag = $printf "%s" "{release_json}" | grep "tag_name" | head -1 | sed 's/.*: *"//;s/".*//'$ failed {
-            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest stable release"$
-            exit(1)
-        }
-
-        if tag == "" {
-            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest stable release"$
-            exit(1)
-        }
-
-        trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Latest stable: {tag}"$
-        return tag
-    }
-
-    const releases_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest nightly release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases"$ failed {
+    // We always list `/releases` (newest-first) rather than `/releases/latest`,
+    // because the latter only returns non-prerelease releases and malbox
+    // currently ships everything as a prerelease. "nightly" takes the newest
+    // release of any kind; "stable" takes the newest release whose tag has no
+    // pre-release suffix (e.g. v0.1.0 but not v0.1.0-alpha.5).
+    const releases_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest {channel} release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not fetch release information"$
         exit(1)
     }
 
-    const tag = $printf "%s" "{releases_json}" | grep "tag_name" | head -1 | sed 's/.*: *"//;s/".*//'$ failed {
-        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest nightly release"$
-        exit(1)
+    const tags = trust $printf "%s" "{releases_json}" | grep "tag_name" | sed 's/.*: *"//;s/".*//'$
+
+    let tag = ""
+    if channel == "stable" {
+        tag = trust $printf "%s" "{tags}" | grep -v -- "-" | head -1$
+    } else {
+        tag = trust $printf "%s" "{tags}" | head -1$
     }
 
     if tag == "" {
-        trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest nightly release"$
+        if channel == "stable" {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "No stable release available yet (only pre-releases exist - try the nightly channel)"$
+        } else {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest {channel} release"$
+        }
         exit(1)
     }
 
-    trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Latest nightly: {tag}"$
+    trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Latest {channel}: {tag}"$
     return tag
 }
 
@@ -173,6 +158,8 @@ fun download_binary(tag: Text, asset_name: Text): Text {
 
     $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Downloading {asset_name}..." -- curl -sSfL -o "{tmp_dir}/{asset_name}" "{download_url}"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to download binary"$
+        trust $gum style --foreground "{COLOR_FAINT}" "No prebuilt binary may exist yet for this platform ({asset_name})."$
+        trust $gum style --foreground "{COLOR_FAINT}" "Check https://github.com/{GITHUB_REPO}/releases for available assets."$
         trust silent $rm -rf "{tmp_dir}"$
         exit(1)
     }
@@ -185,11 +172,25 @@ fun download_binary(tag: Text, asset_name: Text): Text {
 }
 
 fun verify_checksum(tmp_dir: Text, asset_name: Text) {
-    $test -f "{tmp_dir}/{asset_name}.sha256"$ succeeded {
-        $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Verifying checksum..." -- bash -c "cd \"{tmp_dir}\" && sha256sum -c \"{asset_name}.sha256\""$ failed {
-            $bash -c "cd \"{tmp_dir}\" && shasum -a 256 -c \"{asset_name}.sha256\""$ failed {
-                trust $gum log --level warn --prefix.foreground "{COLOR_WARN}" "Checksum verification failed"$
+    // When no sidecar was published the download step already warned; only a
+    // present-but-mismatching checksum is a hard failure (corrupted or
+    // tampered download, never something to install).
+    const has_checksum = trust $test -f "{tmp_dir}/{asset_name}.sha256" && echo "yes" || echo "no"$
+    if has_checksum == "yes" {
+        let verified = false
+        $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Verifying checksum..." -- bash -c "cd \"{tmp_dir}\" && sha256sum -c \"{asset_name}.sha256\""$ succeeded {
+            verified = true
+        }
+        if not verified {
+            $bash -c "cd \"{tmp_dir}\" && shasum -a 256 -c \"{asset_name}.sha256\""$ succeeded {
+                verified = true
             }
+        }
+        if not verified {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Checksum verification failed - aborting installation"$
+            trust silent $rm -rf "{tmp_dir}"$
+            cleanup_gum()
+            exit(1)
         }
     }
 }
@@ -200,7 +201,7 @@ fun install_binary(tmp_dir: Text, asset_name: Text, install_dir: Text) {
         exit(1)
     }
 
-    $mv "{tmp_dir}/malbox-cli" "{install_dir}/{BINARY_NAME}"$ failed {
+    $mv "{tmp_dir}/malboxctl" "{install_dir}/{BINARY_NAME}"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to install binary"$
         exit(1)
     }
@@ -240,14 +241,14 @@ main {
     }
 
     const tag = fetch_release(channel)
-    const asset_name = "malbox-{tag}-{arch}.tar.gz"
+    const asset_name = "malboxctl-{tag}-{arch}.tar.gz"
     const tmp_dir = download_binary(tag, asset_name)
     verify_checksum(tmp_dir, asset_name)
     install_binary(tmp_dir, asset_name, install_dir)
 
     echo("")
     trust $gum style --foreground "{COLOR_SUCCESS}" --bold "Malbox CLI installed successfully!"$
-    trust $gum style --foreground "{COLOR_FAINT}" "Run malbox install to set up Malbox."$
+    trust $gum style --foreground "{COLOR_FAINT}" "Run malboxctl install to set up Malbox."$
 
     cleanup_gum()
 }
