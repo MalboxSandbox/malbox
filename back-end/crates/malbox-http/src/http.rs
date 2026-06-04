@@ -5,12 +5,14 @@ use malbox_plugin_internal::registry::PluginRegistry;
 use malbox_resources::MachinePool;
 use malbox_scheduler::TaskCancellationRegistry;
 use malbox_utils::SampleStore;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
-use tracing::{Level, info};
+use tracing::{Level, info, warn};
 
 mod dto;
 mod error;
@@ -58,7 +60,30 @@ pub async fn serve(
         cancel_registry,
     };
 
-    let app = api_router()
+    let app = api_router();
+
+    // Serve the front-end SPA from the same origin as the API when configured.
+    // The `/v1` API routes are matched first; any other path falls back to the
+    // static bundle, and unknown paths return index.html so the SPA's
+    // client-side router can resolve deep links.
+    let app = match shared_state.config.http.web_dir.as_deref() {
+        Some(dir) if Path::new(dir).is_dir() => {
+            let dir = PathBuf::from(dir);
+            let index = dir.join("index.html");
+            info!(web_dir = %dir.display(), "serving front-end SPA");
+            app.fallback_service(ServeDir::new(dir).not_found_service(ServeFile::new(index)))
+        }
+        Some(dir) => {
+            warn!(
+                web_dir = %dir,
+                "configured http.web_dir does not exist; serving API only"
+            );
+            app.fallback(handler_404)
+        }
+        None => app.fallback(handler_404),
+    };
+
+    let app = app
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(
@@ -88,8 +113,7 @@ pub async fn serve(
 
 fn api_router() -> Router<AppState> {
     Router::new()
-        .route("/", get(root))
-        .fallback(handler_404)
+        .route("/healthz", get(health))
         .merge(tasks::cancel::router())
         .merge(tasks::create::router())
         .merge(tasks::get::router())
@@ -109,8 +133,8 @@ fn api_router() -> Router<AppState> {
         .merge(transforms::delete::router())
 }
 
-async fn root() -> &'static str {
-    "Server is running!"
+async fn health() -> &'static str {
+    "ok"
 }
 
 async fn handler_404() -> impl IntoResponse {
