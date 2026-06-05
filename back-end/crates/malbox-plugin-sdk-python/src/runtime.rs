@@ -28,10 +28,10 @@ pub fn run(
 
     let python_plugin = PythonPlugin::new(plugin);
 
-    // Release the GIL while the Rust runtime runs the blocking event loop.
-    // The GIL is re-acquired inside PythonPlugin's trait methods when
-    // dispatching back into Python handler code.
-    py.allow_threads(|| {
+    // Detach from the interpreter (releasing the GIL) while the Rust runtime
+    // runs the blocking event loop. PythonPlugin's trait methods re-attach
+    // when dispatching back into Python handler code.
+    py.detach(|| {
         let runtime = HostRuntime::new(python_plugin, meta, &[]).map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to initialize runtime: {e}"))
         })?;

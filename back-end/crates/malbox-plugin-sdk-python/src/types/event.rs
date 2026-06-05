@@ -1,7 +1,7 @@
 use malbox_plugin_transport::messages::events::Event;
 use pyo3::prelude::*;
 
-#[pyclass(name = "Event", module = "malbox_plugin_sdk")]
+#[pyclass(name = "Event", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyEvent {
     pub(crate) inner: Event,

@@ -8,7 +8,7 @@ enum Severity {
     Unhealthy,
 }
 
-#[pyclass(name = "HealthStatus", module = "malbox_plugin_sdk")]
+#[pyclass(name = "HealthStatus", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyHealthStatus {
     pub(crate) inner: HealthStatus,

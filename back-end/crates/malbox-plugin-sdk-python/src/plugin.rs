@@ -68,13 +68,13 @@ impl PythonPlugin {
 }
 
 // SAFETY: Py<PyAny> is Send. All access to the Python object goes through
-// Python::with_gil, which acquires the GIL before touching any Python state.
+// Python::attach, which acquires the GIL before touching any Python state.
 unsafe impl Send for PythonPlugin {}
 unsafe impl Sync for PythonPlugin {}
 
 impl Plugin for PythonPlugin {
     fn health_check(&self) -> HealthStatus {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self.py_plugin.call_method0(py, "health_check");
             match result {
                 Ok(obj) => match obj.extract::<PyHealthStatus>(py) {
@@ -95,7 +95,7 @@ impl Plugin for PythonPlugin {
 
 impl HostPlugin for PythonPlugin {
     fn on_task(&self, ctx: &Context) -> Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let (py_ctx, valid) = unsafe { PyContext::from_ref(ctx) };
 
             let result = self.py_plugin.call_method1(py, "on_task", (py_ctx,));
@@ -109,7 +109,7 @@ impl HostPlugin for PythonPlugin {
     }
 
     fn on_start(&self, config: HashMap<String, String>) -> Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let dict = PyDict::new(py);
             for (k, v) in &config {
                 dict.set_item(k, v)?;
@@ -123,7 +123,7 @@ impl HostPlugin for PythonPlugin {
     }
 
     fn on_stop(&self) -> Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self.py_plugin.call_method0(py, "on_stop")?;
             self.maybe_await(py, result.bind(py))?;
             Ok(())
@@ -132,7 +132,7 @@ impl HostPlugin for PythonPlugin {
     }
 
     fn on_event(&self, event: Event) -> Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let py_event = PyEvent::from(event);
 
             let result = self.py_plugin.call_method1(py, "on_event", (py_event,))?;

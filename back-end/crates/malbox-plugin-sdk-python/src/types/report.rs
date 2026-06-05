@@ -7,7 +7,13 @@ use malbox_plugin_sdk::report::{
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Classification", module = "malbox_plugin_sdk", eq, eq_int)]
+#[pyclass(
+    name = "Classification",
+    module = "malbox_plugin_sdk",
+    from_py_object,
+    eq,
+    eq_int
+)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PyClassification {
     Clean = 0,
@@ -27,7 +33,13 @@ impl From<PyClassification> for Classification {
     }
 }
 
-#[pyclass(name = "Confidence", module = "malbox_plugin_sdk", eq, eq_int)]
+#[pyclass(
+    name = "Confidence",
+    module = "malbox_plugin_sdk",
+    from_py_object,
+    eq,
+    eq_int
+)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PyConfidence {
     Low = 0,
@@ -47,7 +59,7 @@ impl From<PyConfidence> for Confidence {
 
 // ─── Indicator ───────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Indicator", module = "malbox_plugin_sdk")]
+#[pyclass(name = "Indicator", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyIndicator {
     pub(crate) inner: Indicator,
@@ -102,7 +114,7 @@ impl From<PyIndicator> for Indicator {
 
 // ─── Ttp ─────────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Ttp", module = "malbox_plugin_sdk")]
+#[pyclass(name = "Ttp", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyTtp {
     pub(crate) inner: Ttp,
@@ -142,7 +154,7 @@ impl From<PyTtp> for Ttp {
 
 // ─── ArtifactRef ─────────────────────────────────────────────────────────────
 
-#[pyclass(name = "ArtifactRef", module = "malbox_plugin_sdk")]
+#[pyclass(name = "ArtifactRef", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyArtifactRef {
     pub(crate) inner: ArtifactRef,
@@ -186,7 +198,7 @@ impl From<PyArtifactRef> for ArtifactRef {
 
 // ─── KvPair ──────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "KvPair", module = "malbox_plugin_sdk")]
+#[pyclass(name = "KvPair", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyKvPair {
     pub(crate) inner: KvPair,
@@ -226,7 +238,7 @@ impl From<PyKvPair> for KvPair {
 
 // ─── Column ──────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Column", module = "malbox_plugin_sdk")]
+#[pyclass(name = "Column", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyColumn {
     pub(crate) inner: Column,
@@ -266,7 +278,7 @@ impl From<PyColumn> for Column {
 
 // ─── TreeNode ────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "TreeNode", module = "malbox_plugin_sdk")]
+#[pyclass(name = "TreeNode", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyTreeNode {
     pub(crate) inner: TreeNode,
@@ -280,7 +292,7 @@ impl PyTreeNode {
         py: Python<'_>,
         label: String,
         children: Vec<PyTreeNode>,
-        meta: Option<PyObject>,
+        meta: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let meta_value = match meta {
             Some(obj) => py_obj_to_json_value(py, &obj)?,
@@ -310,7 +322,7 @@ impl PyTreeNode {
     }
 
     #[getter]
-    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn meta(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         json_value_to_py_obj(py, &self.inner.meta)
     }
 }
@@ -323,7 +335,7 @@ impl From<PyTreeNode> for TreeNode {
 
 // ─── TimelineEvent ───────────────────────────────────────────────────────────
 
-#[pyclass(name = "TimelineEvent", module = "malbox_plugin_sdk")]
+#[pyclass(name = "TimelineEvent", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyTimelineEvent {
     pub(crate) inner: TimelineEvent,
@@ -338,7 +350,7 @@ impl PyTimelineEvent {
         ts: String,
         label: String,
         severity: Option<String>,
-        meta: Option<PyObject>,
+        meta: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let meta_value = match meta {
             Some(obj) => py_obj_to_json_value(py, &obj)?,
@@ -370,7 +382,7 @@ impl PyTimelineEvent {
     }
 
     #[getter]
-    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn meta(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         json_value_to_py_obj(py, &self.inner.meta)
     }
 }
@@ -383,7 +395,7 @@ impl From<PyTimelineEvent> for TimelineEvent {
 
 // ─── GraphNode ───────────────────────────────────────────────────────────────
 
-#[pyclass(name = "GraphNode", module = "malbox_plugin_sdk")]
+#[pyclass(name = "GraphNode", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyGraphNode {
     pub(crate) inner: GraphNode,
@@ -393,7 +405,7 @@ pub struct PyGraphNode {
 impl PyGraphNode {
     #[new]
     #[pyo3(signature = (id, label, meta=None))]
-    fn new(py: Python<'_>, id: String, label: String, meta: Option<PyObject>) -> PyResult<Self> {
+    fn new(py: Python<'_>, id: String, label: String, meta: Option<Py<PyAny>>) -> PyResult<Self> {
         let meta_value = match meta {
             Some(obj) => py_obj_to_json_value(py, &obj)?,
             None => serde_json::Value::Null,
@@ -418,7 +430,7 @@ impl PyGraphNode {
     }
 
     #[getter]
-    fn meta(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn meta(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         json_value_to_py_obj(py, &self.inner.meta)
     }
 }
@@ -431,7 +443,7 @@ impl From<PyGraphNode> for GraphNode {
 
 // ─── GraphEdge ───────────────────────────────────────────────────────────────
 
-#[pyclass(name = "GraphEdge", module = "malbox_plugin_sdk")]
+#[pyclass(name = "GraphEdge", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyGraphEdge {
     pub(crate) inner: GraphEdge,
@@ -476,7 +488,7 @@ impl From<PyGraphEdge> for GraphEdge {
 
 // ─── Block ───────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Block", module = "malbox_plugin_sdk")]
+#[pyclass(name = "Block", module = "malbox_plugin_sdk", from_py_object)]
 #[derive(Clone)]
 pub struct PyBlock {
     pub(crate) inner: Block,
@@ -543,7 +555,7 @@ impl PyBlock {
     fn table(
         py: Python<'_>,
         columns: Vec<PyColumn>,
-        rows: PyObject,
+        rows: Py<PyAny>,
         sortable: bool,
         searchable: bool,
     ) -> PyResult<Self> {
@@ -572,7 +584,7 @@ impl PyBlock {
 
     #[staticmethod]
     #[pyo3(signature = (data, collapsed=true))]
-    fn json(py: Python<'_>, data: PyObject, collapsed: bool) -> PyResult<Self> {
+    fn json(py: Python<'_>, data: Py<PyAny>, collapsed: bool) -> PyResult<Self> {
         let json_mod = py.import("json")?;
         let json_str = json_mod
             .call_method1("dumps", (data.bind(py),))?
@@ -666,7 +678,7 @@ impl From<PyBlock> for Block {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Convert a Python object to a serde_json::Value via Python's json module.
-fn py_obj_to_json_value(py: Python<'_>, obj: &PyObject) -> PyResult<serde_json::Value> {
+fn py_obj_to_json_value(py: Python<'_>, obj: &Py<PyAny>) -> PyResult<serde_json::Value> {
     let json_mod = py.import("json")?;
     let json_str = json_mod
         .call_method1("dumps", (obj.bind(py),))?
@@ -676,7 +688,7 @@ fn py_obj_to_json_value(py: Python<'_>, obj: &PyObject) -> PyResult<serde_json::
 }
 
 /// Convert a serde_json::Value back to a Python object via Python's json module.
-fn json_value_to_py_obj(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObject> {
+fn json_value_to_py_obj(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
     let json_str = serde_json::to_string(value)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let json_mod = py.import("json")?;

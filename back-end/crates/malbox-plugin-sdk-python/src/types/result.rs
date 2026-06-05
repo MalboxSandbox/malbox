@@ -9,7 +9,7 @@ use super::report::{PyArtifactRef, PyBlock, PyClassification, PyConfidence, PyIn
 
 // ─── PluginResult ───────────────────────────────────────────────────────────
 
-#[pyclass(name = "PluginResult", module = "malbox_plugin_sdk")]
+#[pyclass(name = "PluginResult", module = "malbox_plugin_sdk", from_py_object)]
 pub struct PyPluginResult {
     pub(crate) inner: PluginResult,
 }
@@ -37,7 +37,7 @@ impl Clone for PyPluginResult {
 #[pymethods]
 impl PyPluginResult {
     #[staticmethod]
-    fn json(py: Python<'_>, name: String, data: PyObject) -> PyResult<Self> {
+    fn json(py: Python<'_>, name: String, data: Py<PyAny>) -> PyResult<Self> {
         let json_str = py
             .import("json")?
             .call_method1("dumps", (data.bind(py),))?
@@ -169,8 +169,8 @@ impl PyReportBuilder {
         slf
     }
 
-    fn raw(mut slf: PyRefMut<'_, Self>, value: PyObject) -> PyResult<PyRefMut<'_, Self>> {
-        let json_val: serde_json::Value = Python::with_gil(|py| {
+    fn raw(mut slf: PyRefMut<'_, Self>, value: Py<PyAny>) -> PyResult<PyRefMut<'_, Self>> {
+        let json_val: serde_json::Value = Python::attach(|py| {
             let json_str = py
                 .import("json")?
                 .call_method1("dumps", (value.bind(py),))?
