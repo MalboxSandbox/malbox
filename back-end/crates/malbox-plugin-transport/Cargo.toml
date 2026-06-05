@@ -9,7 +9,7 @@ grpc = ["dep:tonic", "dep:prost", "dep:tonic-prost", "dep:tokio", "dep:tokio-str
 ipc = ["dep:iceoryx2", "dep:postcard", "dep:serde"]
 
 [dependencies]
-iceoryx2 = { version = "0.8.1", default-features = false, optional = true }
+iceoryx2 = { version = "0.9.1", default-features = false, optional = true }
 postcard = { version = "1", features = ["alloc"], optional = true }
 serde = { workspace = true, optional = true }
 

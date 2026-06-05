@@ -151,7 +151,7 @@ impl PluginManager {
                 // plugin processes. Without this, a dead server port remains
                 // registered on the service and the new process fails with
                 // ExceedsMaxSupportedServers.
-                Node::<IpcService>::cleanup_dead_nodes(self.ipc_node.config());
+                Node::<IpcService>::try_cleanup_dead_nodes(self.ipc_node.config());
 
                 let mut instance = spawn_host_plugin(entry, Arc::clone(&self.ipc_node)).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
