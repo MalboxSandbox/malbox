@@ -13,5 +13,6 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync", "fs"] }
 toml.workspace = true
-sha2 = "0.10"
+sha2 = { workspace = true }
+hex = { workspace = true }
 serde_json = { workspace = true }

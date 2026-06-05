@@ -6,10 +6,9 @@ use sha2::{Digest, Sha256, Sha512};
 // Hashes read their input; they do not mutate it. Taking `&[u8]` lets callers
 // hash a borrowed slice (e.g. `Bytes`/`Vec<u8>`) without copying it first.
 //
-// All digests are rendered as fixed-width, zero-padded lowercase hex. The
-// per-byte `format!("{:x}", b)` previously used here dropped the leading zero
-// of any byte < 0x10, producing malformed, variable-length hashes; the
-// `{:0Nx}`/whole-digest `{:x}` forms below pad correctly.
+// All digests are rendered as fixed-width, zero-padded lowercase hex via
+// `hex::encode` (digest 0.11 dropped the `LowerHex` impl on its output
+// array). CRC-32 is a plain `u32`, so it keeps the `{:08x}` form.
 
 pub fn get_md5(buf: &[u8]) -> String {
     // md5's `Digest` renders as full 32-char padded hex via its `LowerHex` impl.
@@ -19,19 +18,19 @@ pub fn get_md5(buf: &[u8]) -> String {
 pub fn get_sha1(buf: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.update(buf);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 pub fn get_sha256(buf: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(buf);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 pub fn get_sha512(buf: &[u8]) -> String {
     let mut hasher = Sha512::new();
     hasher.update(buf);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 pub fn get_crc32(buf: &[u8]) -> String {

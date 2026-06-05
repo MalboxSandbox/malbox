@@ -21,7 +21,7 @@ pub(crate) fn hash_provider_config(config: &Option<toml::Value>) -> String {
         Some(val) => {
             let json = serde_json::to_string(val).unwrap_or_default();
             let hash = Sha256::digest(json.as_bytes());
-            format!("{:x}", hash)
+            hex::encode(hash)
         }
         None => "none".to_string(),
     }

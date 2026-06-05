@@ -236,7 +236,7 @@ impl GitHubClient {
         })?;
 
         let digest = Sha256::digest(&bytes);
-        let actual: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let actual = hex::encode(digest);
 
         if !actual.eq_ignore_ascii_case(expected) {
             return Err(InstallError::ChecksumMismatch {
