@@ -30,5 +30,5 @@ globset = { version = "0.4", optional = true }
 
 [dev-dependencies]
 malbox-tracing = { path = "../malbox-tracing" }
-tempfile = "3.26"
+tempfile = "3.27"
 futures = { workspace = true }
