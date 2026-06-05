@@ -1,5 +1,5 @@
 use crate::error::{Result, SampleError};
-use sqlx::{FromRow, PgPool, postgres::PgDatabaseError, query_as};
+use sqlx::{AssertSqlSafe, FromRow, PgPool, postgres::PgDatabaseError, query_as};
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone)]
@@ -122,7 +122,9 @@ pub async fn fetch_sample_by_hash(
         column
     );
 
-    sqlx::query_as::<_, SampleEntity>(&query)
+    // Safety: `column` is restricted to the whitelist above and the hash value
+    // is bound as a parameter, so the dynamic SQL is injection-safe.
+    sqlx::query_as::<_, SampleEntity>(AssertSqlSafe(query))
         .bind(hash_value)
         .fetch_optional(pool)
         .await
