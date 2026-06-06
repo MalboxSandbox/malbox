@@ -9,7 +9,12 @@ grpc = ["dep:tonic", "dep:prost", "dep:tonic-prost", "dep:tokio", "dep:tokio-str
 ipc = ["dep:iceoryx2", "dep:postcard", "dep:serde"]
 
 [dependencies]
-iceoryx2 = { version = "0.9.1", default-features = false, optional = true }
+# `std` is mandatory: it selects iceoryx2's recommended on-disk serializer.
+# Every process sharing malbox services
+# must agree on it or cross-process opens fail with ServiceInCorruptedState.
+# default-features stay off to keep the `console` logger out; the daemon
+# layers `tracing` on top (see malbox-plugin-internal).
+iceoryx2 = { version = "0.9.1", default-features = false, features = ["std"], optional = true }
 postcard = { version = "1", features = ["alloc"], optional = true }
 serde = { workspace = true, optional = true }
 
