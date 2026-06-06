@@ -9,7 +9,7 @@ pub mod error;
 pub mod handle;
 pub mod health;
 pub mod instance;
-pub mod ipc_channels;
+pub mod ipc_reactor;
 pub mod log_router;
 pub mod runtime;
 
@@ -23,17 +23,15 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
 
-use malbox_plugin_transport::ipc::{IpcService, Node};
-
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::PluginHandle;
 use crate::manager::health::spawn_health_check_loop;
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
+use crate::manager::ipc_reactor::IpcReactorHandle;
 use crate::manager::runtime::{GuestRuntime, HostRuntime, PluginRuntime};
 use crate::registry::PluginRegistry;
 use crate::registry::manifest::{PluginStateConfig, PluginTypeConfig};
 use crate::registry::types::{PluginEntry, PluginId};
-use crate::transport::ipc::DaemonEventPublisher;
 
 /// Central plugin lifecycle manager.
 ///
@@ -46,8 +44,7 @@ use crate::transport::ipc::DaemonEventPublisher;
 pub struct PluginManager {
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     registry: Arc<PluginRegistry>,
-    emitter: Arc<DaemonEventPublisher>,
-    ipc_node: Arc<Node<IpcService>>,
+    ipc: IpcReactorHandle,
     log_dir: PathBuf,
     /// Held to keep the background health-check task alive for the lifetime of the manager.
     #[allow(dead_code)]
@@ -61,8 +58,7 @@ impl PluginManager {
     #[instrument(skip_all, err)]
     pub async fn new(
         registry: Arc<PluginRegistry>,
-        emitter: Arc<DaemonEventPublisher>,
-        ipc_node: Arc<Node<IpcService>>,
+        ipc: IpcReactorHandle,
         health_check_interval: Duration,
         token: CancellationToken,
         log_dir: PathBuf,
@@ -78,7 +74,7 @@ impl PluginManager {
 
             if is_persistent && is_host {
                 info!(plugin = %entry.id, "spawning persistent host plugin");
-                match spawn_host_plugin(entry, Arc::clone(&ipc_node)).await {
+                match spawn_host_plugin(entry, ipc.clone()).await {
                     Ok(instance) => {
                         instances.insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
                     }
@@ -100,8 +96,7 @@ impl PluginManager {
         Ok(Self {
             instances,
             registry,
-            emitter,
-            ipc_node,
+            ipc,
             log_dir,
             health_check_handle,
             token,
@@ -115,7 +110,7 @@ impl PluginManager {
     ///   is [`Ready`](PluginLifecycle::Ready), transitions it to `Busy`, and
     ///   returns a handle.
     /// - **Ephemeral**: spawns a fresh process, marks it `Ready` then `Busy`,
-    ///   and returns a handle. The handle owns the instance — it is not inserted
+    ///   and returns a handle. The handle owns the instance - it is not inserted
     ///   into `self.instances`.
     /// - **Scoped**: not yet implemented.
     pub async fn acquire(&self, plugin_id: &PluginId) -> Result<PluginHandle> {
@@ -151,9 +146,9 @@ impl PluginManager {
                 // plugin processes. Without this, a dead server port remains
                 // registered on the service and the new process fails with
                 // ExceedsMaxSupportedServers.
-                Node::<IpcService>::try_cleanup_dead_nodes(self.ipc_node.config());
+                self.ipc.cleanup_dead_nodes().await;
 
-                let mut instance = spawn_host_plugin(entry, Arc::clone(&self.ipc_node)).await?;
+                let mut instance = spawn_host_plugin(entry, self.ipc.clone()).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
                 instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
 
@@ -266,7 +261,7 @@ impl PluginManager {
     pub async fn reconcile(&self) {
         let snapshot = self.registry.snapshot();
 
-        // Check for removed plugins — stop instances that are no longer registered.
+        // Check for removed plugins - stop instances that are no longer registered.
         let orphaned_ids: Vec<PluginId> = self
             .instances
             .iter()
@@ -289,6 +284,7 @@ impl PluginManager {
                 }
             }
             self.instances.remove(plugin_id);
+            self.ipc.remove_channels(plugin_id.clone());
         }
 
         // Spawn new persistent host plugins that should be running.
@@ -298,7 +294,7 @@ impl PluginManager {
 
             if is_persistent && is_host && !self.instances.contains_key(&entry.id) {
                 info!(plugin = %entry.id, "spawning newly discovered persistent host plugin");
-                match spawn_host_plugin(entry, Arc::clone(&self.ipc_node)).await {
+                match spawn_host_plugin(entry, self.ipc.clone()).await {
                     Ok(instance) => {
                         self.instances
                             .insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
@@ -333,6 +329,7 @@ impl PluginManager {
                 }
 
                 instance.lifecycle = PluginLifecycle::Stopped;
+                self.ipc.remove_channels(plugin_id.clone());
             }
         }
 
@@ -344,14 +341,9 @@ impl PluginManager {
         &self.registry
     }
 
-    /// Returns a reference to the IPC event emitter.
-    pub fn emitter(&self) -> &Arc<DaemonEventPublisher> {
-        &self.emitter
-    }
-
-    /// Returns a reference to the shared iceoryx2 IPC node.
-    pub fn ipc_node(&self) -> &Arc<Node<IpcService>> {
-        &self.ipc_node
+    /// Returns the IPC reactor handle (also the daemon event emitter).
+    pub fn emitter(&self) -> &IpcReactorHandle {
+        &self.ipc
     }
 }
 
@@ -359,10 +351,7 @@ impl PluginManager {
 ///
 /// The returned instance is in the [`Starting`](PluginLifecycle::Starting)
 /// state with the process handle attached.
-async fn spawn_host_plugin(
-    entry: &PluginEntry,
-    ipc_node: Arc<Node<IpcService>>,
-) -> Result<PluginInstance> {
+async fn spawn_host_plugin(entry: &PluginEntry, ipc: IpcReactorHandle) -> Result<PluginInstance> {
     let child = tokio::process::Command::new(&entry.binary_path)
         .env("MALBOX_PLUGIN_ID", entry.id.as_str())
         .kill_on_drop(true)
@@ -375,8 +364,7 @@ async fn spawn_host_plugin(
         lifecycle: PluginLifecycle::Starting,
         runtime: PluginRuntime::Host(HostRuntime {
             process: child,
-            task_channels: None,
-            ipc_node,
+            ipc,
         }),
         started_at: Some(Instant::now()),
         last_health_check: None,

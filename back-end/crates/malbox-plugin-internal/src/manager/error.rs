@@ -31,6 +31,9 @@ pub enum ManagerError {
 
     #[error("Scoped plugins are not yet implemented")]
     ScopedNotImplemented,
+
+    #[error("IPC reactor error: {0}")]
+    Reactor(String),
 }
 
 pub type Result<T> = std::result::Result<T, ManagerError>;

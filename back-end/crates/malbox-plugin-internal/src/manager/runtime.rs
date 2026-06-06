@@ -1,14 +1,11 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
-use tracing::{debug, info};
-
-use malbox_plugin_transport::ipc::{IpcService, Node};
+use tracing::debug;
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::{OutputFormat, PluginOutput};
-use crate::manager::ipc_channels::HostTaskChannels;
+use crate::manager::ipc_reactor::IpcReactorHandle;
 use crate::registry::types::{PluginEntry, PluginId};
 use crate::transport::daemon::GrpcClient;
 
@@ -31,11 +28,10 @@ pub trait PluginExecution: Send {
     async fn check_health(&mut self) -> bool;
 }
 
-/// Host plugin runtime: child process + IPC channels.
+/// Host plugin runtime: child process + a handle to the IPC reactor.
 pub struct HostRuntime {
     pub process: tokio::process::Child,
-    pub task_channels: Option<Arc<HostTaskChannels>>,
-    pub ipc_node: Arc<Node<IpcService>>,
+    pub ipc: IpcReactorHandle,
 }
 
 /// Guest plugin runtime: gRPC client connection.
@@ -58,33 +54,23 @@ impl PluginExecution for HostRuntime {
         sample_path: &str,
         config: HashMap<String, String>,
     ) -> Result<Vec<PluginOutput>> {
-        debug!(plugin = %plugin_id, task_id, "executing task on host plugin via IPC");
+        debug!(plugin = %plugin_id, task_id, "executing task on host plugin via IPC reactor");
 
-        if self.task_channels.is_none() {
-            let channels = HostTaskChannels::new(&self.ipc_node, plugin_id.as_str())?;
-            self.task_channels = Some(Arc::new(channels));
-        }
-
-        let channels = Arc::clone(self.task_channels.as_ref().unwrap());
-        let owned_plugin_id = plugin_id.clone();
-        let sample_path = sample_path.to_string();
         let timeout_secs = entry
             .runtime_config
             .as_ref()
             .map(|c| c.analysis_timeout)
             .unwrap_or(300);
-        let timeout = Duration::from_secs(timeout_secs);
 
-        tokio::task::spawn_blocking(move || {
-            channels.execute_task(&owned_plugin_id, task_id, &sample_path, &config, timeout)
-        })
-        .await
-        .map_err(|e| {
-            ManagerError::ExecutionFailed(
-                plugin_id.clone(),
-                format!("spawn_blocking panicked: {e}"),
+        self.ipc
+            .execute_task(
+                plugin_id,
+                task_id,
+                sample_path.to_string(),
+                config,
+                Duration::from_secs(timeout_secs),
             )
-        })?
+            .await
     }
 
     async fn check_health(&mut self) -> bool {
@@ -129,6 +115,7 @@ impl PluginExecution for GuestRuntime {
                             debug!(plugin = %plugin_id, task_id = result.task_id, "plugin signaled ready");
                         }
                         ResultKind::Result => {
+                            use tracing::info;
                             info!(
                                 plugin = %plugin_id,
                                 task_id = result.task_id,
@@ -159,6 +146,7 @@ impl PluginExecution for GuestRuntime {
                                         format!("failed to decode ResultRef: {e}"),
                                     )
                                 })?;
+                            use tracing::info;
                             info!(
                                 plugin = %plugin_id,
                                 task_id = result.task_id,
@@ -241,6 +229,7 @@ async fn pull_result_chunks(
     ref_msg: &crate::transport::grpc::proto::ResultRef,
 ) -> Result<PluginOutput> {
     use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
+    use tracing::info;
 
     let mut stream = client
         .pull_result(ref_msg.handle.clone())
