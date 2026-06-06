@@ -3,7 +3,7 @@ use malbox_database::init_database;
 use malbox_http::http;
 use malbox_machinery::provider::{create_provider, list_providers};
 use malbox_plugin_internal::manager::PluginManager;
-use malbox_plugin_internal::transport::ipc::{DaemonEventPublisher, IpcService, NodeBuilder};
+use malbox_plugin_internal::manager::ipc_reactor::IpcReactor;
 use malbox_resources::{MachinePool, resolve_transport};
 use malbox_scheduler::init_scheduler;
 use malbox_utils::{ResultStore, SampleStore};
@@ -174,26 +174,21 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
             .map_err(|e| DaemonError::Internal(format!("Config reconciliation failed: {}", e)))?;
     }
 
-    // Initialize IPC event emitter and plugin manager
+    // Spawn the IPC reactor thread (owns all daemon-side iceoryx2 state)
+    // and initialize the plugin manager.
+    let (ipc, ipc_join) = {
+        let _span = info_span!("init.ipc_reactor").entered();
+        IpcReactor::spawn()
+            .map_err(|e| DaemonError::Internal(format!("Failed to start IPC reactor: {}", e)))?
+    };
+
     let plugin_manager = {
         let _span = info_span!("init.plugin_manager").entered();
 
-        let ipc_node = Arc::new(
-            NodeBuilder::new()
-                .create::<IpcService>()
-                .map_err(|e| DaemonError::Internal(format!("Failed to create IPC node: {}", e)))?,
-        );
-
-        let emitter = Arc::new(DaemonEventPublisher::new(&ipc_node).map_err(|e| {
-            DaemonError::Internal(format!("Failed to create event emitter: {}", e))
-        })?);
-
-        // Create plugin manager (replaces the logging-only event listener)
         Arc::new(
             PluginManager::new(
                 Arc::clone(&registry),
-                emitter,
-                Arc::clone(&ipc_node),
+                ipc.clone(),
                 std::time::Duration::from_secs(10),
                 shutdown_token.child_token(),
                 config.paths.data_dir.join("logs"),
@@ -257,6 +252,15 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
         .is_err()
     {
         warn!("Graceful shutdown timed out after 30s");
+    }
+
+    // Stop the IPC reactor last: late scheduler workers draining during the
+    // teardown window (and a future DaemonShutdown broadcast) emit through
+    // its handle. The join blocks this thread for at most one reactor tick;
+    // acceptable since the runtime is already in teardown.
+    ipc.shutdown();
+    if ipc_join.join().is_err() {
+        warn!("IPC reactor thread panicked during shutdown");
     }
 
     Ok(())
