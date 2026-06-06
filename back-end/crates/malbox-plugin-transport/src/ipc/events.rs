@@ -12,6 +12,7 @@ use crate::error::{Result, TransportError};
 use crate::messages::events::Event;
 use crate::traits::TransportEmitter;
 
+use super::daemon_notify::{DaemonNotifier, DaemonNotifyKind};
 use super::headers::{EventHeader, EventKind};
 
 use iceoryx2::port::publisher::Publisher;
@@ -75,7 +76,7 @@ impl From<&Event> for EventHeader {
     }
 }
 
-type IpcServiceType = iceoryx2::service::ipc_threadsafe::Service;
+type IpcServiceType = iceoryx2::service::ipc::Service;
 
 const MAX_EVENT_PAYLOAD: usize = 512;
 const MAX_PLUGINS: usize = 65;
@@ -91,6 +92,8 @@ const DAEMON_EVENT_SERVICE_NAME: &str = "malbox/events/daemon";
 /// Each plugin owns exactly one of these.
 pub struct PluginEventPublisher {
     publisher: Publisher<IpcServiceType, [u8], EventHeader>,
+    /// Wakes the daemon after each emit (mandatory notify contract).
+    daemon_notifier: DaemonNotifier,
 }
 
 impl PluginEventPublisher {
@@ -119,7 +122,12 @@ impl PluginEventPublisher {
             .create()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?;
 
-        Ok(Self { publisher })
+        let daemon_notifier = DaemonNotifier::new(node)?;
+
+        Ok(Self {
+            publisher,
+            daemon_notifier,
+        })
     }
 
     /// Emit a lightweight event with an optional small payload.
@@ -134,6 +142,8 @@ impl PluginEventPublisher {
         sample
             .send()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?;
+        // Mandatory notify contract: wake the daemon after the event lands.
+        let _ = self.daemon_notifier.notify(DaemonNotifyKind::PluginEvent);
         Ok(())
     }
 
@@ -367,6 +377,7 @@ mod tests {
 
     #[test]
     fn plugin_event_roundtrip() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let publisher = PluginEventPublisher::new(&node, "test-ev").expect("pub");
@@ -393,6 +404,7 @@ mod tests {
 
     #[test]
     fn plugin_event_with_payload() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let publisher = PluginEventPublisher::new(&node, "test-ev-pl").expect("pub");
@@ -437,6 +449,7 @@ mod tests {
 
     #[test]
     fn drain_events() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let publisher = PluginEventPublisher::new(&node, "test-drain-ev").expect("pub");
@@ -460,6 +473,7 @@ mod tests {
 
     #[test]
     fn safe_overflow_drops_oldest() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let publisher = PluginEventPublisher::new(&node, "test-overflow").expect("pub");

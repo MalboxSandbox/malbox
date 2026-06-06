@@ -15,7 +15,7 @@ use iceoryx2::port::publisher::Publisher;
 use iceoryx2::port::subscriber::Subscriber;
 use iceoryx2::prelude::*;
 
-type IpcServiceType = iceoryx2::service::ipc_threadsafe::Service;
+type IpcServiceType = iceoryx2::service::ipc::Service;
 
 const MAX_RESULT_SLICE_LEN: usize = 1024 * 1024; // 1 MB (chunk size)
 const MAX_PUBLISHERS: usize = 1; // one plugin owns the channel

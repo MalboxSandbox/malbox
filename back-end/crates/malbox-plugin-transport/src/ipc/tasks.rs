@@ -8,13 +8,15 @@
 
 use crate::error::{Result, TransportError};
 
+use super::daemon_notify::{DaemonNotifier, DaemonNotifyKind};
 use super::headers::{TaskRequestHeader, TaskResponseHeader};
 
 use iceoryx2::port::server::Server;
 use iceoryx2::prelude::*;
 use iceoryx2::service::port_factory::request_response::PortFactory;
+use std::rc::Rc;
 
-type IpcServiceType = iceoryx2::service::ipc_threadsafe::Service;
+type IpcServiceType = iceoryx2::service::ipc::Service;
 
 const MAX_REQUEST_SLICE_LEN: usize = 64 * 1024; // 64 KB
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MB
@@ -115,6 +117,9 @@ pub struct TaskResponse {
 /// Plugin-side server for receiving task requests.
 pub struct TaskServer {
     server: Server<IpcServiceType, [u8], TaskRequestHeader, [u8], TaskResponseHeader>,
+    /// Shared with every [`ActiveTaskRequest`] so each response chunk can
+    /// wake the daemon (mandatory notify contract).
+    daemon_notifier: Rc<DaemonNotifier>,
 }
 
 impl TaskServer {
@@ -128,7 +133,12 @@ impl TaskServer {
             .create()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?;
 
-        Ok(Self { server })
+        let daemon_notifier = Rc::new(DaemonNotifier::new(node)?);
+
+        Ok(Self {
+            server,
+            daemon_notifier,
+        })
     }
 
     /// Non-blocking receive of a pending task request.
@@ -138,7 +148,10 @@ impl TaskServer {
             .receive()
             .map_err(|e| TransportError::Ipc(Box::new(e)))?
         {
-            Some(active_request) => Ok(Some(ActiveTaskRequest { active_request })),
+            Some(active_request) => Ok(Some(ActiveTaskRequest {
+                active_request,
+                daemon_notifier: Rc::clone(&self.daemon_notifier),
+            })),
             None => Ok(None),
         }
     }
@@ -154,6 +167,7 @@ pub struct ActiveTaskRequest {
         [u8],
         TaskResponseHeader,
     >,
+    daemon_notifier: Rc<DaemonNotifier>,
 }
 
 impl ActiveTaskRequest {
@@ -221,6 +235,9 @@ impl ActiveTaskRequest {
                     response
                         .send()
                         .map_err(|e| TransportError::Ipc(Box::new(e)))?;
+                    // Mandatory notify contract: wake the daemon for every
+                    // chunk so it keeps draining the bounded response buffer.
+                    let _ = self.daemon_notifier.notify(DaemonNotifyKind::TaskResponse);
                     return Ok(());
                 }
                 Err(iceoryx2::port::LoanError::OutOfMemory) => {
@@ -230,6 +247,9 @@ impl ActiveTaskRequest {
                             payload.len()
                         )));
                     }
+                    // Kick the daemon before backing off: the buffer only
+                    // frees up once it drains.
+                    let _ = self.daemon_notifier.notify(DaemonNotifyKind::TaskResponse);
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 Err(e) => {
@@ -261,7 +281,6 @@ fn open_or_create_task_service(
         .max_servers(1)
         .max_clients(1)
         .max_response_buffer_size(MAX_RESPONSE_BUFFER_SIZE)
-        .enable_safe_overflow_for_requests(false)
         .enable_safe_overflow_for_responses(false)
         .open_or_create()
         .map_err(|e| TransportError::Ipc(Box::new(e)))?;
@@ -276,6 +295,7 @@ mod tests {
 
     #[test]
     fn task_request_response_roundtrip() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let server = TaskServer::new(&node, "test-task-rt").expect("server");
@@ -322,6 +342,7 @@ mod tests {
 
     #[test]
     fn multi_response_streaming() {
+        let _shared_service = crate::ipc::shared_notify_service_lock();
         let node = NodeBuilder::new().create::<IpcServiceType>().expect("node");
 
         let server = TaskServer::new(&node, "test-stream").expect("server");
