@@ -14,10 +14,21 @@ pub async fn run(
 ) -> crate::Result<Manifest> {
     let mut manifest = Manifest::load(manifest_path)?;
 
-    let release = github.latest_release(manifest.channel).await?;
+    // A reconfigure can switch channels; fetch from the channel the new
+    // configuration tracks.
+    let channel = upgrade_config
+        .reconfigure
+        .as_ref()
+        .map(|r| r.channel)
+        .unwrap_or(manifest.channel);
+    let release = github.latest_release(channel).await?;
     let new_version = release.version();
 
-    if !upgrade_config.force && !is_upgrade(&manifest.version, new_version) {
+    // A reconfigure rebuilds with new choices even on the same version.
+    if !upgrade_config.force
+        && upgrade_config.reconfigure.is_none()
+        && !is_upgrade(&manifest.version, new_version)
+    {
         return Err(InstallError::AlreadyUpToDate(manifest.version.clone()));
     }
 
@@ -66,10 +77,7 @@ pub async fn run(
             // Manifests that predate feature recording fall back to the
             // default set.
             let features = if manifest.daemon.features.is_empty() {
-                crate::DEFAULT_DAEMON_FEATURES
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect()
+                crate::features::default_features()
             } else {
                 manifest.daemon.features.clone()
             };
@@ -135,6 +143,25 @@ pub async fn run(
 
     // Record upgrade
     manifest.record_upgrade(new_version, None);
+    manifest.channel = channel;
+    // Persist the feature set the installed binaries actually carry so the
+    // next from-source upgrade replays it (this also fills manifests that
+    // predate feature recording).
+    manifest.daemon.features = features.clone();
+    if let Some(reconfig) = &upgrade_config.reconfigure {
+        manifest.daemon.providers = reconfig.providers.clone();
+        manifest.daemon.provisioners = reconfig.provisioners.clone();
+        manifest.daemon.source = match &daemon_source {
+            DaemonSource::Prebuilt { .. } => "prebuilt",
+            DaemonSource::Compile => "compiled",
+        }
+        .to_string();
+        manifest.frontend.source = match &frontend_source {
+            FrontendSource::Prebuilt { .. } => "prebuilt",
+            FrontendSource::Compile => "compiled",
+        }
+        .to_string();
+    }
 
     // Restart daemon if systemd is configured
     if manifest.systemd.enabled

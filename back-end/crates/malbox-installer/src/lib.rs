@@ -1,15 +1,18 @@
 mod archive;
 pub mod config;
 pub mod error;
+pub mod features;
 pub mod github;
 pub mod install;
 pub mod manifest;
 pub mod progress;
+pub mod rebuild;
 pub mod steps;
 pub mod upgrade;
 
 pub use config::{DaemonSource, FrontendSource, InstallConfig, PostgresStrategy, UpgradeConfig};
 pub use error::{InstallError, Result, Step};
+pub use features::{DAEMON_FEATURES, default_features};
 pub use github::Channel;
 pub use progress::{InstallProgress, NoopProgress};
 
@@ -17,13 +20,6 @@ pub use progress::{InstallProgress, NoopProgress};
 /// the installer, upgrader and source-tarball fallbacks never drift apart.
 pub const GITHUB_OWNER: &str = "DualHorizon";
 pub const GITHUB_REPO: &str = "malbox";
-
-/// Cargo features baked into the prebuilt `malboxctl` release binaries.
-///
-/// The install wizard compares the user's selection against this set to
-/// decide whether the stock binary is equivalent to compiling, and upgrades
-/// fall back to it for manifests that predate feature recording.
-pub const DEFAULT_DAEMON_FEATURES: &[&str] = &["provider-libvirt", "provisioner-ansible"];
 
 /// Resolve an XDG directory with a `$HOME`-based fallback. Never falls back
 /// to a literal `~` path - the OS does not expand those.

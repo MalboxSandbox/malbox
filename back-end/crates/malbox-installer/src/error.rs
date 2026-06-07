@@ -10,6 +10,29 @@ pub enum Step {
     Systemd,
 }
 
+impl Step {
+    /// Install steps in execution order.
+    pub const ORDER: [Step; 5] = [
+        Step::Daemon,
+        Step::Frontend,
+        Step::Postgres,
+        Step::Config,
+        Step::Systemd,
+    ];
+
+    /// True when `self` runs after `other` during installation. Drives
+    /// resume: steps up to and including the last completed one are skipped.
+    pub fn is_after(self, other: Step) -> bool {
+        fn pos(step: Step) -> usize {
+            Step::ORDER
+                .iter()
+                .position(|s| *s == step)
+                .unwrap_or(usize::MAX)
+        }
+        pos(self) > pos(other)
+    }
+}
+
 impl std::fmt::Display for Step {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -30,7 +53,7 @@ pub enum InstallError {
     #[error("manifest error: {0}")]
     Manifest(String),
 
-    #[error("manifest not found at {0} - run `malbox install` first")]
+    #[error("manifest not found at {0} - run `malboxctl install` first")]
     ManifestNotFound(PathBuf),
 
     #[error("already up to date (version {0})")]

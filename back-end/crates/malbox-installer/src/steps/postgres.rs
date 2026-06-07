@@ -28,6 +28,17 @@ pub fn detect_postgres_tools() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
+/// Check that the tools `PostgresStrategy::Setup` shells out to (initdb for
+/// the cluster, psql for the connectivity check) are present. Lets the
+/// wizard fail at prompt time instead of after the download steps.
+pub fn detect_setup_tools() -> bool {
+    detect_postgres_tools()
+        && std::process::Command::new("initdb")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+}
+
 pub async fn execute(
     strategy: &PostgresStrategy,
     data_dir: &Path,

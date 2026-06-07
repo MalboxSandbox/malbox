@@ -114,19 +114,10 @@ impl GitHubClient {
         &self.repo
     }
 
-    pub async fn latest_release(&self, channel: Channel) -> crate::Result<Release> {
-        // NOTE: deliberately not using `/releases/latest`. That endpoint only
-        // ever returns the most recent *non-prerelease* release, and malbox
-        // currently publishes every release as a prerelease. Instead we list
-        // published releases (GitHub returns them newest-first) and take the
-        // first one matching the channel. Unauthenticated requests never
-        // include drafts.
-        let url = format!(
-            "{}/repos/{}/{}/releases?per_page=20",
-            GITHUB_API_BASE, self.owner, self.repo
-        );
-
-        let mut request = self.client.get(&url);
+    /// GET a GitHub API endpoint as JSON. Returns `None` on 404 so callers
+    /// can distinguish "does not exist" from real failures.
+    async fn get_api<T: serde::de::DeserializeOwned>(&self, url: &str) -> crate::Result<Option<T>> {
+        let mut request = self.client.get(url);
         // A token raises the unauthenticated rate limit (60 requests/hour).
         // Asset downloads stay tokenless: GitHub redirects them to S3, which
         // rejects requests that carry an Authorization header.
@@ -138,6 +129,10 @@ impl GitHubClient {
 
         let response = request.send().await?;
         let status = response.status();
+
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
 
         if status == reqwest::StatusCode::FORBIDDEN
             && response
@@ -152,14 +147,33 @@ impl GitHubClient {
 
         if !status.is_success() {
             return Err(InstallError::GitHub(format!(
-                "failed to fetch releases: HTTP {status}"
+                "GitHub API request failed: HTTP {status}"
             )));
         }
 
-        let releases: Vec<Release> = response
+        response
             .json()
             .await
-            .map_err(|e| InstallError::GitHub(e.to_string()))?;
+            .map(Some)
+            .map_err(|e| InstallError::GitHub(e.to_string()))
+    }
+
+    pub async fn latest_release(&self, channel: Channel) -> crate::Result<Release> {
+        // NOTE: deliberately not using `/releases/latest`. That endpoint only
+        // ever returns the most recent *non-prerelease* release, and malbox
+        // currently publishes every release as a prerelease. Instead we list
+        // published releases (GitHub returns them newest-first) and take the
+        // first one matching the channel. Unauthenticated requests never
+        // include drafts.
+        let url = format!(
+            "{}/repos/{}/{}/releases?per_page=20",
+            GITHUB_API_BASE, self.owner, self.repo
+        );
+
+        let releases: Vec<Release> = self
+            .get_api(&url)
+            .await?
+            .ok_or_else(|| InstallError::GitHub("releases endpoint returned 404".to_string()))?;
 
         let release = match channel {
             Channel::Nightly => releases.into_iter().next(),
@@ -173,6 +187,30 @@ impl GitHubClient {
             ),
             Channel::Nightly => InstallError::GitHub("no releases found".to_string()),
         })
+    }
+
+    /// Release for an exact tag, or `None` when the tag has no release.
+    pub async fn release_by_tag(&self, tag: &str) -> crate::Result<Option<Release>> {
+        let url = format!(
+            "{}/repos/{}/{}/releases/tags/{tag}",
+            GITHUB_API_BASE, self.owner, self.repo
+        );
+        self.get_api(&url).await
+    }
+
+    /// Release matching an installed version, trying the canonical `v` tag
+    /// prefix first. Resume and rebuild use this to pin to the installed
+    /// version instead of floating to the latest release.
+    pub async fn release_for_version(&self, version: &str) -> crate::Result<Release> {
+        if let Some(release) = self.release_by_tag(&format!("v{version}")).await? {
+            return Ok(release);
+        }
+        if let Some(release) = self.release_by_tag(version).await? {
+            return Ok(release);
+        }
+        Err(InstallError::GitHub(format!(
+            "no release found for installed version {version}"
+        )))
     }
 
     /// Download `url`, reporting `(bytes_downloaded, total_bytes)` after each
