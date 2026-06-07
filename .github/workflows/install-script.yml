@@ -5,11 +5,13 @@ on:
     branches: ["main", "dev*"]
     paths:
       - "back-end/scripts/install.ab"
+      - "back-end/scripts/install.sh"
       - ".github/workflows/install-script.yml"
   pull_request:
     branches: ["main", "dev*"]
     paths:
       - "back-end/scripts/install.ab"
+      - "back-end/scripts/install.sh"
       - ".github/workflows/install-script.yml"
 
 jobs:
@@ -36,8 +38,11 @@ jobs:
 
     - name: Check for uncommitted changes
       run: |
-        if ! git diff --quiet back-end/scripts/install.sh; then
+        # git status --porcelain catches a modified AND an untracked
+        # install.sh; git diff alone ignores untracked files.
+        if [ -n "$(git status --porcelain -- back-end/scripts/install.sh)" ]; then
           echo "::error::install.sh is out of date. Run 'amber build install.ab install.sh' and commit the result."
-          git diff back-end/scripts/install.sh
+          git status --porcelain -- back-end/scripts/install.sh
+          git diff -- back-end/scripts/install.sh
           exit 1
         fi
