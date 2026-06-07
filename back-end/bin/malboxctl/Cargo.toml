@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["provider-libvirt", "provisioner-ansible"]
 provider-libvirt = ["malbox-daemon/provider-libvirt"]
+provider-xen = ["malbox-daemon/provider-xen"]
 provisioner-ansible = ["malbox-daemon/provisioner-ansible"]
 
 [dependencies]
@@ -20,6 +21,7 @@ color-eyre = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
 clap_complete = "4.6.5"
 console = "0.16.3"

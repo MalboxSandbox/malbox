@@ -12,6 +12,8 @@ exclude = [
     "examples/plugins/host-string-extractor",
     "examples/plugins/host-result-chain",
     "examples/plugins/host-report-showcase",
+    "examples/plugins/host-vbs-analyzer",
+    "examples/plugins/host-yara-scanner",
     "xtask",
 ]
 [workspace.dependencies]
@@ -41,6 +43,7 @@ uuid = { version = "1.23.2", features = ["fast-rng", "v4", "serde"] }
 async-trait = "0.1.89"
 inventory = "0.3.24"
 toml = "1.0.6"
+toml_edit = "0.23"
 tempfile = "3.27.0"
 notify = "8.2.0"
 sha2 = "0.11"
