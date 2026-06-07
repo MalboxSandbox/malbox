@@ -82,6 +82,19 @@ async fn load_config_internal() -> Result<Config, ConfigError> {
     Ok(config)
 }
 
+/// The configuration file `load_config` would read, following the same
+/// precedence (`MALBOX_CONFIG` override, then user, then system config).
+/// `None` when no configuration exists. The override is returned without an
+/// existence check so a broken override fails loudly downstream instead of
+/// silently editing another file.
+pub fn config_file_path() -> Option<PathBuf> {
+    if let Some(path) = env_config_override() {
+        return Some(path);
+    }
+    let paths = PathConfig::new().ok()?;
+    find_user_config(&paths).or_else(find_system_config)
+}
+
 fn env_config_override() -> Option<PathBuf> {
     std::env::var_os("MALBOX_CONFIG")
         .filter(|value| !value.is_empty())
