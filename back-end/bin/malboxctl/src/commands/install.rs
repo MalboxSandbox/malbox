@@ -1,42 +1,21 @@
 use crate::commands::Command;
 use crate::utils::install_progress::CliProgress;
+use crate::utils::wizard;
 use clap::Parser;
 use console::style;
-use dialoguer::{Confirm, Input, MultiSelect, Select};
+use dialoguer::{Confirm, Input, Select};
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
 use malbox_cli_common::utils::format::Brand;
 use malbox_cli_common::utils::progress::Spinner;
-use malbox_installer::config::{DaemonSource, FrontendSource, InstallConfig, PostgresStrategy};
-use malbox_installer::github::{Channel, GitHubClient, Release};
+use malbox_installer::config::{InstallConfig, PostgresStrategy};
+use malbox_installer::features::{default_features, split_features};
+use malbox_installer::github::{Channel, GitHubClient};
 use malbox_installer::manifest::Manifest;
-use malbox_installer::steps::daemon::release_arch;
-use malbox_installer::steps::postgres::{detect_postgres_tools, test_connection};
-use malbox_installer::{DEFAULT_DAEMON_FEATURES, GITHUB_OWNER, GITHUB_REPO};
-
-struct DaemonFeature {
-    display: &'static str,
-    feature: &'static str,
-    default: bool,
-}
-
-const DAEMON_FEATURES: &[DaemonFeature] = &[
-    DaemonFeature {
-        display: "libvirt (virtualization provider)",
-        feature: "provider-libvirt",
-        default: true,
-    },
-    DaemonFeature {
-        display: "xen (virtualization provider)",
-        feature: "provider-xen",
-        default: false,
-    },
-    DaemonFeature {
-        display: "ansible (machine provisioner)",
-        feature: "provisioner-ansible",
-        default: true,
-    },
-];
+use malbox_installer::steps::postgres::{
+    detect_postgres_tools, detect_setup_tools, test_connection,
+};
+use malbox_installer::{GITHUB_OWNER, GITHUB_REPO};
 
 #[derive(Parser)]
 #[command(about = "Install and set up Malbox")]
@@ -58,24 +37,38 @@ impl Command for InstallCommand {
         if manifest_path.exists()
             && let Ok(existing) = Manifest::load(&manifest_path)
         {
-            if existing.last_completed_step.is_none() {
-                if self.yes {
-                    println!("Reinstalling over the existing installation.");
-                } else if !Confirm::new()
-                    .with_prompt("Malbox is already installed. Reinstall?")
-                    .default(false)
-                    .interact()?
-                {
-                    println!("Installation cancelled.");
-                    return Ok(());
+            match existing.last_completed_step {
+                None => {
+                    if self.yes {
+                        println!("Reinstalling over the existing installation.");
+                    } else if !Confirm::new()
+                        .with_prompt("Malbox is already installed. Reinstall?")
+                        .default(false)
+                        .interact()?
+                    {
+                        println!("Installation cancelled.");
+                        return Ok(());
+                    }
                 }
-            } else {
-                println!(
-                    "{}",
-                    Brand::warning().apply_to(
-                        "Previous installation was incomplete. Resuming is not yet supported - starting fresh."
-                    )
-                );
+                Some(last_completed) => {
+                    println!(
+                        "{}",
+                        Brand::warning().apply_to(format!(
+                            "Found an incomplete installation of v{} (stopped after the {} step).",
+                            existing.version, last_completed
+                        ))
+                    );
+                    let resume = self.yes
+                        || Select::new()
+                            .with_prompt("Resume it or start fresh?")
+                            .items(["Resume installation", "Start fresh"])
+                            .default(0)
+                            .interact()?
+                            == 0;
+                    if resume {
+                        return resume_install(&manifest_path).await;
+                    }
+                }
             }
         }
 
@@ -83,40 +76,18 @@ impl Command for InstallCommand {
         let channel = if self.yes {
             Channel::Nightly
         } else {
-            let choice = Select::new()
-                .with_prompt("Release channel")
-                .items(["stable", "nightly"])
-                .default(0)
-                .interact()?;
-            match choice {
-                0 => Channel::Stable,
-                _ => Channel::Nightly,
-            }
+            wizard::prompt_channel(Channel::Stable)?
         };
 
         // Daemon features (providers + provisioners)
         let selected_features: Vec<String> = if self.yes {
-            DEFAULT_DAEMON_FEATURES
-                .iter()
-                .map(|s| s.to_string())
-                .collect()
+            default_features()
         } else {
-            let display_names: Vec<&str> = DAEMON_FEATURES.iter().map(|f| f.display).collect();
-            let defaults: Vec<bool> = DAEMON_FEATURES.iter().map(|f| f.default).collect();
-
-            MultiSelect::new()
-                .with_prompt("Select daemon features to include")
-                .items(&display_names)
-                .defaults(&defaults)
-                .interact()?
-                .into_iter()
-                .map(|i| DAEMON_FEATURES[i].feature.to_string())
-                .collect()
+            wizard::prompt_features(&default_features())?
         };
 
         // Providers configure the daemon; provisioners only affect the build.
-        let providers: Vec<String> = strip_prefixed(&selected_features, "provider-");
-        let provisioners: Vec<String> = strip_prefixed(&selected_features, "provisioner-");
+        let (providers, provisioners) = split_features(&selected_features);
 
         // Fetch latest release
         println!();
@@ -129,60 +100,12 @@ impl Command for InstallCommand {
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
         drop(release_spinner);
 
-        let matches_defaults = {
-            let mut selected: Vec<&str> = selected_features.iter().map(String::as_str).collect();
-            selected.sort_unstable();
-            let mut defaults = DEFAULT_DAEMON_FEATURES.to_vec();
-            defaults.sort_unstable();
-            selected == defaults
-        };
-        let prebuilt_asset = matches_defaults
-            .then(release_arch)
-            .flatten()
-            .and_then(|arch| release.find_malboxctl_asset(arch));
-
         // Daemon source
-        let daemon_source = match prebuilt_asset {
-            Some(asset) => {
-                let use_prebuilt = self.yes
-                    || Select::new()
-                        .with_prompt("A prebuilt binary is available for the default feature set")
-                        .items(["Download prebuilt binary (faster)", "Compile from source"])
-                        .default(0)
-                        .interact()?
-                        == 0;
-                if use_prebuilt {
-                    DaemonSource::Prebuilt {
-                        url: asset.browser_download_url.clone(),
-                    }
-                } else {
-                    DaemonSource::Compile
-                }
-            }
-            None => {
-                if !matches_defaults {
-                    println!(
-                        "  {} Custom feature selection requires compiling from source",
-                        Brand::warning().apply_to("!")
-                    );
-                } else {
-                    println!(
-                        "  {} No prebuilt binary available for this platform - will compile from source",
-                        Brand::warning().apply_to("!")
-                    );
-                }
-                DaemonSource::Compile
-            }
-        };
+        let daemon_source = wizard::resolve_daemon_source(&release, &selected_features, self.yes)?;
 
         // Frontend - download the prebuilt SPA bundle when the release ships
         // one, otherwise build it from source.
-        let frontend_source = match release.find_web_asset() {
-            Some(asset) => FrontendSource::Prebuilt {
-                url: asset.browser_download_url.clone(),
-            },
-            None => FrontendSource::Compile,
-        };
+        let frontend_source = wizard::resolve_frontend_source(&release);
 
         // Postgres
         let postgres = self.select_postgres().await?;
@@ -221,7 +144,7 @@ impl Command for InstallCommand {
         .await
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-        print_summary(&install_config, &manifest, &manifest_path, &release);
+        print_summary(&manifest, &manifest_path);
         Ok(())
     }
 }
@@ -229,6 +152,16 @@ impl Command for InstallCommand {
 impl InstallCommand {
     async fn select_postgres(&self) -> Result<PostgresStrategy> {
         if self.yes {
+            // Fail here, before the download steps, when the managed
+            // instance cannot possibly be set up.
+            if !detect_setup_tools() {
+                return Err(CliError::CommandFailed(
+                    "--yes sets up a managed PostgreSQL instance, but PostgreSQL is not installed \
+                     (initdb/psql not found) - install PostgreSQL first, or run interactively to \
+                     supply an existing connection URL"
+                        .to_string(),
+                ));
+            }
             return Ok(PostgresStrategy::Setup);
         }
 
@@ -248,7 +181,10 @@ impl InstallCommand {
                     url: prompt_postgres_url(Some("postgres://postgres@localhost:5432/malbox_db"))
                         .await?,
                 },
-                _ => PostgresStrategy::Setup,
+                _ => {
+                    ensure_setup_tools()?;
+                    PostgresStrategy::Setup
+                }
             }
         } else {
             let choice = Select::new()
@@ -260,7 +196,10 @@ impl InstallCommand {
                 .default(0)
                 .interact()?;
             match choice {
-                0 => PostgresStrategy::Setup,
+                0 => {
+                    ensure_setup_tools()?;
+                    PostgresStrategy::Setup
+                }
                 _ => PostgresStrategy::Existing {
                     url: prompt_postgres_url(None).await?,
                 },
@@ -268,6 +207,41 @@ impl InstallCommand {
         };
 
         Ok(strategy)
+    }
+}
+
+/// Complete an interrupted installation from where it stopped.
+async fn resume_install(manifest_path: &std::path::Path) -> Result<()> {
+    let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
+        .map_err(|e| CliError::CommandFailed(e.to_string()))?;
+
+    println!();
+    println!(
+        "{}",
+        Brand::accent().bold().apply_to("Resuming installation...")
+    );
+    println!();
+
+    let progress = CliProgress::new();
+    let manifest = malbox_installer::install::resume(&github, manifest_path, &progress)
+        .await
+        .map_err(|e| CliError::CommandFailed(e.to_string()))?;
+
+    print_summary(&manifest, manifest_path);
+    Ok(())
+}
+
+/// Fail at prompt time when the managed-instance tools are missing, instead
+/// of after the download steps.
+fn ensure_setup_tools() -> Result<()> {
+    if detect_setup_tools() {
+        Ok(())
+    } else {
+        Err(CliError::CommandFailed(
+            "setting up a managed PostgreSQL instance requires initdb and psql - install \
+             PostgreSQL via your system package manager first, then re-run `malboxctl install`"
+                .to_string(),
+        ))
     }
 }
 
@@ -305,26 +279,13 @@ async fn prompt_postgres_url(default: Option<&str>) -> Result<String> {
     }
 }
 
-fn strip_prefixed(features: &[String], prefix: &str) -> Vec<String> {
-    features
-        .iter()
-        .filter_map(|feature| feature.strip_prefix(prefix))
-        .map(str::to_string)
-        .collect()
-}
-
-fn print_summary(
-    config: &InstallConfig,
-    manifest: &Manifest,
-    manifest_path: &std::path::Path,
-    release: &Release,
-) {
+fn print_summary(manifest: &Manifest, manifest_path: &std::path::Path) {
     println!();
     println!(
         "{}",
         Brand::success().bold().apply_to(format!(
-            "Malbox {} installed successfully!",
-            release.tag_name
+            "Malbox v{} installed successfully!",
+            manifest.version
         ))
     );
     println!();
@@ -352,7 +313,7 @@ fn print_summary(
             "  Start the daemon with: {}",
             style("malboxctl daemon start").bold()
         );
-        if matches!(config.postgres, PostgresStrategy::Setup) {
+        if manifest.postgres.strategy == "setup" {
             println!(
                 "  {} the managed PostgreSQL instance was started for this session only;\n    restart it after a reboot with: {}",
                 Brand::warning().apply_to("!"),
