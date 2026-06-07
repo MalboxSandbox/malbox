@@ -7,17 +7,20 @@ use sqlx::postgres::PgPoolOptions;
 pub mod error;
 pub mod repositories;
 
-// NOTE: Unwrap here or later?
-pub async fn init_database(config: &DatabaseConfig) -> sqlx::Pool<sqlx::Postgres> {
+/// Connect to the database and apply the embedded migrations. Errors are
+/// returned rather than panicking so daemon startup can fail with an
+/// actionable message.
+pub async fn init_database(
+    config: &DatabaseConfig,
+) -> Result<sqlx::Pool<sqlx::Postgres>, sqlx::Error> {
     let db = PgPoolOptions::new()
         .max_connections(10)
         .connect(&config.host)
-        .await
-        .unwrap();
+        .await?;
 
-    sqlx::migrate!().run(&db).await.unwrap();
+    sqlx::migrate!().run(&db).await?;
 
-    db
+    Ok(db)
 }
 
 // TODO: Machine initialization will be handled by the new provider system

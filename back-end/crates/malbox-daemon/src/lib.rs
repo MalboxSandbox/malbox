@@ -41,7 +41,7 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
 
     let db = {
         let _span = info_span!("init.database").entered();
-        init_database(&config.database).await
+        init_database(&config.database).await?
     };
 
     // Start image store watcher if configured
