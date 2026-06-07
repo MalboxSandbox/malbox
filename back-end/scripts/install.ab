@@ -74,6 +74,7 @@ fun detect_arch(): Text {
         }
         else {
             trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Unsupported architecture: {uname_arch}"$
+            cleanup_gum()
             exit(1)
         }
     }
@@ -112,6 +113,7 @@ fun detect_install_dir(): Text {
 fun choose_channel(): Text {
     const channel = $gum choose --cursor.foreground "{COLOR_ACCENT}" --selected.foreground "{COLOR_ACCENT}" --header.foreground "{COLOR_FAINT}" "stable" "nightly"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "No channel selected"$
+        cleanup_gum()
         exit(1)
     }
     return channel
@@ -125,6 +127,7 @@ fun fetch_release(channel: Text): Text {
     // pre-release suffix (e.g. v0.1.0 but not v0.1.0-alpha.5).
     const releases_json = $gum spin --spinner dot --spinner.foreground "{COLOR_ACCENT}" --title "Fetching latest {channel} release..." --show-output -- curl -sSfL "https://api.github.com/repos/{GITHUB_REPO}/releases"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not fetch release information"$
+        cleanup_gum()
         exit(1)
     }
 
@@ -143,6 +146,7 @@ fun fetch_release(channel: Text): Text {
         } else {
             trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Could not determine latest {channel} release"$
         }
+        cleanup_gum()
         exit(1)
     }
 
@@ -161,6 +165,7 @@ fun download_binary(tag: Text, asset_name: Text): Text {
         trust $gum style --foreground "{COLOR_FAINT}" "No prebuilt binary may exist yet for this platform ({asset_name})."$
         trust $gum style --foreground "{COLOR_FAINT}" "Check https://github.com/{GITHUB_REPO}/releases for available assets."$
         trust silent $rm -rf "{tmp_dir}"$
+        cleanup_gum()
         exit(1)
     }
 
@@ -198,16 +203,22 @@ fun verify_checksum(tmp_dir: Text, asset_name: Text) {
 fun install_binary(tmp_dir: Text, asset_name: Text, install_dir: Text) {
     $tar -xzf "{tmp_dir}/{asset_name}" -C "{tmp_dir}" --strip-components=1$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to extract archive"$
+        trust silent $rm -rf "{tmp_dir}"$
+        cleanup_gum()
         exit(1)
     }
 
     $mv "{tmp_dir}/malboxctl" "{install_dir}/{BINARY_NAME}"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to install binary"$
+        trust silent $rm -rf "{tmp_dir}"$
+        cleanup_gum()
         exit(1)
     }
 
     $chmod +x "{install_dir}/{BINARY_NAME}"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to set permissions"$
+        trust silent $rm -rf "{tmp_dir}"$
+        cleanup_gum()
         exit(1)
     }
 
@@ -235,6 +246,7 @@ main {
         if force != "1" {
             $gum confirm --prompt.foreground "{COLOR_ACCENT}" --selected.background "{COLOR_ACCENT}" --unselected.foreground "{COLOR_FAINT}" "Malbox CLI already exists at {install_dir}/{BINARY_NAME}. Overwrite?"$ failed {
                 trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Installation cancelled."$
+                cleanup_gum()
                 exit(0)
             }
         }
