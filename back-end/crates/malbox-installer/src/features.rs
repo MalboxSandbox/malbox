@@ -19,11 +19,6 @@ pub const DAEMON_FEATURES: &[DaemonFeature] = &[
         default: true,
     },
     DaemonFeature {
-        display: "xen (virtualization provider)",
-        feature: "provider-xen",
-        default: false,
-    },
-    DaemonFeature {
         display: "ansible (machine provisioner)",
         feature: "provisioner-ansible",
         default: true,
