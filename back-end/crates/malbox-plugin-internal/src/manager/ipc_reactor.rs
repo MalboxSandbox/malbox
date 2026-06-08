@@ -26,7 +26,7 @@ use malbox_plugin_transport::ipc::notify::NotifyKind;
 use malbox_plugin_transport::ipc::{
     CallbackProgression, DaemonEventPublisher, DaemonNotifyListener, IpcService, Node, NodeBuilder,
     PluginEventSubscriber, PluginNotifier, ReactorWaker, ReactorWakeupListener, SignalHandlingMode,
-    TaskClient, TaskPendingResponse, WaitSetBuilder,
+    TaskClient, TaskPendingResponse, WaitSetBuilder, cleanup_stale_resources,
 };
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
@@ -190,6 +190,20 @@ fn reactor_thread(
                 }
             }
         };
+    }
+
+    // Reclaim iceoryx2 services/nodes orphaned by a previous run that did not
+    // shut down cleanly. Stale resources make a plugin's open_or_create fail
+    // with ServiceInCorruptedState; this runs before any node or service of
+    // ours exists, so only provably-dead nodes are touched.
+    match cleanup_stale_resources() {
+        Ok(report) if !report.is_empty() => info!(
+            reclaimed = report.reclaimed,
+            failed = report.failed,
+            "reclaimed stale iceoryx2 resources from a previous run"
+        ),
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "stale iceoryx2 resource cleanup failed; continuing"),
     }
 
     let node = try_init!(

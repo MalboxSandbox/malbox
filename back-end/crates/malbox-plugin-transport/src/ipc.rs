@@ -5,6 +5,7 @@
 //! exists solely for the reactor waker, whose notifier is shared by many
 //! async tasks. The two variants interoperate on the same services.
 
+pub mod cleanup;
 pub mod daemon_notify;
 pub mod events;
 pub mod headers;
@@ -20,6 +21,7 @@ pub use iceoryx2::prelude::{CallbackProgression, WaitSetBuilder};
 pub use iceoryx2::service::ipc::Service as IpcService;
 pub use iceoryx2::service::ipc_threadsafe::Service as IpcServiceThreadsafe;
 
+pub use cleanup::{CleanupReport, cleanup_stale_resources};
 pub use daemon_notify::{DaemonNotifier, DaemonNotifyKind, DaemonNotifyListener};
 pub use events::{
     DaemonEventPublisher, DaemonEventSubscriber, PluginEventPublisher, PluginEventSubscriber,
