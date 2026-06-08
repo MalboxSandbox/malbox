@@ -9,6 +9,7 @@ pub mod daemon;
 pub mod image;
 pub mod install;
 pub mod machine;
+pub mod plugin;
 pub mod provider;
 pub mod upgrade;
 
@@ -57,6 +58,8 @@ pub enum Commands {
     Machine(machine::MachineCommand),
     /// Manage VM images (register, list, delete)
     Image(image::ImageCommand),
+    /// Manage plugins (install, remove, search)
+    Plugin(plugin::PluginCommand),
     /// Generate shell completions
     Completion(completion::CompletionCommand),
 }
@@ -73,6 +76,7 @@ impl Command for Cli {
             Commands::Provider(cmd) => cmd.execute(ctx).await,
             Commands::Machine(cmd) => cmd.execute(ctx).await,
             Commands::Image(cmd) => cmd.execute(ctx).await,
+            Commands::Plugin(cmd) => cmd.execute(ctx).await,
             Commands::Completion(cmd) => cmd.execute(ctx).await,
         }
     }
