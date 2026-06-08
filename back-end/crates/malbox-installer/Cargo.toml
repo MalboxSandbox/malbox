@@ -19,3 +19,4 @@ dirs = "6"
 flate2 = "1"
 tar = "0.4"
 tempfile = { workspace = true }
+url = "2"

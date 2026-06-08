@@ -29,7 +29,7 @@ pub fn build_initial_manifest(
 
     let (postgres_strategy, postgres_url) = match &config.postgres {
         PostgresStrategy::Existing { url } => ("existing", url.clone()),
-        PostgresStrategy::Setup => ("setup", "postgres://localhost/malbox_db".to_string()),
+        PostgresStrategy::Setup => ("setup", crate::steps::postgres::setup_url()),
     };
 
     Manifest {

@@ -3,13 +3,30 @@ use crate::error::{InstallError, Step, StepCtx};
 use crate::progress::InstallProgress;
 use std::path::{Path, PathBuf};
 
-/// Connection URL for the managed instance set up by `PostgresStrategy::Setup`.
-const SETUP_URL: &str = "postgres://localhost/malbox_db";
-
 /// The managed instance keeps its socket in /tmp: distro packages often
 /// default to /run/postgresql, which is not writable by an unprivileged
 /// user-started server. The daemon itself connects over TCP on localhost.
 pub(crate) const SOCKET_DIR: &str = "/tmp";
+
+/// Connection URL for the managed instance set up by `PostgresStrategy::Setup`.
+///
+/// Identifies the server only - the daemon names and creates its database
+/// itself. `initdb` runs as the invoking OS user, which becomes the cluster
+/// superuser, so embed that identity explicitly: psql resolves it
+/// implicitly, but the daemon must be told.
+pub(crate) fn setup_url() -> String {
+    match os_user() {
+        Some(user) => format!("postgres://{user}@localhost:5432"),
+        None => "postgres://localhost:5432".to_string(),
+    }
+}
+
+/// The invoking OS user, mirroring libpq's default-username lookup.
+fn os_user() -> Option<String> {
+    ["USER", "LOGNAME"]
+        .iter()
+        .find_map(|var| std::env::var(var).ok().filter(|user| !user.is_empty()))
+}
 
 pub struct PostgresResult {
     pub url: String,
@@ -50,10 +67,12 @@ pub async fn execute(
         PostgresStrategy::Existing { url } => {
             progress.progress(
                 Step::Postgres,
-                50,
+                40,
                 "Testing connection to existing PostgreSQL",
             );
             test_connection(url).await?;
+            progress.progress(Step::Postgres, 70, "Ensuring database exists");
+            ensure_database(url).await?;
             PostgresResult {
                 url: url.clone(),
                 pgdata: None,
@@ -63,10 +82,13 @@ pub async fn execute(
             progress.progress(Step::Postgres, 10, "Setting up PostgreSQL");
             let pgdata = data_dir.join("pgdata");
             setup_postgres(&pgdata).await?;
-            progress.progress(Step::Postgres, 70, "Testing connection");
-            test_connection(SETUP_URL).await?;
+            progress.progress(Step::Postgres, 60, "Testing connection");
+            let url = setup_url();
+            test_connection(&url).await?;
+            progress.progress(Step::Postgres, 80, "Ensuring database exists");
+            ensure_database(&url).await?;
             PostgresResult {
-                url: SETUP_URL.to_string(),
+                url,
                 pgdata: Some(pgdata),
             }
         }
@@ -75,16 +97,20 @@ pub async fn execute(
     // NOTE: schema migrations are deliberately not run here. They are
     // embedded in the daemon (sqlx::migrate! in malbox-database) and applied
     // automatically at startup, which keeps them correct across upgrades.
+    // Database *creation* is the opposite: it is provisioning, so it happens
+    // here and the daemon only verifies.
     progress.completed(Step::Postgres);
     Ok(result)
 }
 
-/// Verify a PostgreSQL URL accepts connections. Public so the install wizard
-/// can validate user-entered URLs at prompt time instead of failing minutes
-/// later.
+/// Verify a PostgreSQL server accepts connections. The check targets the
+/// `postgres` maintenance database (present in every cluster) so it works
+/// before the daemon's database has been provisioned. Public so the install
+/// wizard can validate user-entered URLs at prompt time instead of failing
+/// minutes later.
 pub async fn test_connection(url: &str) -> crate::Result<()> {
     let output = tokio::process::Command::new("psql")
-        .arg(url)
+        .arg(maintenance_url(url)?)
         .arg("-c")
         .arg("SELECT 1")
         .output()
@@ -98,6 +124,62 @@ pub async fn test_connection(url: &str) -> crate::Result<()> {
         });
     }
     Ok(())
+}
+
+/// Create the daemon's database if it is missing. Database creation is
+/// provisioning, so it lives here rather than in the daemon, which fails
+/// with instructions when the database does not exist.
+pub(crate) async fn ensure_database(url: &str) -> crate::Result<()> {
+    let dbname = malbox_config::core::DATABASE_NAME;
+    let maintenance = maintenance_url(url)?;
+
+    // Probe instead of parsing CREATE DATABASE failures out of stderr:
+    // psql's -tA output is stable, error text is not.
+    let probe = tokio::process::Command::new("psql")
+        .arg(&maintenance)
+        .args(["-tA", "-c"])
+        .arg(format!(
+            "SELECT 1 FROM pg_database WHERE datname = '{dbname}'"
+        ))
+        .output()
+        .await
+        .step_ctx(Step::Postgres, "failed to run psql")?;
+
+    if probe.status.success() && String::from_utf8_lossy(&probe.stdout).trim() == "1" {
+        return Ok(());
+    }
+
+    let create = tokio::process::Command::new("psql")
+        .arg(&maintenance)
+        .arg("-c")
+        .arg(format!("CREATE DATABASE \"{dbname}\""))
+        .output()
+        .await
+        .step_ctx(Step::Postgres, "failed to run psql")?;
+
+    if !create.status.success() {
+        let stderr = String::from_utf8_lossy(&create.stderr);
+        return Err(InstallError::StepFailed {
+            step: Step::Postgres,
+            message: format!(
+                "creating database \"{dbname}\" failed: {} - create it manually \
+                 with a privileged role: CREATE DATABASE \"{dbname}\"",
+                stderr.trim()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Rewrite a server URL to target the `postgres` maintenance database,
+/// normalizing away any database path the user may have included.
+fn maintenance_url(url: &str) -> crate::Result<String> {
+    let mut parsed = url::Url::parse(url).map_err(|e| InstallError::StepFailed {
+        step: Step::Postgres,
+        message: format!("invalid PostgreSQL URL '{url}': {e}"),
+    })?;
+    parsed.set_path("/postgres");
+    Ok(parsed.into())
 }
 
 /// True when the managed instance at `pgdata` is currently running.
@@ -189,29 +271,5 @@ async fn setup_postgres(pgdata: &Path) -> crate::Result<()> {
         }
     }
 
-    create_database().await
-}
-
-/// Create the malbox database, tolerating an existing one from a previous
-/// install.
-async fn create_database() -> crate::Result<()> {
-    let output = tokio::process::Command::new("createdb")
-        .args(["-h", SOCKET_DIR, "malbox_db"])
-        .output()
-        .await
-        .step_ctx(Step::Postgres, "createdb failed")?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("already exists") {
-        return Ok(());
-    }
-
-    Err(InstallError::StepFailed {
-        step: Step::Postgres,
-        message: format!("createdb malbox_db failed: {}", stderr.trim()),
-    })
+    Ok(())
 }

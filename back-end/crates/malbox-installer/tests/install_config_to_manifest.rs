@@ -19,7 +19,7 @@ fn install_config_produces_correct_manifest() {
             url: "https://example.com/frontend.tar.gz".to_string(),
         },
         postgres: PostgresStrategy::Existing {
-            url: "postgres://localhost/malbox_db".to_string(),
+            url: "postgres://localhost".to_string(),
         },
         systemd: false,
     };

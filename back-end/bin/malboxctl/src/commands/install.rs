@@ -178,8 +178,7 @@ impl InstallCommand {
                 .interact()?;
             match choice {
                 0 => PostgresStrategy::Existing {
-                    url: prompt_postgres_url(Some("postgres://postgres@localhost:5432/malbox_db"))
-                        .await?,
+                    url: prompt_postgres_url(Some("postgres://postgres@localhost:5432")).await?,
                 },
                 _ => {
                     ensure_setup_tools()?;

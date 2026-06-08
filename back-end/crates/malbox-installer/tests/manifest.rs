@@ -33,7 +33,7 @@ fn sample_manifest() -> Manifest {
         },
         postgres: PostgresManifest {
             strategy: "existing".to_string(),
-            url: "postgres://postgres@localhost:5433/malbox_db".to_string(),
+            url: "postgres://postgres@localhost:5433".to_string(),
         },
         systemd: SystemdManifest {
             enabled: false,
