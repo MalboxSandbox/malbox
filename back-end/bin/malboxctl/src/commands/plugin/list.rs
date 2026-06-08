@@ -27,21 +27,19 @@ impl Command for ListCommand {
         }
 
         println!(
-            "  {:<20} {:<10} {:<8} {:<12} {}",
-            "NAME", "VERSION", "TYPE", "STATUS", "SOURCE"
+            "  {:<20} {:<10} {:<8} {:<12} SOURCE",
+            "NAME", "VERSION", "TYPE", "STATUS"
         );
 
         for (name, plugin) in &lockfile.plugins {
-            let plugin_type = plugins_dir
-                .join(name)
-                .join("plugin.toml")
-                .exists()
-                .then(|| {
-                    parse_manifest(&plugins_dir.join(name).join("plugin.toml"))
-                        .map(|m| format!("{:?}", m.plugin.plugin_type).to_lowercase())
-                        .unwrap_or_else(|_| "?".into())
-                })
-                .unwrap_or_else(|| "?".into());
+            let manifest_path = plugins_dir.join(name).join("plugin.toml");
+            let plugin_type = if manifest_path.exists() {
+                parse_manifest(&manifest_path)
+                    .map(|m| format!("{:?}", m.plugin.plugin_type).to_lowercase())
+                    .unwrap_or_else(|_| "?".into())
+            } else {
+                "?".into()
+            };
 
             let source = match plugin.source {
                 malbox_plugin_registry::lockfile::InstallSource::Registry => "registry",
@@ -64,8 +62,8 @@ impl Command for ListCommand {
                 .unwrap_or_else(|_| "?".into());
 
             println!(
-                "  {:<20} {:<10} {:<8} {:<12} {}",
-                name, version, plugin_type, "untracked", "\u{2014}"
+                "  {:<20} {:<10} {:<8} {:<12} \u{2014}",
+                name, version, plugin_type, "untracked"
             );
         }
 

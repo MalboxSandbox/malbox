@@ -63,20 +63,20 @@ impl Command for InfoCommand {
             }
             Err(_) => {
                 let manifest_path = plugins_dir.join(&self.name).join("plugin.toml");
-                if manifest_path.exists() {
-                    if let Ok(manifest) = malbox_plugin_manifest::parse_manifest(&manifest_path) {
-                        found = true;
-                        println!("  Name:          {}", manifest.plugin.name);
-                        if let Some(ref desc) = manifest.plugin.description {
-                            println!("  Description:   {}", desc);
-                        }
-                        println!("  Version:       {}", manifest.plugin.version);
-                        println!("  Type:          {:?}", manifest.plugin.plugin_type);
-                        if !manifest.plugin.authors.is_empty() {
-                            println!("  Authors:       {}", manifest.plugin.authors.join(", "));
-                        }
-                        println!("  (local plugin \u{2014} not in registry)");
+                if manifest_path.exists()
+                    && let Ok(manifest) = malbox_plugin_manifest::parse_manifest(&manifest_path)
+                {
+                    found = true;
+                    println!("  Name:          {}", manifest.plugin.name);
+                    if let Some(ref desc) = manifest.plugin.description {
+                        println!("  Description:   {}", desc);
                     }
+                    println!("  Version:       {}", manifest.plugin.version);
+                    println!("  Type:          {:?}", manifest.plugin.plugin_type);
+                    if !manifest.plugin.authors.is_empty() {
+                        println!("  Authors:       {}", manifest.plugin.authors.join(", "));
+                    }
+                    println!("  (local plugin \u{2014} not in registry)");
                 }
             }
         }

@@ -106,19 +106,19 @@ impl RegistryClient {
             request = request.header(reqwest::header::IF_NONE_MATCH, etag);
         }
 
-        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-            if !token.is_empty() {
-                request = request.bearer_auth(token);
-            }
+        if let Ok(token) = std::env::var("GITHUB_TOKEN")
+            && !token.is_empty()
+        {
+            request = request.bearer_auth(token);
         }
 
         let response = request.send().await?;
         let status = response.status();
 
-        if status == reqwest::StatusCode::NOT_MODIFIED {
-            if let Some((content, _)) = cached {
-                return Ok(content);
-            }
+        if status == reqwest::StatusCode::NOT_MODIFIED
+            && let Some((content, _)) = cached
+        {
+            return Ok(content);
         }
 
         if status == reqwest::StatusCode::NOT_FOUND {

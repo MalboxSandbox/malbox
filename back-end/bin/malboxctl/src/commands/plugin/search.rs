@@ -33,7 +33,7 @@ impl Command for SearchCommand {
             return Ok(());
         }
 
-        println!("  {:<20} {:<52} {}", "NAME", "DESCRIPTION", "TYPE");
+        println!("  {:<20} {:<52} TYPE", "NAME", "DESCRIPTION");
 
         for entry in &results {
             let desc = if entry.description.len() > 50 {
