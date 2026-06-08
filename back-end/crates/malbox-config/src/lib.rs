@@ -22,7 +22,7 @@ pub use guest_access::{GuestAccessConfig, TransportKind};
 pub use images::ImagesConfig;
 pub use machinery::MachineryConfig;
 pub use machines::{Arch, MachineConfig, validate_machine_configs};
-pub use plugins::PluginsConfig;
+pub use plugins::{PluginsConfig, RegistryConfig};
 pub use providers::ProvidersConfig;
 pub use provisioning::ProvisionStep;
 pub use storage::PathConfig;
