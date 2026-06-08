@@ -1,0 +1,23 @@
+[package]
+name = "malbox-plugin-registry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+malbox-installer = { path = "../malbox-installer" }
+malbox-config = { path = "../malbox-config" }
+malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+semver = { workspace = true }
+tempfile = { workspace = true }
+chrono = { workspace = true }
+flate2 = "1"
+tar = "0.4"
+which = "7"
+
+[dev-dependencies]
+tempfile = { workspace = true }
