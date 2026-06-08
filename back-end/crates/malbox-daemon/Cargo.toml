@@ -21,6 +21,7 @@ malbox-http = { path = "../malbox-http" }
 malbox-machinery = { path = "../malbox-machinery" }
 malbox-resources = { path = "../malbox-resources" }
 malbox-plugin-internal = { path = "../malbox-plugin-internal" }
+malbox-plugin-registry = { path = "../malbox-plugin-registry" }
 
 # Provider implementations (optional, feature-gated)
 malbox-provider-libvirt = { path = "../malbox-provider-libvirt", optional = true }
@@ -34,3 +35,4 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+signal-hook = "0.3"

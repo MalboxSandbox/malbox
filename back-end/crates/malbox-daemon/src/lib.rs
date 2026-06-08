@@ -14,6 +14,7 @@ use tracing::{debug, info, info_span, instrument, warn};
 pub mod error;
 mod providers;
 mod provisioners;
+mod signal;
 
 pub use error::DaemonError;
 
@@ -182,6 +183,11 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
             .map_err(|e| DaemonError::Internal(format!("Failed to start IPC reactor: {}", e)))?
     };
 
+    // Register signal handlers AFTER iceoryx2 init. iceoryx2 overwrites
+    // process-wide sigaction handlers during shared memory setup; any
+    // tokio::signal listeners registered earlier are silently dead.
+    signal::spawn_signal_handlers(&shutdown_token);
+
     let plugin_manager = {
         let _span = info_span!("init.plugin_manager").entered();
 
@@ -199,6 +205,26 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
             })?,
         )
     };
+
+    // Check for missing soft dependencies (read-only, no network calls).
+    {
+        let cache_dir = config
+            .plugins
+            .registry
+            .as_ref()
+            .map(|r| r.cache_dir.clone())
+            .unwrap_or_else(|| malbox_config::RegistryConfig::default().cache_dir);
+        let missing =
+            malbox_plugin_registry::deps::check_startup_deps(&config.plugins.directory, &cache_dir);
+        for dep in &missing {
+            tracing::warn!(
+                plugin = %dep.plugin,
+                dependency = %dep.dep_name,
+                version = %dep.dep_version,
+                "missing optional plugin dependency"
+            );
+        }
+    }
 
     // Initialize sample and result stores for file uploads and worker access
     let sample_store = Arc::new(SampleStore::new(&config.paths.data_dir));
