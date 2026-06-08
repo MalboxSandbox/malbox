@@ -50,9 +50,14 @@ port = 8080
 # Maximum upload size in bytes (default: 0 = unlimited)
 # max_upload_size = 104857600
 
+# The daemon uses the database "malbox", provisioned by 'malboxctl install'
+# (or manually: CREATE DATABASE "malbox").
 [database]
-host = "postgresql://postgres@localhost:5432/malbox_db"
+host = "localhost"
 port = 5432
+# Role to connect as (default: PGUSER, then the OS user - same as psql).
+user = "postgres"
+# password = ""
 
 # Providers must be compiled into the daemon via Cargo features.
 # Each enabled provider needs a corresponding [providers.<name>] section.

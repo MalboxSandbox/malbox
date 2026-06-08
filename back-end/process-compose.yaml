@@ -22,9 +22,11 @@ processes:
     availability:
       restart: on_failure
 
+  # Dev-side provisioning, mirroring what `malboxctl install` does for real
+  # installs: the daemon expects the "malbox" database to exist.
   postgres-setup:
     command: |
-      createdb -h 127.0.0.1 -U postgres malbox_db 2>/dev/null || true
+      createdb -h 127.0.0.1 -U postgres malbox 2>/dev/null || true
       psql -h 127.0.0.1 -U postgres -c "ALTER ROLE postgres WITH SUPERUSER PASSWORD 'password';" 2>/dev/null || true
     depends_on:
       postgres:

@@ -145,7 +145,7 @@
           pkgs.libclang.lib
           pkgs.libvirt
         ];
-        DATABASE_URL = "postgres://postgres@localhost:5432/malbox_db";
+        DATABASE_URL = "postgres://postgres@localhost:5432/malbox";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingwCc}/bin/${mingwCc.targetPrefix}gcc";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${mingwCrt}/lib -L native=${mingwPthreadsWin}/lib -L native=${mingwPthreads}/lib -L native=${mingwMcfgthreads}/lib";
         MINGW_LIB_PATH = "${mingwCrt}/lib:${mingwMcfgthreads}/lib:${mingwPthreadsWin}/lib";
@@ -159,6 +159,7 @@
 
       docsPackages = with pkgs; [
         nodejs
+        pnpm
       ];
     in
     {
