@@ -33,7 +33,7 @@ pub struct Config {
 impl Config {
     /// Stock defaults shared by `malboxctl config init` and the installer.
     ///
-    /// Callers tweak the returned value (environment, database URL, web dir,
+    /// Callers tweak the returned value (environment, database, web dir,
     /// providers) instead of hand-writing TOML, so generated configuration
     /// can never drift from the schema the daemon parses.
     pub fn with_defaults(paths: PathConfig) -> Self {
@@ -57,10 +57,7 @@ impl Config {
                 max_upload_size: 100 * 1024 * 1024,
                 web_dir: None,
             },
-            database: DatabaseConfig {
-                host: "postgres://localhost/malbox_db".to_string(),
-                port: 5432,
-            },
+            database: DatabaseConfig::default(),
             providers: ProvidersConfig::default(),
             machinery: MachineryConfig::default(),
             images: None,
@@ -122,13 +119,36 @@ pub struct HttpConfig {
     pub web_dir: Option<String>,
 }
 
+/// Name of the daemon's database. Not configurable: the daemon creates and
+/// migrates it itself on first start, so there is nothing for an operator
+/// to point elsewhere.
+pub const DATABASE_NAME: &str = "malbox";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
-    /// Full PostgreSQL connection string (e.g.
-    /// `postgres://user@host:5432/malbox_db`), passed verbatim to the pool.
+    /// PostgreSQL server hostname or IP address.
+    #[serde(default = "default_db_host")]
     pub host: String,
+    #[serde(default = "default_db_port")]
     pub port: u16,
+    /// Role to connect as. When omitted, resolution matches psql: `PGUSER`
+    /// from the environment, then the OS user the daemon runs as.
+    pub user: Option<String>,
+    /// Password for `user`. When omitted, `PGPASSWORD` still applies.
+    /// Local trust/peer setups (the managed install, dev) need none.
+    pub password: Option<String>,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            host: default_db_host(),
+            port: default_db_port(),
+            user: None,
+            password: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +171,14 @@ pub struct PlatformAnalysisConfig {
 
 fn default_log_level() -> LogLevel {
     LogLevel::Info
+}
+
+fn default_db_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_db_port() -> u16 {
+    5432
 }
 
 fn default_max_workers() -> usize {
