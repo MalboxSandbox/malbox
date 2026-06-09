@@ -2,6 +2,8 @@ import { split } from "std/text"
 
 let GITHUB_REPO = "DualHorizon/malbox"
 let BINARY_NAME = "malboxctl"
+// Channel used for non-interactive installs (curl|bash with no MALBOX_CHANNEL).
+let DEFAULT_CHANNEL = "stable"
 // Pinned so a curl|bash bootstrap never pulls a moving, unreviewed dependency.
 let GUM_VERSION = "0.17.0"
 let GUM_TMP_DIR = ""
@@ -110,7 +112,30 @@ fun detect_install_dir(): Text {
     return local_bin
 }
 
+fun is_interactive(): Text {
+    // curl|bash leaves stdin as the pipe, not a tty; gum prompts can't read it.
+    return trust $test -t 0 && echo "yes" || echo "no"$
+}
+
 fun choose_channel(): Text {
+    // An explicit MALBOX_CHANNEL wins everywhere, interactive or not.
+    const env_channel = trust $printenv MALBOX_CHANNEL || true$
+    if env_channel != "" {
+        if env_channel != "stable" and env_channel != "nightly" {
+            trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Invalid MALBOX_CHANNEL: {env_channel} (expected 'stable' or 'nightly')"$
+            cleanup_gum()
+            exit(1)
+        }
+        return env_channel
+    }
+
+    const interactive = is_interactive()
+    if interactive == "no" {
+        trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Non-interactive install, defaulting to {DEFAULT_CHANNEL} channel (set MALBOX_CHANNEL to override)"$
+        return DEFAULT_CHANNEL
+    }
+
+    trust $gum style --bold "Select release channel:"$
     const channel = $gum choose --cursor.foreground "{COLOR_ACCENT}" --selected.foreground "{COLOR_ACCENT}" --header.foreground "{COLOR_FAINT}" "stable" "nightly"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "No channel selected"$
         cleanup_gum()
@@ -237,13 +262,15 @@ main {
     trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Install to:   {install_dir}/{BINARY_NAME}"$
     echo("")
 
-    trust $gum style --bold "Select release channel:"$
     const channel = choose_channel()
     echo("")
 
     $test -f "{install_dir}/{BINARY_NAME}"$ succeeded {
         const force = trust $printenv MALBOX_FORCE || true$
-        if force != "1" {
+        const interactive = is_interactive()
+        // Non-interactive (or forced) installs overwrite silently so re-running
+        // the bootstrap to upgrade works unattended.
+        if force != "1" and interactive == "yes" {
             $gum confirm --prompt.foreground "{COLOR_ACCENT}" --selected.background "{COLOR_ACCENT}" --unselected.foreground "{COLOR_FAINT}" "Malbox CLI already exists at {install_dir}/{BINARY_NAME}. Overwrite?"$ failed {
                 trust $gum log --level info --prefix.foreground "{COLOR_ACCENT}" "Installation cancelled."$
                 cleanup_gum()
