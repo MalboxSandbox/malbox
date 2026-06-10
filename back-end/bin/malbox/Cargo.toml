@@ -6,10 +6,19 @@ edition = "2024"
 [dependencies]
 malbox-cli-common = { path = "../../crates/malbox-cli-common" }
 malbox-config = { path = "../../crates/malbox-config" }
+malbox-installer = { path = "../../crates/malbox-installer" }
+malbox-plugin-registry = { path = "../../crates/malbox-plugin-registry" }
+malbox-plugin-manifest = { path = "../../crates/malbox-plugin-manifest" }
 malbox-tracing = { path = "../../crates/malbox-tracing" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 color-eyre = { workspace = true }
 tracing = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
 clap_complete = "4.6.5"
 serde_json = { workspace = true }
+console = "0.16.3"
+dialoguer = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+which = "7.0.3"

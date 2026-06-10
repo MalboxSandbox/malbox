@@ -6,6 +6,7 @@ use malbox_tracing::init_tracing;
 use tracing::level_filters::LevelFilter;
 
 mod commands;
+mod utils;
 use commands::{Cli, Command};
 
 #[tokio::main]
