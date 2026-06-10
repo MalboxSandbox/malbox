@@ -31,7 +31,7 @@ body:
       description: Which area of malbox does this relate to?
       options:
         - malbox (CLI)
-        - malboxctl (daemon/CLI)
+        - malboxd (daemon)
         - HTTP API
         - Scheduler
         - Database

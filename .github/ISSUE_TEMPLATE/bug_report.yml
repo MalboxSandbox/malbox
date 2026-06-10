@@ -43,7 +43,7 @@ body:
       description: Which part of malbox is affected?
       options:
         - malbox (CLI)
-        - malboxctl (daemon/CLI)
+        - malboxd (daemon)
         - HTTP API
         - Scheduler
         - Database
