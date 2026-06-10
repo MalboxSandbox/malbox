@@ -1,7 +1,7 @@
 import { split } from "std/text"
 
 let GITHUB_REPO = "DualHorizon/malbox"
-let BINARY_NAME = "malboxctl"
+let BINARY_NAME = "malboxd"
 // Channel used for non-interactive installs (curl|bash with no MALBOX_CHANNEL).
 let DEFAULT_CHANNEL = "stable"
 // Pinned so a curl|bash bootstrap never pulls a moving, unreviewed dependency.
@@ -233,7 +233,7 @@ fun install_binary(tmp_dir: Text, asset_name: Text, install_dir: Text) {
         exit(1)
     }
 
-    $mv "{tmp_dir}/malboxctl" "{install_dir}/{BINARY_NAME}"$ failed {
+    $mv "{tmp_dir}/malboxd" "{install_dir}/{BINARY_NAME}"$ failed {
         trust $gum log --level error --prefix.foreground "{COLOR_ERROR}" "Failed to install binary"$
         trust silent $rm -rf "{tmp_dir}"$
         cleanup_gum()
@@ -280,14 +280,14 @@ main {
     }
 
     const tag = fetch_release(channel)
-    const asset_name = "malboxctl-{tag}-{arch}.tar.gz"
+    const asset_name = "malboxd-{tag}-{arch}.tar.gz"
     const tmp_dir = download_binary(tag, asset_name)
     verify_checksum(tmp_dir, asset_name)
     install_binary(tmp_dir, asset_name, install_dir)
 
     echo("")
     trust $gum style --foreground "{COLOR_SUCCESS}" --bold "Malbox CLI installed successfully!"$
-    trust $gum style --foreground "{COLOR_FAINT}" "Run malboxctl install to set up Malbox."$
+    trust $gum style --foreground "{COLOR_FAINT}" "Run malbox daemon install to set up Malbox."$
 
     cleanup_gum()
 }

@@ -39,7 +39,7 @@ split__4_v0() {
 }
 
 __GITHUB_REPO_3="DualHorizon/malbox"
-__BINARY_NAME_4="malboxctl"
+__BINARY_NAME_4="malboxd"
 # Channel used for non-interactive installs (curl|bash with no MALBOX_CHANNEL).
 __DEFAULT_CHANNEL_5="stable"
 # Pinned so a curl|bash bootstrap never pulls a moving, unreviewed dependency.
@@ -362,7 +362,7 @@ install_binary__47_v0() {
         cleanup_gum__38_v0 
         exit 1
     fi
-    mv "${tmp_dir_94}/malboxctl" "${install_dir_96}/${__BINARY_NAME_4}"
+    mv "${tmp_dir_94}/malboxd" "${install_dir_96}/${__BINARY_NAME_4}"
     __status=$?
     if [ "${__status}" != 0 ]; then
         gum log --level error --prefix.foreground "${__COLOR_ERROR_10}" "Failed to install binary"
@@ -426,7 +426,7 @@ if [ "${__status}" = 0 ]; then
 fi
 fetch_release__44_v0 "${channel_59}"
 tag_70="${ret_fetch_release44_v0}"
-asset_name_71="malboxctl-${tag_70}-${arch_28}.tar.gz"
+asset_name_71="malboxd-${tag_70}-${arch_28}.tar.gz"
 download_binary__45_v0 "${tag_70}" "${asset_name_71}"
 tmp_dir_82="${ret_download_binary45_v0}"
 verify_checksum__46_v0 "${tmp_dir_82}" "${asset_name_71}"
@@ -434,6 +434,6 @@ install_binary__47_v0 "${tmp_dir_82}" "${asset_name_71}" "${install_dir_52}"
 printf '%s\n' ""
 gum style --foreground "${__COLOR_SUCCESS_9}" --bold "Malbox CLI installed successfully!"
 __status=$?
-gum style --foreground "${__COLOR_FAINT_12}" "Run malboxctl install to set up Malbox."
+gum style --foreground "${__COLOR_FAINT_12}" "Run malbox daemon install to set up Malbox."
 __status=$?
 cleanup_gum__38_v0 

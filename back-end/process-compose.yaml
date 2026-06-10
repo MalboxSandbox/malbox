@@ -22,7 +22,7 @@ processes:
     availability:
       restart: on_failure
 
-  # Dev-side provisioning, mirroring what `malboxctl install` does for real
+  # Dev-side provisioning, mirroring what `malbox daemon install` does for real
   # installs: the daemon expects the "malbox" database to exist.
   postgres-setup:
     command: |

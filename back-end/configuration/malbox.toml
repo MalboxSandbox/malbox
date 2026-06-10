@@ -50,7 +50,7 @@ port = 8080
 # Maximum upload size in bytes (default: 0 = unlimited)
 # max_upload_size = 104857600
 
-# The daemon uses the database "malbox", provisioned by 'malboxctl install'
+# The daemon uses the database "malbox", provisioned by 'malbox daemon install'
 # (or manually: CREATE DATABASE "malbox").
 [database]
 host = "localhost"
