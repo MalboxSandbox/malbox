@@ -64,7 +64,7 @@ pub async fn run(
             let prebuilt_asset = (manifest.daemon.source == "prebuilt")
                 .then(release_arch)
                 .flatten()
-                .and_then(|arch| release.find_malboxctl_asset(arch));
+                .and_then(|arch| release.find_daemon_asset(arch));
 
             let daemon_source = match prebuilt_asset {
                 Some(asset) => DaemonSource::Prebuilt {
@@ -107,7 +107,7 @@ pub async fn run(
         )
         .await,
     )?;
-    manifest.daemon.path = result.malboxctl;
+    manifest.daemon.path = result.daemon;
     manifest.cli.path = result.malbox;
 
     // Upgrade frontend
@@ -212,7 +212,7 @@ pub async fn rollback(manifest_path: &Path, progress: &dyn InstallProgress) -> c
     }
 
     // Swap binaries. Rename, not copy: atomic, and immune to ETXTBSY when
-    // malboxctl is rolling itself back.
+    // malboxd is rolling itself back.
     progress.started(Step::Daemon, "Rolling back malbox binaries");
     tokio::fs::rename(&prev_path, &manifest.daemon.path).await?;
     manifest.daemon.prev_path = None;

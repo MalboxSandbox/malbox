@@ -53,7 +53,7 @@ pub enum InstallError {
     #[error("manifest error: {0}")]
     Manifest(String),
 
-    #[error("manifest not found at {0} - run `malboxctl install` first")]
+    #[error("manifest not found at {0} - run `malbox daemon install` first")]
     ManifestNotFound(PathBuf),
 
     #[error("already up to date (version {0})")]

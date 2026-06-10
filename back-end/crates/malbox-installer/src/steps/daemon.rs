@@ -5,7 +5,7 @@ use crate::progress::InstallProgress;
 use std::path::{Path, PathBuf};
 
 pub struct InstallResult {
-    pub malboxctl: PathBuf,
+    pub daemon: PathBuf,
     pub malbox: PathBuf,
 }
 
@@ -19,7 +19,7 @@ pub async fn execute(
 ) -> crate::Result<InstallResult> {
     progress.started(Step::Daemon, "Installing malbox binaries");
 
-    let malboxctl_path = install_dir.join("malboxctl");
+    let daemon_path = install_dir.join("malboxd");
     let malbox_path = install_dir.join("malbox");
 
     match source {
@@ -28,13 +28,13 @@ pub async fn execute(
                 github,
                 release,
                 url,
-                "malboxctl",
+                "malboxd",
                 Step::Daemon,
                 10..45,
                 progress,
             )
             .await?;
-            crate::archive::extract_binary(&bytes, "malboxctl", &malboxctl_path, Step::Daemon)?;
+            crate::archive::extract_binary(&bytes, "malboxd", &daemon_path, Step::Daemon)?;
 
             match release_arch().and_then(|arch| release.find_malbox_asset(arch)) {
                 Some(cli_asset) => {
@@ -92,11 +92,7 @@ pub async fn execute(
             // CARGO_TARGET_DIR) would otherwise silently relocate it.
             let target_dir = tmp_dir.path().join("target");
 
-            progress.progress(
-                Step::Daemon,
-                30,
-                "Compiling malboxctl with selected features",
-            );
+            progress.progress(Step::Daemon, 30, "Compiling malboxd with selected features");
             let feature_list = features.join(",");
             run_cargo_build(
                 &manifest_path,
@@ -104,7 +100,7 @@ pub async fn execute(
                 &host,
                 &[
                     "-p",
-                    "malboxctl",
+                    "malboxd",
                     "--no-default-features",
                     "--features",
                     &feature_list,
@@ -116,14 +112,14 @@ pub async fn execute(
             run_cargo_build(&manifest_path, &target_dir, &host, &["-p", "malbox"]).await?;
 
             let built = target_dir.join(&host).join("release");
-            install_built(&built.join("malboxctl"), &malboxctl_path)?;
+            install_built(&built.join("malboxd"), &daemon_path)?;
             install_built(&built.join("malbox"), &malbox_path)?;
         }
     }
 
     progress.completed(Step::Daemon);
     Ok(InstallResult {
-        malboxctl: malboxctl_path,
+        daemon: daemon_path,
         malbox: malbox_path,
     })
 }

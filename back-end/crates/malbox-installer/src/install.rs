@@ -11,7 +11,7 @@ pub fn build_initial_manifest(
     config: &InstallConfig,
     version: &str,
     arch: &str,
-    malboxctl_path: &str,
+    daemon_path: &str,
     malbox_path: &str,
     frontend_path: &str,
 ) -> Manifest {
@@ -43,7 +43,7 @@ pub fn build_initial_manifest(
             source: daemon_source.to_string(),
             version: version.to_string(),
             commit: None,
-            path: PathBuf::from(malboxctl_path),
+            path: PathBuf::from(daemon_path),
             prev_path: None,
             prev_version: None,
             providers: config.providers.clone(),
@@ -93,7 +93,7 @@ pub async fn run(
         config,
         release.version(),
         &arch_label(),
-        &bin_dir.join("malboxctl").display().to_string(),
+        &bin_dir.join("malboxd").display().to_string(),
         &bin_dir.join("malbox").display().to_string(),
         &data_dir.join("web").display().to_string(),
     );
@@ -169,7 +169,7 @@ async fn run_steps(
     } = plan;
     let should_run = |step: Step| resume_after.is_none_or(|last| step.is_after(last));
 
-    // Step 1: Binaries (malboxctl + malbox)
+    // Step 1: Binaries (malboxd + malbox)
     if should_run(Step::Daemon) {
         let result = observe(
             Step::Daemon,
@@ -184,7 +184,7 @@ async fn run_steps(
             )
             .await,
         )?;
-        manifest.daemon.path = result.malboxctl;
+        manifest.daemon.path = result.daemon;
         manifest.cli.path = result.malbox;
         manifest.mark_step_completed(Step::Daemon);
         manifest.save(manifest_path)?;
@@ -273,7 +273,7 @@ fn config_from_manifest(manifest: &Manifest, release: &Release) -> InstallConfig
         manifest.daemon.source.as_str(),
         crate::steps::daemon::release_arch(),
     ) {
-        ("prebuilt", Some(arch)) => match release.find_malboxctl_asset(arch) {
+        ("prebuilt", Some(arch)) => match release.find_daemon_asset(arch) {
             Some(asset) => DaemonSource::Prebuilt {
                 url: asset.browser_download_url.clone(),
             },

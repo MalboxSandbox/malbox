@@ -7,13 +7,13 @@ fn sample_release() -> Release {
         body: Some("## Changelog\n- Added feature X".to_string()),
         assets: vec![
             ReleaseAsset {
-                name: "malboxctl-v0.2.0-linux-x64.tar.gz".to_string(),
-                browser_download_url: "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxctl-v0.2.0-linux-x64.tar.gz".to_string(),
+                name: "malboxd-v0.2.0-linux-x64.tar.gz".to_string(),
+                browser_download_url: "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxd-v0.2.0-linux-x64.tar.gz".to_string(),
                 size: 15_000_000,
             },
             ReleaseAsset {
-                name: "malboxctl-v0.2.0-linux-x64.tar.gz.sha256".to_string(),
-                browser_download_url: "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxctl-v0.2.0-linux-x64.tar.gz.sha256".to_string(),
+                name: "malboxd-v0.2.0-linux-x64.tar.gz.sha256".to_string(),
+                browser_download_url: "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxd-v0.2.0-linux-x64.tar.gz.sha256".to_string(),
                 size: 64,
             },
             ReleaseAsset {
@@ -38,8 +38,8 @@ fn parse_release_response() {
         "body": "## Changelog\n- Added feature X",
         "assets": [
             {
-                "name": "malboxctl-v0.2.0-linux-x64.tar.gz",
-                "browser_download_url": "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxctl-v0.2.0-linux-x64.tar.gz",
+                "name": "malboxd-v0.2.0-linux-x64.tar.gz",
+                "browser_download_url": "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxd-v0.2.0-linux-x64.tar.gz",
                 "size": 15000000
             },
             {
@@ -56,17 +56,17 @@ fn parse_release_response() {
 }
 
 #[test]
-fn find_malboxctl_asset() {
+fn find_daemon_asset() {
     let release = sample_release();
-    let asset = release.find_malboxctl_asset("linux-x64");
+    let asset = release.find_daemon_asset("linux-x64");
     assert!(asset.is_some());
-    assert!(asset.unwrap().name.starts_with("malboxctl-"));
+    assert!(asset.unwrap().name.starts_with("malboxd-"));
 }
 
 #[test]
-fn find_malboxctl_asset_wrong_arch() {
+fn find_daemon_asset_wrong_arch() {
     let release = sample_release();
-    let asset = release.find_malboxctl_asset("linux-arm64");
+    let asset = release.find_daemon_asset("linux-arm64");
     assert!(asset.is_none());
 }
 

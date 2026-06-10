@@ -58,8 +58,8 @@ impl Release {
         semver::Version::parse(self.version()).is_ok_and(|v| v.pre.is_empty())
     }
 
-    pub fn find_malboxctl_asset(&self, arch: &str) -> Option<&ReleaseAsset> {
-        let expected = format!("malboxctl-{}-{}.tar.gz", self.tag_name, arch);
+    pub fn find_daemon_asset(&self, arch: &str) -> Option<&ReleaseAsset> {
+        let expected = format!("malboxd-{}-{}.tar.gz", self.tag_name, arch);
         self.assets.iter().find(|a| a.name == expected)
     }
 

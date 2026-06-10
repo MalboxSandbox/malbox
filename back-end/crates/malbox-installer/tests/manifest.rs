@@ -16,7 +16,7 @@ fn sample_manifest() -> Manifest {
             source: "prebuilt".to_string(),
             version: "0.1.0".to_string(),
             commit: Some("891348d".to_string()),
-            path: "/home/user/.local/bin/malboxctl".into(),
+            path: "/home/user/.local/bin/malboxd".into(),
             prev_path: None,
             prev_version: None,
             providers: vec!["libvirt".to_string()],

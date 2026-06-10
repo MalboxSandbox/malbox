@@ -39,7 +39,7 @@ pub async fn init_database(
                 sqlx::Error::Configuration(
                     format!(
                         "database \"{DATABASE_NAME}\" does not exist on {}:{} - \
-                         run 'malboxctl install', or create it manually: \
+                         run 'malbox daemon install', or create it manually: \
                          CREATE DATABASE \"{DATABASE_NAME}\"",
                         config.host, config.port
                     )

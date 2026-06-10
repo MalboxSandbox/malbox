@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 const DAEMON_UNIT: &str = "malbox.service";
 const POSTGRES_UNIT: &str = "malbox-postgres.service";
 
-fn daemon_unit(malboxctl_path: &Path, config_path: &Path, managed_postgres: bool) -> String {
+fn daemon_unit(daemon_path: &Path, config_path: &Path, managed_postgres: bool) -> String {
     // NOTE: a user unit cannot order against system units, so there is no
     // point referencing the distro's postgresql.service here. When the
     // installer manages its own instance we depend on that unit instead.
@@ -25,7 +25,7 @@ After={after}
 {wants}
 [Service]
 Type=simple
-ExecStart="{malboxctl}" daemon start
+ExecStart="{daemon}"
 Restart=on-failure
 RestartSec=5
 Environment="MALBOX_CONFIG={config}"
@@ -33,7 +33,7 @@ Environment="MALBOX_CONFIG={config}"
 [Install]
 WantedBy=default.target
 "#,
-        malboxctl = malboxctl_path.display(),
+        daemon = daemon_path.display(),
         config = config_path.display(),
     )
 }
@@ -61,7 +61,7 @@ WantedBy=default.target
 
 pub async fn execute(
     enabled: bool,
-    malboxctl_path: &Path,
+    daemon_path: &Path,
     config_path: &Path,
     pgdata: Option<&Path>,
     progress: &dyn InstallProgress,
@@ -97,7 +97,7 @@ pub async fn execute(
     }
 
     progress.progress(Step::Systemd, 60, "Installing malbox.service");
-    let unit_content = daemon_unit(malboxctl_path, config_path, pgdata.is_some());
+    let unit_content = daemon_unit(daemon_path, config_path, pgdata.is_some());
     tokio::fs::write(unit_dir.join(DAEMON_UNIT), unit_content).await?;
 
     progress.progress(Step::Systemd, 80, "Reloading systemd daemon");

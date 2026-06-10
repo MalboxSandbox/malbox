@@ -12,7 +12,7 @@ pub(crate) fn extract_tarball(bytes: &[u8], dest: &Path, step: Step) -> crate::R
 
 /// Write `reader` to `dest` as an executable via a temp file in the same
 /// directory followed by an atomic rename. Writing `dest` in place would fail
-/// with ETXTBSY whenever it is the currently running binary (`malboxctl
+/// with ETXTBSY whenever it is the currently running binary (`malbox daemon
 /// install` re-installing itself, every upgrade); rename swaps the directory
 /// entry while the running process keeps its old inode.
 pub(crate) fn write_executable(

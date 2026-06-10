@@ -31,7 +31,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Stock defaults shared by `malboxctl config init` and the installer.
+    /// Stock defaults shared by `malbox daemon config init` and the installer.
     ///
     /// Callers tweak the returned value (environment, database, web dir,
     /// providers) instead of hand-writing TOML, so generated configuration

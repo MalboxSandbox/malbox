@@ -1,5 +1,5 @@
 //! Same-version rebuild of the installed binaries with a different Cargo
-//! feature set. Backs `malboxctl provider install/uninstall/rebuild`.
+//! feature set. Backs `malbox daemon rebuild`.
 
 use crate::config::DaemonSource;
 use crate::error::Step;
@@ -55,7 +55,7 @@ pub async fn run(
         )
         .await,
     )?;
-    manifest.daemon.path = result.malboxctl;
+    manifest.daemon.path = result.daemon;
     manifest.cli.path = result.malbox;
 
     // Record the rebuild: the binaries are now compiled with this exact set.

@@ -28,7 +28,7 @@ fn install_config_produces_correct_manifest() {
         &config,
         "0.1.0",
         "linux-x64",
-        "/home/user/.local/bin/malboxctl",
+        "/home/user/.local/bin/malboxd",
         "/home/user/.local/bin/malbox",
         "/home/user/.local/share/malbox/web",
     );
@@ -45,7 +45,7 @@ fn install_config_produces_correct_manifest() {
     );
     assert_eq!(
         manifest.daemon.path,
-        std::path::PathBuf::from("/home/user/.local/bin/malboxctl")
+        std::path::PathBuf::from("/home/user/.local/bin/malboxd")
     );
     assert_eq!(manifest.frontend.source, "prebuilt");
     assert_eq!(manifest.postgres.strategy, "existing");
@@ -73,7 +73,7 @@ fn install_config_compiled_recorded() {
         &config,
         "0.1.0",
         "linux-x64",
-        "/home/user/.local/bin/malboxctl",
+        "/home/user/.local/bin/malboxd",
         "/home/user/.local/bin/malbox",
         "/home/user/.local/share/malbox/web",
     );

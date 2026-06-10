@@ -5,10 +5,10 @@
 pub struct DaemonFeature {
     /// Human-readable label shown in interactive prompts.
     pub display: &'static str,
-    /// Cargo feature name as declared in `bin/malboxctl/Cargo.toml`.
+    /// Cargo feature name as declared in `bin/malboxd/Cargo.toml`.
     pub feature: &'static str,
     /// Part of the default set. Must mirror the Cargo `default` feature list
-    /// (enforced by the `feature_sync` test in malboxctl).
+    /// (enforced by the `feature_sync` test in malboxd).
     pub default: bool,
 }
 
@@ -25,7 +25,7 @@ pub const DAEMON_FEATURES: &[DaemonFeature] = &[
     },
 ];
 
-/// Cargo features baked into the prebuilt `malboxctl` release binaries
+/// Cargo features baked into the prebuilt `malboxd` release binaries
 /// (the release workflow builds with default features).
 ///
 /// The install wizard compares the user's selection against this set to
