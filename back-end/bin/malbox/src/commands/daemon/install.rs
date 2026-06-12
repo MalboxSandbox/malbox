@@ -9,7 +9,7 @@ use malbox_cli_common::error::{CliError, Result};
 use malbox_cli_common::utils::format::Brand;
 use malbox_cli_common::utils::progress::Spinner;
 use malbox_installer::config::{InstallConfig, PostgresStrategy};
-use malbox_installer::features::{default_features, split_features};
+use malbox_installer::features::split_features;
 use malbox_installer::github::{Channel, GitHubClient};
 use malbox_installer::manifest::Manifest;
 use malbox_installer::steps::postgres::{
@@ -79,17 +79,8 @@ impl Command for InstallCommand {
             wizard::prompt_channel(Channel::Stable)?
         };
 
-        // Daemon features (providers + provisioners)
-        let selected_features: Vec<String> = if self.yes {
-            default_features()
-        } else {
-            wizard::prompt_features(&default_features())?
-        };
-
-        // Providers configure the daemon; provisioners only affect the build.
-        let (providers, provisioners) = split_features(&selected_features);
-
-        // Fetch latest release
+        // Fetch latest release (needed before the strategy prompt so we know
+        // whether a prebuilt binary exists).
         println!();
         let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
@@ -100,8 +91,13 @@ impl Command for InstallCommand {
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
         drop(release_spinner);
 
-        // Daemon source
-        let daemon_source = wizard::resolve_daemon_source(&release, &selected_features, self.yes)?;
+        // Daemon: prebuilt (all features) or compile (user picks features)
+        let daemon_choice = if self.yes {
+            wizard::default_daemon_choice(&release)
+        } else {
+            wizard::prompt_daemon_choice(&release, &malbox_installer::default_features())?
+        };
+        let (providers, provisioners) = split_features(&daemon_choice.features);
 
         // Frontend - download the prebuilt SPA bundle when the release ships
         // one, otherwise build it from source.
@@ -120,9 +116,9 @@ impl Command for InstallCommand {
         let install_config = InstallConfig {
             providers,
             provisioners,
-            features: selected_features,
+            features: daemon_choice.features,
             channel,
-            daemon: daemon_source,
+            daemon: daemon_choice.source,
             frontend: frontend_source,
             postgres,
             systemd,

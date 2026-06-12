@@ -5,9 +5,15 @@ use dialoguer::{MultiSelect, Select};
 use malbox_cli_common::error::Result;
 use malbox_cli_common::utils::format::Brand;
 use malbox_installer::config::{DaemonSource, FrontendSource};
-use malbox_installer::features::{DAEMON_FEATURES, default_features};
+use malbox_installer::features::{self, FeatureKind, default_features};
 use malbox_installer::github::{Channel, Release};
 use malbox_installer::steps::daemon::release_arch;
+
+/// The resolved daemon installation strategy and selected features.
+pub struct DaemonChoice {
+    pub features: Vec<String>,
+    pub source: DaemonSource,
+}
 
 pub fn prompt_channel(current: Channel) -> Result<Channel> {
     let default_idx = match current {
@@ -25,77 +31,91 @@ pub fn prompt_channel(current: Channel) -> Result<Channel> {
     })
 }
 
-/// Multi-select over the known daemon features, pre-selecting `current`.
-pub fn prompt_features(current: &[String]) -> Result<Vec<String>> {
-    let display_names: Vec<&str> = DAEMON_FEATURES.iter().map(|f| f.display).collect();
-    let defaults: Vec<bool> = DAEMON_FEATURES
-        .iter()
-        .map(|f| current.iter().any(|c| c == f.feature))
-        .collect();
-
-    Ok(MultiSelect::new()
-        .with_prompt("Select daemon features to include")
-        .items(&display_names)
-        .defaults(&defaults)
-        .interact()?
-        .into_iter()
-        .map(|i| DAEMON_FEATURES[i].feature.to_string())
-        .collect())
+/// Default choice for `--yes`: prebuilt binary with all default features.
+pub fn default_daemon_choice(release: &Release) -> DaemonChoice {
+    let source = release_arch()
+        .and_then(|arch| release.find_daemon_asset(arch))
+        .map(|asset| DaemonSource::Prebuilt {
+            url: asset.browser_download_url.clone(),
+        })
+        .unwrap_or(DaemonSource::Compile);
+    DaemonChoice {
+        features: default_features(),
+        source,
+    }
 }
 
-/// Decide the daemon binary source. Prebuilt is only offered when the
-/// selection is exactly the feature set the release binaries were built
-/// with; `assume_yes` takes the prebuilt without prompting.
-pub fn resolve_daemon_source(
-    release: &Release,
-    selected_features: &[String],
-    assume_yes: bool,
-) -> Result<DaemonSource> {
-    let matches_defaults = {
-        let mut selected = selected_features.to_vec();
-        selected.sort_unstable();
-        let mut defaults = default_features();
-        defaults.sort_unstable();
-        selected == defaults
-    };
-    let prebuilt_asset = matches_defaults
-        .then(release_arch)
-        .flatten()
-        .and_then(|arch| release.find_daemon_asset(arch));
+/// Ask the user: prebuilt binary (all features) or compile from source
+/// (choose specific providers and provisioners).
+pub fn prompt_daemon_choice(release: &Release, current: &[String]) -> Result<DaemonChoice> {
+    let prebuilt_asset = release_arch().and_then(|arch| release.find_daemon_asset(arch));
 
-    let source = match prebuilt_asset {
+    match prebuilt_asset {
         Some(asset) => {
-            let use_prebuilt = assume_yes
-                || Select::new()
-                    .with_prompt("A prebuilt binary is available for the default feature set")
-                    .items(["Download prebuilt binary (faster)", "Compile from source"])
-                    .default(0)
-                    .interact()?
-                    == 0;
-            if use_prebuilt {
-                DaemonSource::Prebuilt {
-                    url: asset.browser_download_url.clone(),
-                }
-            } else {
-                DaemonSource::Compile
+            let choice = Select::new()
+                .with_prompt("How would you like to install the daemon?")
+                .items([
+                    "Download prebuilt binary (all providers and provisioners)",
+                    "Compile from source (choose specific providers and provisioners)",
+                ])
+                .default(0)
+                .interact()?;
+
+            match choice {
+                0 => Ok(DaemonChoice {
+                    features: default_features(),
+                    source: DaemonSource::Prebuilt {
+                        url: asset.browser_download_url.clone(),
+                    },
+                }),
+                _ => Ok(DaemonChoice {
+                    features: prompt_custom_features(current)?,
+                    source: DaemonSource::Compile,
+                }),
             }
         }
         None => {
-            if !matches_defaults {
-                println!(
-                    "  {} Custom feature selection requires compiling from source",
-                    Brand::warning().apply_to("!")
-                );
-            } else {
-                println!(
-                    "  {} No prebuilt binary available for this platform - will compile from source",
-                    Brand::warning().apply_to("!")
-                );
-            }
-            DaemonSource::Compile
+            println!(
+                "  {} No prebuilt binary available for this platform - compiling from source",
+                Brand::warning().apply_to("!")
+            );
+            Ok(DaemonChoice {
+                features: prompt_custom_features(current)?,
+                source: DaemonSource::Compile,
+            })
         }
-    };
-    Ok(source)
+    }
+}
+
+/// Categorized multi-select: providers first, then provisioners.
+fn prompt_custom_features(current: &[String]) -> Result<Vec<String>> {
+    let mut selected = Vec::new();
+
+    for (kind, label) in [
+        (FeatureKind::Provider, "Select virtualization providers"),
+        (FeatureKind::Provisioner, "Select machine provisioners"),
+    ] {
+        let entries: Vec<&features::DaemonFeature> = features::by_kind(kind).collect();
+        if entries.is_empty() {
+            continue;
+        }
+
+        let display: Vec<&str> = entries.iter().map(|f| f.display).collect();
+        let defaults: Vec<bool> = entries
+            .iter()
+            .map(|f| current.iter().any(|c| c == f.feature))
+            .collect();
+
+        let indices = MultiSelect::new()
+            .with_prompt(label)
+            .items(&display)
+            .defaults(&defaults)
+            .interact()?;
+
+        selected.extend(indices.into_iter().map(|i| entries[i].feature.to_string()));
+    }
+
+    Ok(selected)
 }
 
 /// Front-end source: the prebuilt SPA bundle when the release ships one,

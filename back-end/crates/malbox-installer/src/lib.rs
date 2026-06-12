@@ -12,7 +12,7 @@ pub mod upgrade;
 
 pub use config::{DaemonSource, FrontendSource, InstallConfig, PostgresStrategy, UpgradeConfig};
 pub use error::{InstallError, Result, Step};
-pub use features::{DAEMON_FEATURES, default_features};
+pub use features::{DAEMON_FEATURES, FeatureKind, default_features};
 pub use github::Channel;
 pub use progress::{InstallProgress, NoopProgress};
 

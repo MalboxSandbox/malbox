@@ -137,14 +137,6 @@ async fn prompt_reconfigure(
 
     let channel = wizard::prompt_channel(manifest.channel)?;
 
-    let current_features = if manifest.daemon.features.is_empty() {
-        default_features()
-    } else {
-        manifest.daemon.features.clone()
-    };
-    let selected_features = wizard::prompt_features(&current_features)?;
-    let (providers, provisioners) = split_features(&selected_features);
-
     let spinner = Spinner::start("Fetching latest release info");
     let release = github
         .latest_release(channel)
@@ -152,15 +144,21 @@ async fn prompt_reconfigure(
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
     drop(spinner);
 
-    let daemon = wizard::resolve_daemon_source(&release, &selected_features, false)?;
+    let current_features = if manifest.daemon.features.is_empty() {
+        default_features()
+    } else {
+        manifest.daemon.features.clone()
+    };
+    let daemon_choice = wizard::prompt_daemon_choice(&release, &current_features)?;
+    let (providers, provisioners) = split_features(&daemon_choice.features);
     let frontend = wizard::resolve_frontend_source(&release);
 
     Ok(InstallConfig {
         providers,
         provisioners,
-        features: selected_features,
+        features: daemon_choice.features,
         channel,
-        daemon,
+        daemon: daemon_choice.source,
         frontend,
         postgres: PostgresStrategy::Existing {
             url: manifest.postgres.url.clone(),
