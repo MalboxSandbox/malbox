@@ -16,7 +16,7 @@ host = ["malbox-plugin-sdk/host", "malbox-plugin-transport/ipc"]
 [dependencies]
 malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }
 malbox-plugin-transport = { path = "../malbox-plugin-transport" }
-pyo3 = { version = "0.28", features = ["extension-module"] }
+pyo3 = { version = "0.29", features = ["extension-module"] }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
