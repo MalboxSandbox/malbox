@@ -35,4 +35,4 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-signal-hook = "0.3"
+signal-hook = "0.4"
