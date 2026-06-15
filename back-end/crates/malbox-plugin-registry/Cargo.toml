@@ -17,7 +17,7 @@ tempfile = { workspace = true }
 chrono = { workspace = true }
 flate2 = "1"
 tar = "0.4"
-which = "7"
+which = "8"
 
 [dev-dependencies]
 tempfile = { workspace = true }
