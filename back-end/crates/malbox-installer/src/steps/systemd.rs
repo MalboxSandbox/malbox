@@ -1,5 +1,5 @@
 use crate::error::{InstallError, Step, StepCtx};
-use crate::progress::InstallProgress;
+use crate::progress::ProgressObserver;
 use std::path::{Path, PathBuf};
 
 const DAEMON_UNIT: &str = "malbox.service";
@@ -64,13 +64,14 @@ pub async fn execute(
     daemon_path: &Path,
     config_path: &Path,
     pgdata: Option<&Path>,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<Option<String>> {
+    observer.step_started("Configuring systemd user services");
+
     if !enabled {
+        observer.step_completed("Configuring systemd user services", "skipped");
         return Ok(None);
     }
-
-    progress.started(Step::Systemd, "Configuring systemd user services");
 
     let unit_dir = crate::xdg_dir(dirs::config_dir(), ".config")?
         .join("systemd")
@@ -78,7 +79,7 @@ pub async fn execute(
     tokio::fs::create_dir_all(&unit_dir).await?;
 
     if let Some(pgdata) = pgdata {
-        progress.progress(Step::Systemd, 20, "Setting up managed PostgreSQL service");
+        observer.build_output("Setting up managed PostgreSQL service");
         let postgres_bin = resolve_bin("postgres").await?;
         tokio::fs::write(
             unit_dir.join(POSTGRES_UNIT),
@@ -88,27 +89,23 @@ pub async fn execute(
         run_systemctl(&["--user", "daemon-reload"]).await?;
         run_systemctl(&["--user", "enable", POSTGRES_UNIT]).await?;
 
-        // Hand the instance over to systemd: stop the pg_ctl-started server,
-        // then let the unit own it from here on (and across reboots).
         if super::postgres::is_running(pgdata).await {
             super::postgres::stop_instance(pgdata).await?;
         }
         run_systemctl(&["--user", "start", POSTGRES_UNIT]).await?;
     }
 
-    progress.progress(Step::Systemd, 60, "Installing malbox.service");
+    observer.build_output("Installing malbox.service");
     let unit_content = daemon_unit(daemon_path, config_path, pgdata.is_some());
     tokio::fs::write(unit_dir.join(DAEMON_UNIT), unit_content).await?;
 
-    progress.progress(Step::Systemd, 80, "Reloading systemd daemon");
+    observer.build_output("Reloading systemd daemon");
     run_systemctl(&["--user", "daemon-reload"]).await?;
 
-    // Enabled but deliberately not started: the user reviews the generated
-    // configuration (providers, machines) before the first start.
-    progress.progress(Step::Systemd, 90, "Enabling malbox service");
+    observer.build_output("Enabling malbox service");
     run_systemctl(&["--user", "enable", DAEMON_UNIT]).await?;
 
-    progress.completed(Step::Systemd);
+    observer.step_completed("Configuring systemd user services", "");
     Ok(Some(DAEMON_UNIT.to_string()))
 }
 
