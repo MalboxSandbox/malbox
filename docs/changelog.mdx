@@ -3,6 +3,45 @@ title: "Changelog"
 description: "Release notes for Malbox covering new features, plugin SDK updates, CLI changes, UI improvements, and bug fixes shipped each week."
 ---
 
+<Update label="June 18, 2026" tags={["release"]}>
+
+## New features
+
+- **Unified `malbox` CLI with daemon subcommands.** Administration has moved under `malbox daemon`, alongside the everyday submission commands. Use `malbox daemon install`, `malbox daemon upgrade`, `malbox daemon start`, `malbox daemon plugin`, `malbox daemon provider`, and `malbox daemon config` — one binary covers user and admin workflows. See the [`malbox` reference](/reference/cli/malbox).
+- **Standalone `malboxd` daemon.** A new `malboxd` binary runs the daemon on its own (for example, under systemd) without going through the CLI wrapper.
+- **Plugin registry and management commands.** A new plugin registry lets you install, update, search, list, remove, and inspect host plugins from a configured registry. Configure sources under the new `[plugins.registry]` section in `daemon.toml` — see [Plugin configuration](/reference/configuration/plugins) — and drive it from `malbox daemon plugin install|update|list|search|remove|info`.
+- **Provider install / uninstall / rebuild.** Manage machinery providers from the CLI with `malbox daemon provider install`, `uninstall`, and `rebuild`, including non-interactive flows for automation.
+- **Installer overhaul.** The installer now provisions the PostgreSQL database for you at install time, supports install resume after a failure, same-version rebuilds, and upgrade reconfiguration. The install wizard also gained release channels (stable / beta / nightly), URL validation, and a PostgreSQL preflight check. See [Automatic install](/installation/automatic).
+- **Same-origin front-end.** The daemon now serves the front-end SPA from the same origin as the API, controlled by the new `web_dir` config — no separate static host required.
+- **Sample pages with multi-run aggregation.** The web UI now has dedicated sample pages that aggregate results across every analysis run for a given hash, with a sample-aware sidebar, deferred report loading, and a section that surfaces failed plugins.
+- **Hash lookup, rescan, and workbench.** Look up a sample by hash from the dashboard, trigger a rescan, and use the new workbench for ad-hoc inspection. Settings have been reorganized to match.
+- **Context menu, transforms, and inline editor.** Right-click any value in a report to copy it, preview it, pipe it through transforms, or open it in the new CodeMirror-based editor.
+- **Paginated tasks and submissions.** The dashboard and submissions views now use cursor-based pagination, so large task lists stay responsive.
+- **Richer report viewer.** The report view has a faster hex viewer, syntax-highlighted code blocks, and modular components that load only what you scroll to. A top-of-page navigation progress bar shows route transitions.
+- **Persistent plugin reports and verdicts.** The scheduler now records plugin reports and a sample-level verdict after each run, and the HTTP API exposes aggregated task and sample reports.
+
+## Updates
+
+- **`malboxctl` renamed to `malboxd`.** The administration binary introduced in the [May 15 release](/changelog#may-15-2026) has been renamed: the standalone daemon is now `malboxd`, and admin commands have moved into `malbox daemon ...`. Update any scripts that call `malboxctl` directly.
+- **Database configuration uses discrete fields.** `daemon.toml` now takes `host`, `port`, `user`, and `password` for the database instead of a single URL. The database name is no longer required in the URL, and the default development database has been renamed from `malbox_db` to `malbox`.
+- **Typed config defaults and `MALBOX_CONFIG` override.** Default values are now strongly typed, and you can point the daemon at any config file via the `MALBOX_CONFIG` environment variable.
+- **Non-interactive installs.** The install script now supports `curl | bash`–style runs cleanly, pins the `gum` dependency, and treats checksum verification failures as fatal.
+- **More resilient daemon startup.** The daemon cleans up stale iceoryx2 IPC resources at startup to prevent corruption across restarts, restores SIGTERM handling, and loads its config lazily so first-run commands work before the config exists.
+- **Standalone Images and Machines pages removed.** Those views have been folded into the new settings and sample flows; file uploads now redirect to the existing sample page when a file has already been submitted.
+- **Deprecated `native` provisioner removed.** The `native` provisioner and the in-development `provider-xen` feature have been dropped from the default configuration.
+
+## Bug fixes
+
+- Fixed a duplicate header and a stuck systemd step in the installer's progress renderer.
+- Fixed install and upgrade flows on fresh machines so a clean host reaches a working install reliably.
+- Fixed the install script leaving temp directories behind on some exit paths.
+- Fixed the CodeMirror editor being recreated on every keystroke, which caused input lag in the workbench and recipe editors.
+- Fixed an SSR build failure caused by eager `zlibjs` loading.
+- Fixed hash digests being rendered without leading zeros in some views.
+- Fixed first-run CLI commands failing because the daemon config was loaded eagerly.
+
+</Update>
+
 <Update label="May 17, 2026" tags={["maintenance"]}>
 
 ## Bug fixes
