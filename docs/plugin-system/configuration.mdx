@@ -65,7 +65,7 @@ To change a runtime setting, edit `plugin.toml` and rebuild the plugin (guest) o
 
 ## Custom plugin settings
 
-Beyond system-level configuration, plugin developers can expose custom settings. The daemon passes a `HashMap<String, String>` config map to the plugin's `on_start` handler. In Rust host plugins, the `#[malbox::handlers]` macro can automatically deserialize this map into a typed struct if your `on_start` method takes a typed parameter.
+Beyond system-level configuration, you can expose custom settings. The daemon passes a `HashMap<String, String>` config map to the plugin's `on_start` handler. In Rust host plugins, the `#[malbox::handlers]` macro can automatically deserialize this map into a typed struct if your `on_start` method takes a typed parameter.
 
 ## Event subscriptions
 

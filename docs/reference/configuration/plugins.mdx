@@ -78,7 +78,7 @@ Core plugin identity. This section is required.
 
 ## `[runtime]`
 
-Controls how the plugin runtime behaves. For guest plugins, these values are baked into the plugin binary at build time. For host plugins, they are read by the daemon at registry scan time.
+Controls how the plugin runtime behaves. For guest plugins, the build process bakes these values into the plugin binary. For host plugins, the daemon reads them at registry scan time.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -137,10 +137,10 @@ All paths must be absolute. Guest plugins may use Windows-style absolute paths (
 
 ### `[runtime.auto_collect]`
 
-Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. Files in these directories are streamed back to the daemon as results without the plugin needing to send them explicitly.
+Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. The runtime streams files in these directories back to the daemon as results, so your plugin does not need to send them explicitly.
 
 <Note>
-For artifacts, files that were already sent explicitly (via `ctx.results().push(PluginResult::file(...))`) or marked via `ctx.mark_collected()` are skipped to avoid duplicates. External logs are always collected without dedup.
+For artifacts, the runtime skips files you already sent explicitly (via `ctx.results().push(PluginResult::file(...))`) or marked with `ctx.mark_collected()` to avoid duplicates. External logs are always collected without deduplication.
 </Note>
 
 #### `[runtime.auto_collect.artifacts]`
@@ -199,7 +199,7 @@ Declares result entries that this plugin may produce. Each key under `[results]`
 
 ## Validation
 
-The daemon validates the manifest when scanning plugin directories. Plugins with invalid manifests are marked `Invalid` in the registry and will not be started. The following constraints are enforced:
+The daemon validates the manifest when scanning plugin directories. It marks plugins with invalid manifests as `Invalid` in the registry and does not start them. The daemon enforces the following constraints:
 
 | Constraint | Rule |
 |------------|------|

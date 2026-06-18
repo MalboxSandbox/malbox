@@ -131,7 +131,7 @@ Used by the Table block.
 |-------|------|----------|-------------|
 | `label` | `string` | Yes | Display text |
 | `children` | `TreeNode[]` | No | Nested child nodes |
-| `meta` | `JSON` | No | Metadata shown on hover or expand |
+| `meta` | `JSON` | No | Metadata shown on hover or click |
 
 ### TimelineEvent
 
@@ -140,7 +140,7 @@ Used by the Table block.
 | `ts` | `string` | Yes | ISO 8601 timestamp or relative offset |
 | `label` | `string` | Yes | Event description |
 | `severity` | `string` | No | Color hint (e.g. `high`, `medium`, `low`) |
-| `meta` | `JSON` | No | Detail metadata on hover or click |
+| `meta` | `JSON` | No | Detail metadata shown on hover or click |
 
 ### GraphNode
 
@@ -148,7 +148,7 @@ Used by the Table block.
 |-------|------|----------|-------------|
 | `id` | `string` | Yes | Unique node ID (referenced by edges) |
 | `label` | `string` | Yes | Display label |
-| `meta` | `JSON` | No | Metadata on click or hover |
+| `meta` | `JSON` | No | Metadata shown on hover or click |
 
 ### GraphEdge
 

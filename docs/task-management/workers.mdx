@@ -5,7 +5,7 @@ description: "How Malbox workers execute tasks and report results"
 
 ## Overview
 
-Workers are the execution engines of the task management system. Each worker operates as an independent Tokio task that competes for tasks from a shared queue, executes them via the task executor, and reports results back to the pool. Workers are managed through the [worker pool](/task-management/scheduling#worker-pool).
+Workers are the execution engines of the task management system. Each worker operates as an independent Tokio task that competes for tasks from a shared queue, executes them via the task executor, and reports results back to the pool. The [worker pool](/task-management/scheduling#worker-pool) manages workers.
 
 ## Architecture
 
@@ -20,12 +20,12 @@ The worker's execution loop uses `tokio::select!` to multiplex the task notifier
 
 The worker pool maintains two categories of workers:
 
-- **Baseline workers** (`min_workers`) - always running, no idle timeout. These are spawned when the scheduler starts and stay alive until shutdown.
+- **Baseline workers** (`min_workers`) - always running, no idle timeout. The scheduler spawns these on startup, and they stay alive until shutdown.
 - **Demand workers** - spawned when all active workers are busy and the pool is below `max_workers`. These have an idle timeout and exit automatically when they receive no work within that window.
 
 ### Backpressure
 
-Workers signal "currently executing a task" using an atomic busy counter. The worker pool checks this counter on every task enqueue: if all active workers are busy and the pool is below `max_workers`, a new demand worker is spawned. This ensures the pool scales up under load without over-provisioning.
+Workers signal "currently executing a task" using an atomic busy counter. The worker pool checks this counter on every task enqueue: if all active workers are busy and the pool is below `max_workers`, the pool spawns a new demand worker. This ensures the pool scales up under load without over-provisioning.
 
 ### Task execution
 
@@ -41,7 +41,7 @@ Task cancellation is cooperative: each task gets a child `CancellationToken` tha
 
 ### Configuration
 
-Worker behavior is controlled through configuration options:
+Configuration options control worker behavior:
 
 - Maximum and minimum worker counts
 - Idle timeout for demand workers

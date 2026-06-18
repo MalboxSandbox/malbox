@@ -167,7 +167,7 @@ void progress(double pct, const char* message) const;
 
 ### `warn()`
 
-Logs a warning that will be attached to the task report.
+Logs a warning and attaches it to the task report.
 
 ```cpp
 void warn(const char* message) const;
@@ -192,7 +192,7 @@ void mark_collected(const std::filesystem::path& path) const;
 
 ## TaskInfo
 
-Non-owning view into task metadata. Obtained via `ctx.task()`. Must not outlive the `Context` it was created from.
+Non-owning view into task metadata. Obtained via `ctx.task()`. Must not outlive the `Context` that created it.
 
 ### `id()`
 
@@ -612,7 +612,7 @@ public:
 
 ## Thread safety
 
-When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. The runtime guarantees that only one callback is active at a time unless `ExecutionContext::Parallel` is chosen.
+When using `ExecutionContext::Parallel`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `std::mutex` or similar. The runtime guarantees that only one callback is active at a time unless you choose `ExecutionContext::Parallel`.
 
 ## Headers
 
@@ -890,6 +890,6 @@ malbox.run(
 
 ## Thread safety
 
-When using `execution = "parallel"` in `plugin.toml`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `threading.Lock` or similar. The GIL is released during IPC operations, so Python code in handlers runs without contention from the runtime's event loop.
+When using `execution = "parallel"` in `plugin.toml`, multiple `on_task` calls may execute concurrently. Protect shared mutable state with `threading.Lock` or similar. The runtime releases the GIL during IPC operations, so Python code in handlers runs without contention from the event loop.
 
 </View>

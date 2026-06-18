@@ -29,7 +29,7 @@ malboxctl machine provision win10-dev \
 | `--config` | No | Provisioner-specific config as JSON. |
 | `--plugins` | No | Guest plugin names to deploy (resolved from the daemon's plugin registry). |
 
-Machines can be referenced by name or numeric ID. If omitted, an interactive fuzzy selector is shown.
+Machines can be referenced by name or numeric ID. If omitted, Malbox shows an interactive fuzzy selector.
 
 You can view provisioning history with:
 
@@ -109,7 +109,7 @@ For Linux machines, only the IP is added (SSH is the default connection).
 
 #### Guest plugin injection
 
-When plugins are specified (either via `--plugins` on the CLI or `guest_plugins` in the pipeline), the Ansible provisioner resolves each plugin's `plugin.toml` manifest and injects a `guest_plugins` extra variable as a JSON array. Each entry includes:
+When plugins are specified (either via `--plugins` on the CLI or `guest_plugins` in the pipeline), the Ansible provisioner resolves each plugin's `plugin.toml` manifest. It then injects a `guest_plugins` extra variable as a JSON array. Each entry includes:
 
 ```json
 {

@@ -7,7 +7,7 @@ This page documents all worker configuration options. For conceptual information
 
 ## Daemon-level settings
 
-Worker pool settings are configured in the `[general]` section of `malbox.toml`:
+You configure worker pool settings in the `[general]` section of `malbox.toml`:
 
 ```toml
 [general]
@@ -22,11 +22,11 @@ idle_timeout_ms = 60000
 | `min_workers` | `integer` | `1` | Baseline workers that are always running. These never idle-exit. |
 | `idle_timeout_ms` | `integer` | `60000` | How long a demand worker (beyond `min_workers`) waits without work before exiting. In milliseconds. |
 
-Baseline workers (`min_workers`) have no idle timeout and run until the daemon shuts down. Demand workers are spawned when all active workers are busy and exit automatically after `idle_timeout_ms` of inactivity.
+Baseline workers (`min_workers`) have no idle timeout and run until the daemon shuts down. The daemon spawns demand workers when all active workers are busy, and they exit automatically after `idle_timeout_ms` of inactivity.
 
 ## Worker configuration
 
-Individual worker behavior is controlled through `WorkerConfig`:
+Control individual worker behavior through `WorkerConfig`:
 
 ```toml
 [[workers]]

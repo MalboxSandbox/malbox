@@ -17,7 +17,7 @@ The scheduler implements an event-driven architecture built on Tokio's asynchron
 - **Worker event listener** - a spawned task that receives completion and error events from workers via an mpsc channel
 - **Shutdown coordinator** - the main task awaits a `CancellationToken`, then triggers graceful shutdown of the worker pool and aborts the ingestion/event tasks
 
-On startup, the scheduler also recovers orphaned tasks from the database (tasks left in transient states from a prior daemon crash) and loads any pending tasks back into the queue.
+On startup, the scheduler also recovers orphaned tasks from the database — tasks left in transient states from a prior daemon crash. It then loads any pending tasks back into the queue.
 
 The scheduler maintains references to three subsystems: the task store, task queue, and worker pool.
 

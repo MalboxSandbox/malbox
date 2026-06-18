@@ -12,7 +12,7 @@ When you register a plugin with Malbox, you declare which events your plugin sho
 - **Per-plugin channels** - each plugin publishes events on its own channel (`malbox/events/plugin/{id}`). Other plugins can subscribe to these to react to lifecycle and result events.
 - **Daemon broadcast channel** - a shared channel (`malbox/events/daemon`) that delivers system-wide events (like `DaemonShutdown` and `ConfigReloaded`) to all plugins simultaneously.
 
-The runtime uses a WaitSet-based reactor pattern - your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler if one exists, or to a catch-all `on_event` method.
+The runtime uses a WaitSet-based reactor pattern. Your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler, or to a catch-all `on_event` method if no specific handler exists.
 
 ## Event categories
 

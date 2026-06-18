@@ -9,7 +9,7 @@ Providers are the foundation of Malbox's machinery system. They handle the creat
 
 A provider is a component that implements a set of capability traits to interact with different infrastructure platforms. Providers abstract away the complexity of different technologies, giving you a consistent interface regardless of your underlying infrastructure.
 
-Providers register themselves at compile time using the `inventory` crate, so new providers can be developed independently of Malbox's codebase.
+Providers register themselves at compile time using the `inventory` crate, so you can develop new providers independently of Malbox's codebase.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ Malbox's provider system is built on a capability-based architecture:
 - **`ProviderHandle`** - a struct that wraps trait objects for each capability a provider supports. Created by the `#[derive(RegisterProvider)]` macro.
 - **`ProviderMetadata`** - registered at compile time via the `inventory` crate. Contains the provider name and a factory function that creates a `ProviderHandle` from provider-specific TOML configuration.
 
-Providers are looked up by name at runtime using `create_provider(name, config)`, which finds the registered metadata and calls the factory function.
+Malbox looks up providers by name at runtime using `create_provider(name, config)`, which finds the registered metadata and calls the factory function.
 
 ### Capabilities
 
