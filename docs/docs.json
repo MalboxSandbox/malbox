@@ -81,7 +81,8 @@
                         "group": "CLI",
                         "pages": [
                             "reference/cli/malbox",
-                            "reference/cli/malboxctl"
+                            "reference/cli/malbox-daemon",
+                            "reference/cli/malboxd"
                         ]
                     },
                     {

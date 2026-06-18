@@ -1,0 +1,296 @@
+---
+title: "malbox daemon"
+description: "CLI reference for host-local Malbox daemon administration"
+---
+
+The `malbox daemon` subcommands manage the host-local daemon installation: installing and upgrading Malbox, generating configuration, controlling which virtualization providers are compiled in, and installing plugins from the registry.
+
+Run these commands on the analysis host where the daemon is (or will be) installed. For analysis operations against a running daemon, use the top-level [`malbox`](/reference/cli/malbox) commands (`task`, `machine`, `image`, `plugin`).
+
+<Note>
+Earlier releases shipped a separate `malboxctl` binary for these commands. It has been consolidated into `malbox daemon`. The standalone daemon process is now called [`malboxd`](/reference/cli/malboxd).
+</Note>
+
+## Global flags
+
+The global flags from [`malbox`](/reference/cli/malbox#global-flags) apply to every `malbox daemon` subcommand.
+
+## install
+
+Run the interactive installation wizard to set up Malbox.
+
+```bash
+malbox daemon install [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--yes` | - | No | `false` | Skip prompts and install with defaults (nightly channel, default features, prebuilt binaries when available, managed PostgreSQL, systemd unit) |
+
+The wizard walks you through:
+
+1. Release channel (stable or nightly)
+2. Provider selection (e.g. `libvirt`, `vmware`)
+3. Daemon source (prebuilt binary or compile from source)
+4. Frontend source (prebuilt or compile)
+5. PostgreSQL setup (managed instance or connect to an existing server). The installer provisions the `malbox` database and role.
+6. Systemd service configuration
+
+If a previous installation stopped partway through, the wizard offers to resume from the last completed step or start fresh.
+
+### Non-interactive install
+
+`--yes` skips every prompt and uses sensible defaults. This is what the published `curl | bash` installer runs:
+
+```bash
+malbox daemon install --yes
+```
+
+## upgrade
+
+Upgrade Malbox to the latest version on the current release channel.
+
+```bash
+malbox daemon upgrade [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--force` | - | No | `false` | Force reinstall even if already up to date |
+| `--reconfigure` | - | No | `false` | Re-prompt the build-related choices (channel, daemon features, binary source) and rebuild |
+| `--rollback` | - | No | `false` | Roll back to the previous version |
+
+## start
+
+Start the daemon in the foreground using the current configuration.
+
+```bash
+malbox daemon start [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--log-level` | `string` | No | `info` | Log level passed to `malboxd` (`error`, `warn`, `info`, `debug`, or `trace`) |
+
+In production the daemon is normally launched by the systemd unit installed by `malbox daemon install`. Use `malbox daemon start` for ad-hoc runs and local development.
+
+## config
+
+Manage the daemon configuration file.
+
+### config init
+
+Write a new daemon configuration file populated with defaults.
+
+```bash
+malbox daemon config init [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `-f`, `--force` | - | No | `false` | Overwrite an existing configuration file |
+| `-o`, `--output` | `path` | No | `~/.config/malbox/malbox.toml` | Path to write the configuration file |
+
+This command also writes a `cli.toml` alongside the daemon configuration so the [`malbox`](/reference/cli/malbox) client CLI can find the API URL.
+
+## provider
+
+Manage which virtualization providers are compiled into the daemon.
+
+Providers are toggled in the `[providers]` section of the daemon config and compiled in as Cargo features. Changing the provider set requires rebuilding the installed binaries from the installed version's source.
+
+### provider list
+
+List providers compiled into the current daemon binary.
+
+```bash
+malbox daemon provider list
+```
+
+### provider install
+
+Add a provider to the configuration and rebuild the daemon with it enabled.
+
+```bash
+malbox daemon provider install <name> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Provider name (for example, `libvirt` or `xen`) |
+| `--no-rebuild` | - | No | `false` | Update the config only; do not rebuild now |
+
+### provider uninstall
+
+Remove a provider from the configuration and rebuild the daemon without it.
+
+```bash
+malbox daemon provider uninstall <name> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Provider name |
+| `--no-rebuild` | - | No | `false` | Update the config only; do not rebuild now |
+
+### provider rebuild
+
+Rebuild the daemon with the providers currently listed in the configuration. Use this after `--no-rebuild` or after editing the config by hand.
+
+```bash
+malbox daemon provider rebuild
+```
+
+## plugin
+
+Manage host-local plugin installations. These commands talk to the plugin registry configured under `[plugins.registry]` in the daemon config (see [`malbox plugin`](/reference/cli/malbox#plugin) to query plugins on a running daemon).
+
+### plugin install
+
+Install a plugin from the registry or directly from a GitHub repository.
+
+```bash
+malbox daemon plugin install <plugin> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `plugin` | `string` | Yes | - | `name`, `name@version`, or `owner/repo` |
+| `--source` | - | No | `false` | Force build from source (skip prebuilt asset search) |
+| `--prebuilt` | - | No | `false` | Only use prebuilt assets; error if none available |
+| `--force` | - | No | `false` | Overwrite an existing installation |
+| `--dry-run` | - | No | `false` | Print what would happen without changing anything |
+
+`--source` and `--prebuilt` are mutually exclusive.
+
+```bash
+# Install the latest version from the registry
+malbox daemon plugin install yara-scanner
+
+# Pin a specific version
+malbox daemon plugin install yara-scanner@1.2.0
+
+# Install directly from a GitHub repository
+malbox daemon plugin install acme-corp/custom-plugin
+```
+
+### plugin update
+
+Update an installed plugin to its latest version, or update everything.
+
+```bash
+malbox daemon plugin update [name] [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `name` | `string` | No | - | Plugin to update. If omitted, all installed plugins are updated. |
+| `--force` | - | No | `false` | Reinstall even if already at the latest version |
+| `--dry-run` | - | No | `false` | Print what would happen without changing anything |
+
+### plugin remove
+
+Uninstall a plugin.
+
+```bash
+malbox daemon plugin remove <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Plugin name to remove |
+
+### plugin list
+
+List plugins installed on this host.
+
+```bash
+malbox daemon plugin list
+```
+
+### plugin search
+
+Search the configured plugin registry. Matches against name, description, and categories.
+
+```bash
+malbox daemon plugin search <query>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string` | Yes | Search query |
+
+### plugin info
+
+Show detailed information about a plugin (version, description, categories, dependencies).
+
+```bash
+malbox daemon plugin info <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Plugin name |
+
+## Plugin registry configuration
+
+`malbox daemon plugin` reads its registry settings from the `[plugins.registry]` section of the daemon configuration. When the section is omitted, the official registry is used.
+
+```toml
+[plugins]
+# Directory plugins are installed into.
+directory = "~/.config/malbox/plugins"
+# Reload plugins when files change in `directory`.
+watch = true
+
+[plugins.registry]
+# GitHub repository hosting the registry index (owner/repo).
+repository = "DualHorizon/malbox-plugin-registry"
+# Local cache directory for downloaded index data and assets.
+cache_dir = "~/.cache/malbox/registry"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `repository` | `string` | `DualHorizon/malbox-plugin-registry` | `owner/repo` of the registry index on GitHub. Point this at a fork or private mirror to use a different registry. |
+| `cache_dir` | `path` | Platform cache dir under `malbox/registry` | Where registry index data and downloaded assets are cached. |
+
+## Database configuration
+
+The daemon connects to PostgreSQL using discrete fields under `[database]`. The database name is fixed at `malbox` and is provisioned by `malbox daemon install`, so it no longer appears in the configuration.
+
+```toml
+[database]
+host = "127.0.0.1"
+port = 5432
+# Optional. Falls back to PGUSER, then the OS user the daemon runs as.
+user = "malbox"
+# Optional. PGPASSWORD still applies when omitted.
+# Local trust or peer authentication needs no password.
+password = "secret"
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `host` | `string` | No (default `127.0.0.1`) | PostgreSQL server hostname or IP address |
+| `port` | `u16` | No (default `5432`) | PostgreSQL server port |
+| `user` | `string` | No | Role to connect as. When omitted, resolution matches `psql`: `PGUSER` from the environment, then the OS user. |
+| `password` | `string` | No | Password for `user`. Honors `PGPASSWORD` when omitted. Not required for local trust or peer setups. |
+
+## completion
+
+Generate shell completions for `malbox` (the parent binary).
+
+```bash
+malbox completion <shell>
+```
+
+See [`malbox completion`](/reference/cli/malbox#completion) for installation paths.
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `RUST_LOG` | Override the log level filter. Takes precedence over `--verbose`. Uses standard [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
+| `MALBOX_CONFIG` | Path to the daemon config file. Set automatically by the systemd service. |
+| `PGUSER`, `PGPASSWORD` | Standard PostgreSQL environment variables. Used as fallbacks when `[database].user` or `[database].password` are omitted. |

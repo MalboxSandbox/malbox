@@ -1,0 +1,33 @@
+---
+title: "malboxd"
+description: "Reference for the standalone Malbox analysis daemon binary"
+---
+
+`malboxd` is the analysis daemon. It loads the daemon configuration, opens the API on the configured `[http]` host and port, and runs the analysis pipeline.
+
+You normally do not invoke `malboxd` directly. `malbox daemon install` registers it as a systemd unit, and `malbox daemon start` launches it in the foreground for development. Run `malboxd` yourself only when you need a lightweight entry point that does not depend on the `malbox` client CLI — for example, in container images.
+
+## Prerequisites
+
+`malboxd` requires a daemon configuration on disk. If none exists it exits with an error pointing you at `malbox daemon install` or `malbox daemon config init`.
+
+The config is loaded from the standard XDG location (`~/.config/malbox/malbox.toml` on Linux), or from `MALBOX_CONFIG` when that variable is set.
+
+## Usage
+
+```bash
+malboxd [options]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--log-level` | `string` | `info` | Log level (`error`, `warn`, `info`, `debug`, or `trace`). Overridden by `RUST_LOG`. |
+
+The daemon runs in the foreground until it receives `SIGTERM` or `SIGINT`. Under systemd it is supervised; outside systemd you are responsible for daemonizing it.
+
+## Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `RUST_LOG` | Overrides `--log-level` and takes the full [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
+| `MALBOX_CONFIG` | Path to the daemon config file. Set automatically by the systemd service. |

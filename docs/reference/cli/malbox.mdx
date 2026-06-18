@@ -3,7 +3,13 @@ title: "malbox"
 description: "CLI reference for the malbox command-line tool"
 ---
 
-The `malbox` CLI lets you submit samples, manage analysis tasks, and retrieve results from your Malbox instance.
+The `malbox` CLI is the unified entry point for Malbox. Use it to submit samples, manage analysis tasks and machines, register VM images, and administer the daemon.
+
+This page covers the analysis commands that talk to a running daemon over HTTP. For host-local daemon administration (install, upgrade, config, providers, plugin installs), see [`malbox daemon`](/reference/cli/malbox-daemon).
+
+<Note>
+Earlier releases shipped a separate `malboxctl` binary for daemon administration. Those commands now live under `malbox daemon`.
+</Note>
 
 ## Global flags
 
@@ -66,7 +72,7 @@ malbox task get [id] [options]
 
 ## machine
 
-View analysis machines.
+Manage analysis machines.
 
 ### machine list
 
@@ -88,9 +94,116 @@ malbox machine get [machine]
 |----------|------|----------|---------|-------------|
 | `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
 
+### machine provision
+
+Run a provisioning step against a machine.
+
+```bash
+malbox machine provision [machine] --provisioner <type> [options]
+```
+
+| Argument / Flag | Type | Required | Default | Description |
+|-----------------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+| `--provisioner` | `string` | Yes | - | Provisioner type (for example, `ansible` or `native`) |
+| `--snapshot` | `string` | No | - | Snapshot name to create after provisioning |
+| `--revert-to` | `string` | No | `base` | Snapshot to revert to before provisioning |
+| `--config` | `string` | No | - | Provisioner config as JSON (for example, `'{"playbook": "setup.yml"}'`) |
+| `--plugins` | `string[]` | No | - | Guest plugin names to deploy (resolved from the daemon's plugin registry) |
+
+### machine provision-history
+
+List provision run history for a machine.
+
+```bash
+malbox machine provision-history [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+### machine snapshot list
+
+List snapshots for a machine.
+
+```bash
+malbox machine snapshot list [machine]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+
+### machine snapshot delete
+
+Delete a snapshot and its associated provision runs.
+
+```bash
+malbox machine snapshot delete [machine] [snapshot_name]
+```
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `machine` | `string` | No | - | Machine name or ID. If omitted, an interactive fuzzy-select menu is shown. |
+| `snapshot_name` | `string` | No | - | Snapshot name. If omitted, an interactive fuzzy-select menu is shown. |
+
+## image
+
+Manage VM images.
+
+### image register
+
+Register a new VM image.
+
+```bash
+malbox image register --name <name> --platform <platform> --arch <arch> --path <path> [options]
+```
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--name` | `string` | Yes | - | Image name |
+| `--platform` | `windows` \| `linux` | Yes | - | Target platform |
+| `--arch` | `x64` \| `x86` | Yes | - | Target architecture |
+| `--path` | `string` | Yes | - | Path to the image file |
+| `--image-format` | `string` | No | - | Image format (for example, `qcow2` or `vmdk`) |
+| `--description` | `string` | No | - | Image description |
+
+### image list
+
+List all registered images.
+
+```bash
+malbox image list
+```
+
+### image get
+
+Get details of a specific image.
+
+```bash
+malbox image get <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Image name |
+
+### image delete
+
+Delete an image.
+
+```bash
+malbox image delete <name>
+```
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Image name |
+
 ## plugin
 
-View analysis plugins.
+View analysis plugins registered with the running daemon. To install, update, or remove plugins on the host, use [`malbox daemon plugin`](/reference/cli/malbox-daemon#plugin).
 
 ### plugin list
 
@@ -102,7 +215,7 @@ malbox plugin list [options]
 
 | Flag | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `--type` | `string` | No | - | Filter by plugin type (e.g. `guest`, `host`) |
+| `--type` | `string` | No | - | Filter by plugin type (for example, `guest` or `host`) |
 
 ## completion
 
@@ -138,7 +251,7 @@ The `malbox` CLI reads its configuration from `~/.config/malbox/cli.toml`:
 url = "http://127.0.0.1:8080"
 ```
 
-This file is created automatically by [`malboxctl config init`](/reference/cli/malboxctl#config-init).
+This file is created automatically by [`malbox daemon config init`](/reference/cli/malbox-daemon#config-init).
 
 ## Environment variables
 

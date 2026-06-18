@@ -11,10 +11,10 @@ Provisioners are transport-agnostic: each provisioner manages its own connectivi
 
 ## Running provisioning
 
-Provisioning is driven through the `malboxctl` CLI. Each invocation runs a single provisioning step against a machine via the daemon's HTTP API (`POST /v1/machines/{id}/provision`).
+Provisioning is driven through the `malbox` CLI. Each invocation runs a single provisioning step against a machine via the daemon's HTTP API (`POST /v1/machines/{id}/provision`).
 
 ```bash
-malboxctl machine provision win10-dev \
+malbox machine provision win10-dev \
   --provisioner ansible \
   --snapshot with-yara \
   --config '{"playbook": "playbooks/windows/provision.yml"}' \
@@ -34,7 +34,7 @@ Machines can be referenced by name or numeric ID. If omitted, Malbox shows an in
 You can view provisioning history with:
 
 ```bash
-malboxctl machine provision-history win10-dev
+malbox machine provision-history win10-dev
 ```
 
 ### What happens during a provision step
@@ -53,13 +53,13 @@ To build up a machine in layers, run multiple provision commands, each snapshott
 
 ```bash
 # Step 1: Configure auto-login, snapshot as "configured"
-malboxctl machine provision win10-dev \
+malbox machine provision win10-dev \
   --provisioner ansible \
   --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_plugins": "true"}}' \
   --snapshot configured
 
 # Step 2: Deploy guest plugins on top of the configured snapshot
-malboxctl machine provision win10-dev \
+malbox machine provision win10-dev \
   --provisioner ansible \
   --revert-to configured \
   --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_autologin": "true"}}' \
@@ -139,7 +139,7 @@ Each sub-step can be skipped via extra variables (`skip_plugins`, `skip_autologi
 
 ```bash
 # Plugins only (auto-login already configured):
-malboxctl machine provision win10-dev \
+malbox machine provision win10-dev \
   --provisioner ansible \
   --config '{"playbook": "playbooks/windows/provision.yml", "extra_vars": {"skip_autologin": "true"}}' \
   --plugins guest-windows-agent \
