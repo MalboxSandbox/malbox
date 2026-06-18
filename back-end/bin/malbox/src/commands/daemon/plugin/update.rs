@@ -88,16 +88,7 @@ impl Command for UpdateCommand {
                 continue;
             }
 
-            match update_plugin(
-                name,
-                &lockfile,
-                &client,
-                plugins_dir,
-                &platform,
-                self.force,
-                &mut |_, _| {},
-            )
-            .await
+            match update_plugin(name, &lockfile, &client, plugins_dir, &platform, self.force).await
             {
                 Ok(outcome) => {
                     if outcome.updated {

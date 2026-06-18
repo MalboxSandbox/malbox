@@ -8,6 +8,7 @@ use crate::resolve::{
 };
 use crate::source;
 use malbox_installer::github::GitHubClient;
+use malbox_installer::progress::ProgressObserver;
 use std::path::{Path, PathBuf};
 
 pub struct InstallOutcome {
@@ -25,10 +26,10 @@ pub async fn resolve_and_install(
     platform: &Platform,
     strategy: RequestedStrategy,
     force: bool,
-    on_progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+    observer: &dyn ProgressObserver,
 ) -> Result<InstallOutcome> {
     let resolved = resolve_plugin(specifier, registry_client, platform, strategy).await?;
-    install_resolved_plugin(resolved, plugins_dir, force, on_progress).await
+    install_resolved_plugin(resolved, plugins_dir, force, observer).await
 }
 
 pub async fn resolve_plugin(
@@ -118,7 +119,7 @@ pub async fn install_resolved_plugin(
     resolved: ResolvedPlugin,
     plugins_dir: &Path,
     force: bool,
-    on_progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+    observer: &dyn ProgressObserver,
 ) -> Result<InstallOutcome> {
     let dest = plugins_dir.join(&resolved.name);
     if dest.exists() && !force {
@@ -133,30 +134,50 @@ pub async fn install_resolved_plugin(
                 .ok_or_else(|| RegistryError::GitHub("invalid repository".into()))?;
 
             let gh = GitHubClient::new(owner, repo)?;
+
+            observer.step_started("Downloading asset");
             let bytes = gh
-                .download_verified(release, &asset.browser_download_url, on_progress)
+                .download_verified(release, &asset.browser_download_url, &mut |done, total| {
+                    observer.download_progress(done, total, "plugin archive");
+                })
                 .await?;
+            observer.step_completed(
+                "Downloading asset",
+                &format!("{:.1} MB", bytes.len() as f64 / 1_048_576.0),
+            );
 
             std::fs::create_dir_all(plugins_dir)?;
 
+            observer.step_started("Extracting archive");
             let temp_dir = tempfile::tempdir_in(plugins_dir)?;
             extract_tarball(&bytes, temp_dir.path())?;
-
             let extracted_dir = find_extracted_subdir(temp_dir.path())?;
-            let dest = plugins_dir.join(&resolved.name);
+            observer.step_completed("Extracting archive", "");
 
+            observer.step_started("Validating plugin manifest");
+            let dest = plugins_dir.join(&resolved.name);
             if dest.exists() {
                 std::fs::remove_dir_all(&dest)?;
             }
             std::fs::rename(&extracted_dir, &dest)?;
-
             let manifest = validate_extracted_plugin(&dest)?;
             let ptype = format!("{:?}", manifest.plugin.plugin_type).to_lowercase();
+            observer.step_completed("Validating plugin manifest", "");
+
+            observer.step_started("Installing to plugins directory");
+            observer.step_completed("Installing to plugins directory", "");
+
             (ptype, dest)
         }
         InstallStrategy::Source { clone_url, git_ref } => {
-            let outcome =
-                source::build_from_source(clone_url, git_ref, &resolved.name, plugins_dir).await?;
+            let outcome = source::build_from_source(
+                clone_url,
+                git_ref,
+                &resolved.name,
+                plugins_dir,
+                observer,
+            )
+            .await?;
             (outcome.plugin_type, outcome.plugin_dir)
         }
     };

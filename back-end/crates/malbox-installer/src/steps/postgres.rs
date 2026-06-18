@@ -1,6 +1,6 @@
 use crate::config::PostgresStrategy;
 use crate::error::{InstallError, Step, StepCtx};
-use crate::progress::InstallProgress;
+use crate::progress::ProgressObserver;
 use std::path::{Path, PathBuf};
 
 /// The managed instance keeps its socket in /tmp: distro packages often
@@ -59,19 +59,15 @@ pub fn detect_setup_tools() -> bool {
 pub async fn execute(
     strategy: &PostgresStrategy,
     data_dir: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<PostgresResult> {
-    progress.started(Step::Postgres, "Setting up PostgreSQL");
+    observer.step_started("Setting up PostgreSQL");
 
     let result = match strategy {
         PostgresStrategy::Existing { url } => {
-            progress.progress(
-                Step::Postgres,
-                40,
-                "Testing connection to existing PostgreSQL",
-            );
+            observer.build_output("Testing connection to existing PostgreSQL");
             test_connection(url).await?;
-            progress.progress(Step::Postgres, 70, "Ensuring database exists");
+            observer.build_output("Ensuring database exists");
             ensure_database(url).await?;
             PostgresResult {
                 url: url.clone(),
@@ -79,13 +75,13 @@ pub async fn execute(
             }
         }
         PostgresStrategy::Setup => {
-            progress.progress(Step::Postgres, 10, "Setting up PostgreSQL");
+            observer.build_output("Initializing PostgreSQL cluster");
             let pgdata = data_dir.join("pgdata");
             setup_postgres(&pgdata).await?;
-            progress.progress(Step::Postgres, 60, "Testing connection");
+            observer.build_output("Testing connection");
             let url = setup_url();
             test_connection(&url).await?;
-            progress.progress(Step::Postgres, 80, "Ensuring database exists");
+            observer.build_output("Ensuring database exists");
             ensure_database(&url).await?;
             PostgresResult {
                 url,
@@ -94,12 +90,7 @@ pub async fn execute(
         }
     };
 
-    // NOTE: schema migrations are deliberately not run here. They are
-    // embedded in the daemon (sqlx::migrate! in malbox-database) and applied
-    // automatically at startup, which keeps them correct across upgrades.
-    // Database *creation* is the opposite: it is provisioning, so it happens
-    // here and the daemon only verifies.
-    progress.completed(Step::Postgres);
+    observer.step_completed("Setting up PostgreSQL", "");
     Ok(result)
 }
 

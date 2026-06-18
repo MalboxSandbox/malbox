@@ -1,5 +1,5 @@
 use crate::commands::Command;
-use crate::utils::install_progress::CliProgress;
+use crate::utils::install_renderer::InstallRenderer;
 use crate::utils::provider_config::ProvidersEdit;
 use crate::utils::wizard;
 use clap::Parser;
@@ -38,30 +38,20 @@ impl Command for UpgradeCommand {
         let manifest_path = Manifest::default_path();
 
         if self.rollback {
-            let header = Brand::accent().bold();
-            println!("{}", header.apply_to("Rolling back Malbox..."));
-            println!();
+            let renderer = InstallRenderer::new("Rolling back Malbox");
+            renderer.add_pending_steps(&[
+                "Rolling back malbox binaries",
+                "Rolling back front-end assets",
+                "Starting rolled-back daemon",
+            ]);
 
-            let progress = CliProgress::new();
-            malbox_installer::upgrade::rollback(&manifest_path, &progress)
+            malbox_installer::upgrade::rollback(&manifest_path, &renderer)
                 .await
                 .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-            println!();
-            println!("{}", Brand::success().bold().apply_to("Rollback complete."));
+            renderer.finish_line("Rollback complete");
             return Ok(());
         }
-
-        let header = Brand::accent().bold();
-        println!(
-            "{}",
-            header.apply_to(if self.reconfigure {
-                "Reconfiguring Malbox..."
-            } else {
-                "Upgrading Malbox..."
-            })
-        );
-        println!();
 
         let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
@@ -77,15 +67,23 @@ impl Command for UpgradeCommand {
             reconfigure,
         };
 
-        let progress = CliProgress::new();
+        let renderer = InstallRenderer::new(if self.reconfigure {
+            "Reconfiguring Malbox"
+        } else {
+            "Upgrading Malbox"
+        });
+        renderer.add_pending_steps(&[
+            "Stopping daemon",
+            "Installing malbox binaries",
+            "Installing front-end assets",
+            "Setting up PostgreSQL",
+            "Starting upgraded daemon",
+        ]);
 
-        match malbox_installer::upgrade::run(&upgrade_config, &github, &manifest_path, &progress)
+        match malbox_installer::upgrade::run(&upgrade_config, &github, &manifest_path, &renderer)
             .await
         {
             Ok(manifest) => {
-                // Keep the daemon config's provider list in sync with the
-                // reconfigured feature set; the daemon refuses to start on a
-                // mismatch.
                 if let Some(reconfig) = &upgrade_config.reconfigure
                     && let Err(e) = sync_providers(&reconfig.providers)
                 {
@@ -95,13 +93,7 @@ impl Command for UpgradeCommand {
                         reconfig.providers
                     );
                 }
-                println!();
-                println!(
-                    "{}",
-                    Brand::success()
-                        .bold()
-                        .apply_to(format!("Malbox upgraded to v{}!", manifest.version))
-                );
+                renderer.finish_line(&format!("Malbox upgraded to v{}!", manifest.version));
             }
             Err(InstallError::AlreadyUpToDate(version)) => {
                 println!(

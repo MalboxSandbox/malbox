@@ -2,7 +2,7 @@ use crate::config::{DaemonSource, FrontendSource, UpgradeConfig};
 use crate::error::{InstallError, Step};
 use crate::github::GitHubClient;
 use crate::manifest::Manifest;
-use crate::progress::{InstallProgress, observe};
+use crate::progress::{ProgressObserver, observe};
 use crate::steps::daemon::release_arch;
 use std::path::Path;
 
@@ -10,7 +10,7 @@ pub async fn run(
     upgrade_config: &UpgradeConfig,
     github: &GitHubClient,
     manifest_path: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<Manifest> {
     let mut manifest = Manifest::load(manifest_path)?;
 
@@ -36,9 +36,9 @@ pub async fn run(
     if manifest.systemd.enabled
         && let Some(unit) = &manifest.systemd.unit
     {
-        progress.started(Step::Systemd, "Stopping daemon");
+        observer.step_started("Stopping daemon");
         let _ = crate::steps::systemd::stop_service(unit).await;
-        progress.completed(Step::Systemd);
+        observer.step_completed("Stopping daemon", "");
     }
 
     // Back up the current binary and persist the manifest immediately: if
@@ -96,14 +96,14 @@ pub async fn run(
     let bin_dir = manifest.daemon.path.parent().unwrap_or(Path::new("."));
     let result = observe(
         Step::Daemon,
-        progress,
+        observer,
         crate::steps::daemon::execute(
             &daemon_source,
             &features,
             bin_dir,
             github,
             &release,
-            progress,
+            observer,
         )
         .await,
     )?;
@@ -119,8 +119,8 @@ pub async fn run(
         .to_path_buf();
     let frontend = observe(
         Step::Frontend,
-        progress,
-        crate::steps::frontend::execute(&frontend_source, &data_dir, github, &release, progress)
+        observer,
+        crate::steps::frontend::execute(&frontend_source, &data_dir, github, &release, observer)
             .await,
     )?;
     manifest.frontend.path = frontend.path;
@@ -130,13 +130,13 @@ pub async fn run(
     // at startup.
     observe(
         Step::Postgres,
-        progress,
+        observer,
         crate::steps::postgres::execute(
             &crate::config::PostgresStrategy::Existing {
                 url: manifest.postgres.url.clone(),
             },
             &data_dir,
-            progress,
+            observer,
         )
         .await,
     )?;
@@ -167,9 +167,9 @@ pub async fn run(
     if manifest.systemd.enabled
         && let Some(unit) = &manifest.systemd.unit
     {
-        progress.started(Step::Systemd, "Starting upgraded daemon");
+        observer.step_started("Starting upgraded daemon");
         crate::steps::systemd::start_service(unit).await?;
-        progress.completed(Step::Systemd);
+        observer.step_completed("Starting upgraded daemon", "");
     }
 
     manifest.save(manifest_path)?;
@@ -189,7 +189,7 @@ fn is_upgrade(local: &str, remote: &str) -> bool {
     }
 }
 
-pub async fn rollback(manifest_path: &Path, progress: &dyn InstallProgress) -> crate::Result<()> {
+pub async fn rollback(manifest_path: &Path, observer: &dyn ProgressObserver) -> crate::Result<()> {
     let mut manifest = Manifest::load(manifest_path)?;
 
     let prev_path =
@@ -213,25 +213,25 @@ pub async fn rollback(manifest_path: &Path, progress: &dyn InstallProgress) -> c
 
     // Swap binaries. Rename, not copy: atomic, and immune to ETXTBSY when
     // malboxd is rolling itself back.
-    progress.started(Step::Daemon, "Rolling back malbox binaries");
+    observer.step_started("Rolling back malbox binaries");
     tokio::fs::rename(&prev_path, &manifest.daemon.path).await?;
     manifest.daemon.prev_path = None;
     if let Some(prev_version) = manifest.daemon.prev_version.take() {
         manifest.version = prev_version.clone();
         manifest.daemon.version = prev_version;
     }
-    progress.completed(Step::Daemon);
+    observer.step_completed("Rolling back malbox binaries", "");
 
     // Restore the previous front-end bundle when one was kept.
     if let Some(web_prev) = manifest.frontend.prev_path.take()
         && web_prev.exists()
     {
-        progress.started(Step::Frontend, "Rolling back front-end assets");
+        observer.step_started("Rolling back front-end assets");
         if manifest.frontend.path.exists() {
             tokio::fs::remove_dir_all(&manifest.frontend.path).await?;
         }
         tokio::fs::rename(&web_prev, &manifest.frontend.path).await?;
-        progress.completed(Step::Frontend);
+        observer.step_completed("Rolling back front-end assets", "");
     }
 
     manifest.updated_at = chrono::Utc::now().to_rfc3339();
@@ -240,9 +240,9 @@ pub async fn rollback(manifest_path: &Path, progress: &dyn InstallProgress) -> c
     if manifest.systemd.enabled
         && let Some(unit) = &manifest.systemd.unit
     {
-        progress.started(Step::Systemd, "Starting rolled-back daemon");
+        observer.step_started("Starting rolled-back daemon");
         crate::steps::systemd::start_service(unit).await?;
-        progress.completed(Step::Systemd);
+        observer.step_completed("Starting rolled-back daemon", "");
     }
 
     manifest.save(manifest_path)?;

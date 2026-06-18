@@ -4,6 +4,7 @@ use crate::install::install_resolved_plugin;
 use crate::lockfile::{InstallMethod, InstallSource, Lockfile};
 use crate::resolve::{Platform, PluginSpecifier, RequestedStrategy, SpecifierSource};
 use malbox_installer::github::GitHubClient;
+use malbox_installer::progress::NullObserver;
 
 pub struct UpdateOutcome {
     pub name: String,
@@ -29,7 +30,6 @@ pub async fn update_plugin(
     plugins_dir: &std::path::Path,
     platform: &Platform,
     force: bool,
-    on_progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
 ) -> Result<UpdateOutcome> {
     let locked = lockfile
         .plugins
@@ -77,7 +77,7 @@ pub async fn update_plugin(
     let old_version = locked.version.clone();
     let new_version = resolved.version.clone();
 
-    install_resolved_plugin(resolved, plugins_dir, true, on_progress).await?;
+    install_resolved_plugin(resolved, plugins_dir, true, &NullObserver).await?;
 
     Ok(UpdateOutcome {
         name: name.to_string(),

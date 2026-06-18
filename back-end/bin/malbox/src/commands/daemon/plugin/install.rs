@@ -1,8 +1,10 @@
 use super::load_plugin_config;
+use crate::utils::install_renderer::InstallRenderer;
 use clap::Parser;
 use malbox_cli_common::command::Command;
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
+use malbox_cli_common::utils::format::Brand;
 use malbox_plugin_registry::client::RegistryClient;
 use malbox_plugin_registry::install::{install_resolved_plugin, resolve_plugin};
 use malbox_plugin_registry::resolve::{
@@ -63,8 +65,10 @@ impl Command for InstallCommand {
         if matches!(strategy, RequestedStrategy::PrebuiltWithFallback)
             && matches!(resolved.strategy, InstallStrategy::Source { .. })
         {
+            let warn = Brand::warning();
             println!(
-                "  \u{26a0} No prebuilt asset for {} on {}",
+                "  {} No prebuilt asset for {} on {}",
+                warn.apply_to("\u{26a0}"),
                 specifier.name,
                 platform.asset_suffix()
             );
@@ -105,48 +109,65 @@ impl Command for InstallCommand {
 
         let is_source = matches!(resolved.strategy, InstallStrategy::Source { .. });
 
+        let header = if is_source {
+            format!(
+                "\u{27d0} Installing {} v{} from source",
+                resolved.name, resolved.version
+            )
+        } else {
+            format!(
+                "\u{27d0} Installing {} v{}",
+                resolved.name, resolved.version
+            )
+        };
+
+        let renderer = InstallRenderer::new(&header);
+
         if is_source {
-            println!("  \u{25b8} Building from source...");
+            renderer.add_pending_steps(&[
+                "Cloning repository",
+                "Detecting build system",
+                "Building release binary",
+                "Validating plugin manifest",
+                "Installing to plugins directory",
+            ]);
+        } else {
+            renderer.add_pending_steps(&[
+                "Downloading asset",
+                "Extracting archive",
+                "Validating plugin manifest",
+                "Installing to plugins directory",
+            ]);
         }
 
-        let outcome = install_resolved_plugin(
-            resolved,
-            plugins_dir,
-            self.force,
-            &mut |downloaded, total| {
-                if let Some(total) = total {
-                    let mb_done = downloaded as f64 / 1_048_576.0;
-                    let mb_total = total as f64 / 1_048_576.0;
-                    eprint!(
-                        "\r  \u{25b8} Downloading... {:.1}/{:.1} MB",
-                        mb_done, mb_total
-                    );
-                }
-            },
-        )
-        .await
-        .map_err(|e| CliError::CommandFailed(e.to_string()))?;
-
-        if !is_source {
-            eprintln!();
-        }
+        let outcome = install_resolved_plugin(resolved, plugins_dir, self.force, &renderer)
+            .await
+            .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
         let method = if is_source { "from source" } else { "prebuilt" };
-        println!(
-            "  \u{2713} Installed {} v{} ({} plugin, {})",
+        renderer.finish_line(&format!(
+            "{} v{} installed ({} plugin, {})",
             outcome.name, outcome.version, outcome.plugin_type, method
-        );
+        ));
 
         if !outcome.missing_deps.is_empty() {
+            let warn = Brand::warning();
+            let dim = Brand::dim();
             println!();
             for dep in &outcome.missing_deps {
                 println!(
-                    "  \u{26a0} Missing optional dependency: {} {}",
-                    dep.name, dep.version
+                    "  {} {} {} {}",
+                    warn.apply_to("\u{26a0}"),
+                    warn.apply_to("Missing optional dependency:"),
+                    dep.name,
+                    dim.apply_to(&dep.version),
                 );
                 println!(
-                    "    Install with: malbox daemon plugin install {}",
-                    dep.name
+                    "    {}",
+                    dim.apply_to(format!(
+                        "Install with: malbox daemon plugin install {}",
+                        dep.name
+                    ))
                 );
             }
         }

@@ -1,4 +1,5 @@
 mod archive;
+pub mod build_parse;
 pub mod config;
 pub mod error;
 pub mod features;
@@ -14,7 +15,7 @@ pub use config::{DaemonSource, FrontendSource, InstallConfig, PostgresStrategy, 
 pub use error::{InstallError, Result, Step};
 pub use features::{DAEMON_FEATURES, FeatureKind, default_features};
 pub use github::Channel;
-pub use progress::{InstallProgress, NoopProgress};
+pub use progress::{NullObserver, ProgressObserver};
 
 /// Canonical GitHub coordinates for malbox releases. Single source of truth so
 /// the installer, upgrader and source-tarball fallbacks never drift apart.

@@ -4,7 +4,7 @@ use crate::github::{GitHubClient, Release};
 use crate::manifest::{
     CliManifest, DaemonManifest, FrontendManifest, Manifest, PostgresManifest, SystemdManifest,
 };
-use crate::progress::{InstallProgress, observe};
+use crate::progress::{ProgressObserver, observe};
 use std::path::{Path, PathBuf};
 
 pub fn build_initial_manifest(
@@ -79,7 +79,7 @@ pub async fn run(
     github: &GitHubClient,
     release: &Release,
     manifest_path: &std::path::Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<Manifest> {
     let bin_dir = crate::xdg_dir(dirs::executable_dir(), ".local/bin")?;
     tokio::fs::create_dir_all(&bin_dir).await?;
@@ -105,7 +105,7 @@ pub async fn run(
         data_dir,
         config_dir,
     };
-    run_steps(config, github, release, manifest_path, progress, plan).await
+    run_steps(config, github, release, manifest_path, observer, plan).await
 }
 
 /// Continue an interrupted installation from the step after the last
@@ -115,7 +115,7 @@ pub async fn run(
 pub async fn resume(
     github: &GitHubClient,
     manifest_path: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<Manifest> {
     let manifest = Manifest::load(manifest_path)?;
     let Some(last_completed) = manifest.last_completed_step else {
@@ -140,7 +140,7 @@ pub async fn resume(
         data_dir,
         config_dir,
     };
-    run_steps(&config, github, &release, manifest_path, progress, plan).await
+    run_steps(&config, github, &release, manifest_path, observer, plan).await
 }
 
 struct StepPlan {
@@ -157,7 +157,7 @@ async fn run_steps(
     github: &GitHubClient,
     release: &Release,
     manifest_path: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
     plan: StepPlan,
 ) -> crate::Result<Manifest> {
     let StepPlan {
@@ -169,18 +169,17 @@ async fn run_steps(
     } = plan;
     let should_run = |step: Step| resume_after.is_none_or(|last| step.is_after(last));
 
-    // Step 1: Binaries (malboxd + malbox)
     if should_run(Step::Daemon) {
         let result = observe(
             Step::Daemon,
-            progress,
+            observer,
             crate::steps::daemon::execute(
                 &config.daemon,
                 &config.features,
                 &bin_dir,
                 github,
                 release,
-                progress,
+                observer,
             )
             .await,
         )?;
@@ -190,12 +189,11 @@ async fn run_steps(
         manifest.save(manifest_path)?;
     }
 
-    // Step 2: Frontend
     if should_run(Step::Frontend) {
         let frontend = observe(
             Step::Frontend,
-            progress,
-            crate::steps::frontend::execute(&config.frontend, &data_dir, github, release, progress)
+            observer,
+            crate::steps::frontend::execute(&config.frontend, &data_dir, github, release, observer)
                 .await,
         )?;
         manifest.frontend.path = frontend.path;
@@ -204,35 +202,31 @@ async fn run_steps(
         manifest.save(manifest_path)?;
     }
 
-    // Step 3: Postgres
     let pgdata = if should_run(Step::Postgres) {
         let pg = observe(
             Step::Postgres,
-            progress,
-            crate::steps::postgres::execute(&config.postgres, &data_dir, progress).await,
+            observer,
+            crate::steps::postgres::execute(&config.postgres, &data_dir, observer).await,
         )?;
         manifest.postgres.url = pg.url;
         manifest.mark_step_completed(Step::Postgres);
         manifest.save(manifest_path)?;
         pg.pgdata
     } else {
-        // Set up on a previous run; recover the managed instance's data
-        // directory for the systemd step.
         (manifest.postgres.strategy == "setup").then(|| data_dir.join("pgdata"))
     };
 
-    // Step 4: Config
     let config_path = config_dir.join("malbox.toml");
     if should_run(Step::Config) {
         observe(
             Step::Config,
-            progress,
+            observer,
             crate::steps::config::execute(
                 &config_dir,
                 &config.providers,
                 &manifest.postgres.url,
                 &manifest.frontend.path,
-                progress,
+                observer,
             )
             .await,
         )?;
@@ -240,23 +234,21 @@ async fn run_steps(
         manifest.save(manifest_path)?;
     }
 
-    // Step 5: Systemd
     let unit = observe(
         Step::Systemd,
-        progress,
+        observer,
         crate::steps::systemd::execute(
             config.systemd,
             &manifest.daemon.path,
             &config_path,
             pgdata.as_deref(),
-            progress,
+            observer,
         )
         .await,
     )?;
     manifest.systemd.unit = unit;
     manifest.mark_step_completed(Step::Systemd);
 
-    // Mark complete
     manifest.mark_complete();
     manifest.save(manifest_path)?;
 

@@ -6,11 +6,10 @@
 //! the installed version's source.
 
 use crate::commands::Command;
-use crate::utils::install_progress::CliProgress;
+use crate::utils::install_renderer::InstallRenderer;
 use clap::{Parser, Subcommand};
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
-use malbox_cli_common::utils::format::Brand;
 use malbox_installer::features::{default_features, provider_feature, split_features};
 use malbox_installer::github::GitHubClient;
 use malbox_installer::manifest::Manifest;
@@ -102,35 +101,30 @@ pub(crate) async fn rebuild_daemon(features: &[String]) -> Result<()> {
     let manifest =
         Manifest::load(&manifest_path).map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-    println!();
-    println!(
-        "{}",
-        Brand::accent().bold().apply_to(format!(
-            "Rebuilding malbox v{} with features: {}",
-            manifest.version,
-            features.join(", ")
-        ))
-    );
-    println!();
+    let renderer = InstallRenderer::new(format!(
+        "Rebuilding malbox v{} with features: {}",
+        manifest.version,
+        features.join(", ")
+    ));
+    renderer.add_pending_steps(&[
+        "Stopping daemon",
+        "Installing malbox binaries",
+        "Starting rebuilt daemon",
+    ]);
 
     let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
-    let progress = CliProgress::new();
-    let manifest = malbox_installer::rebuild::run(features, &github, &manifest_path, &progress)
+    let manifest = malbox_installer::rebuild::run(features, &github, &manifest_path, &renderer)
         .await
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-    println!();
-    println!(
-        "{}",
-        Brand::success().bold().apply_to(format!(
-            "Daemon rebuilt (providers: {})",
-            if manifest.daemon.providers.is_empty() {
-                "none".to_string()
-            } else {
-                manifest.daemon.providers.join(", ")
-            }
-        ))
-    );
+    renderer.finish_line(&format!(
+        "Daemon rebuilt (providers: {})",
+        if manifest.daemon.providers.is_empty() {
+            "none".to_string()
+        } else {
+            manifest.daemon.providers.join(", ")
+        }
+    ));
     Ok(())
 }

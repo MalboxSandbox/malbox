@@ -1,13 +1,11 @@
 use crate::config::FrontendSource;
 use crate::error::{InstallError, Step, StepCtx};
 use crate::github::{GitHubClient, Release};
-use crate::progress::InstallProgress;
+use crate::progress::ProgressObserver;
 use std::path::{Path, PathBuf};
 
 pub struct FrontendResult {
     pub path: PathBuf,
-    /// Previous bundle, kept as `web.prev` for rollback. `None` on a fresh
-    /// install.
     pub prev_path: Option<PathBuf>,
 }
 
@@ -16,14 +14,11 @@ pub async fn execute(
     data_dir: &Path,
     github: &GitHubClient,
     release: &Release,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<FrontendResult> {
-    progress.started(Step::Frontend, "Installing front-end assets");
+    observer.step_started("Installing front-end assets");
 
     let web_dir = data_dir.join("web");
-    // Stage into a sibling directory and swap via renames: the daemon never
-    // serves a half-extracted bundle, stale assets from previous versions
-    // don't accumulate, and the old bundle stays around for rollback.
     let staging = data_dir.join("web.new");
     if staging.exists() {
         tokio::fs::remove_dir_all(&staging)
@@ -39,13 +34,11 @@ pub async fn execute(
                 release,
                 url,
                 "front-end assets",
-                Step::Frontend,
-                10..70,
-                progress,
+                observer,
             )
             .await?;
 
-            progress.progress(Step::Frontend, 80, "Extracting front-end assets");
+            observer.build_output("Extracting front-end assets");
             crate::archive::extract_tarball(&bytes, &staging, Step::Frontend)?;
         }
         FrontendSource::Compile => {
@@ -56,9 +49,13 @@ pub async fn execute(
             )
             .await?;
 
-            progress.progress(Step::Frontend, 10, "Fetching source for front-end build");
+            observer.build_output("Fetching source for front-end build");
             let source_url = release.source_archive_url(github.owner(), github.repo());
-            let bytes = github.download_asset(&source_url, &mut |_, _| {}).await?;
+            let bytes = github
+                .download_asset(&source_url, &mut |done, total| {
+                    observer.download_progress(done, total, "front-end source");
+                })
+                .await?;
 
             let tmp_dir =
                 tempfile::tempdir().step_ctx(Step::Frontend, "failed to create temp dir")?;
@@ -67,19 +64,18 @@ pub async fn execute(
             let source_dir = crate::archive::find_extracted_dir(tmp_dir.path(), Step::Frontend)?;
             let frontend_dir = source_dir.join("front-end");
 
-            progress.progress(Step::Frontend, 20, "Installing pnpm dependencies");
+            observer.build_output("Installing pnpm dependencies");
             run_cmd("pnpm", &["install"], &frontend_dir, Step::Frontend).await?;
 
-            progress.progress(Step::Frontend, 50, "Building front-end");
+            observer.build_output("Building front-end");
             run_cmd("pnpm", &["run", "build"], &frontend_dir, Step::Frontend).await?;
 
-            progress.progress(Step::Frontend, 90, "Copying build output");
+            observer.build_output("Copying build output");
             let build_output = frontend_dir.join("build");
             copy_dir_recursive(&build_output, &staging).await?;
         }
     }
 
-    // Swap the staged bundle in.
     let prev = data_dir.join("web.prev");
     if prev.exists() {
         tokio::fs::remove_dir_all(&prev)
@@ -96,7 +92,7 @@ pub async fn execute(
         .await
         .step_ctx(Step::Frontend, "failed to activate new bundle")?;
 
-    progress.completed(Step::Frontend);
+    observer.step_completed("Installing front-end assets", "");
     Ok(FrontendResult {
         path: web_dir,
         prev_path: had_previous.then_some(prev),

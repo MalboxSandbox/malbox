@@ -1,5 +1,5 @@
 use crate::commands::Command;
-use crate::utils::install_progress::CliProgress;
+use crate::utils::install_renderer::InstallRenderer;
 use crate::utils::wizard;
 use clap::Parser;
 use console::style;
@@ -125,21 +125,26 @@ impl Command for InstallCommand {
         };
 
         // Run installation
-        println!();
-        println!("{}", header.apply_to("Installing Malbox..."));
-        println!();
+        let renderer = InstallRenderer::new("Installing Malbox");
+        renderer.add_pending_steps(&[
+            "Installing malbox binaries",
+            "Installing front-end assets",
+            "Setting up PostgreSQL",
+            "Generating default configuration",
+            "Configuring systemd user services",
+        ]);
 
-        let progress = CliProgress::new();
         let manifest = malbox_installer::install::run(
             &install_config,
             &github,
             &release,
             &manifest_path,
-            &progress,
+            &renderer,
         )
         .await
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
+        renderer.finish_line(&format!("Malbox v{} installed", manifest.version));
         print_summary(&manifest, &manifest_path);
         Ok(())
     }
@@ -210,18 +215,20 @@ async fn resume_install(manifest_path: &std::path::Path) -> Result<()> {
     let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-    println!();
-    println!(
-        "{}",
-        Brand::accent().bold().apply_to("Resuming installation...")
-    );
-    println!();
+    let renderer = InstallRenderer::new("Resuming installation");
+    renderer.add_pending_steps(&[
+        "Installing malbox binaries",
+        "Installing front-end assets",
+        "Setting up PostgreSQL",
+        "Generating default configuration",
+        "Configuring systemd user services",
+    ]);
 
-    let progress = CliProgress::new();
-    let manifest = malbox_installer::install::resume(&github, manifest_path, &progress)
+    let manifest = malbox_installer::install::resume(&github, manifest_path, &renderer)
         .await
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
+    renderer.finish_line(&format!("Malbox v{} installed", manifest.version));
     print_summary(&manifest, manifest_path);
     Ok(())
 }

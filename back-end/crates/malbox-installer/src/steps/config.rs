@@ -1,5 +1,5 @@
 use crate::error::{InstallError, Step, StepCtx};
-use crate::progress::InstallProgress;
+use crate::progress::ProgressObserver;
 use malbox_config::core::{DATABASE_NAME, DatabaseConfig};
 use malbox_config::{CliConfig, Config, Environment, PathConfig};
 use std::path::{Path, PathBuf};
@@ -9,28 +9,27 @@ pub async fn execute(
     providers: &[String],
     postgres_url: &str,
     web_dir: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<PathBuf> {
-    progress.started(Step::Config, "Generating default configuration");
+    observer.step_started("Generating default configuration");
 
     tokio::fs::create_dir_all(config_dir).await?;
 
     let config_path = config_dir.join("malbox.toml");
 
     if config_path.exists() {
-        progress.progress(Step::Config, 100, "Keeping existing configuration");
-        progress.completed(Step::Config);
+        observer.build_output("Keeping existing configuration");
+        observer.step_completed(
+            "Generating default configuration",
+            "existing config preserved",
+        );
         return Ok(config_path);
     }
 
-    // Build a typed Config and serialize it rather than templating TOML by
-    // hand: the result is guaranteed to round-trip through the daemon's
-    // strict (deny_unknown_fields) loader.
     let paths = PathConfig::new().step_ctx(Step::Config, "failed to resolve XDG paths")?;
     let mut config = Config::with_defaults(paths);
     config.general.environment = Environment::Production;
     config.http.web_dir = Some(web_dir.display().to_string());
-    // Same-origin SPA serving needs no CORS allowances.
     config.http.cors_origins.clear();
     config.database = database_config(postgres_url)?;
     config.providers.enabled = providers.to_vec();
@@ -49,15 +48,10 @@ pub async fn execute(
         tokio::fs::write(&cli_config_path, cli_toml).await?;
     }
 
-    progress.completed(Step::Config);
+    observer.step_completed("Generating default configuration", "");
     Ok(config_path)
 }
 
-/// Split the pipeline's connection URL into the discrete `[database]`
-/// fields the daemon consumes. URLs stay the interchange format for the
-/// wizard, the psql checks and the manifest; only the generated config
-/// uses fields. The database name is fixed, so a URL naming some other
-/// database is refused rather than silently ignored.
 fn database_config(url: &str) -> crate::Result<DatabaseConfig> {
     let parsed = url::Url::parse(url).map_err(|e| invalid_url(url, &e.to_string()))?;
 
@@ -83,8 +77,6 @@ fn database_config(url: &str) -> crate::Result<DatabaseConfig> {
 
     let mut database = DatabaseConfig::default();
     if let Some(host) = parsed.host_str() {
-        // The url crate keeps IPv6 hosts bracketed; the config wants them
-        // bare.
         database.host = host
             .trim_start_matches('[')
             .trim_end_matches(']')

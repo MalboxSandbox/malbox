@@ -5,7 +5,7 @@ use crate::config::DaemonSource;
 use crate::error::Step;
 use crate::github::GitHubClient;
 use crate::manifest::Manifest;
-use crate::progress::{InstallProgress, observe};
+use crate::progress::{ProgressObserver, observe};
 use std::path::Path;
 
 /// Recompile the installed version's binaries with `features` and swap them
@@ -15,7 +15,7 @@ pub async fn run(
     features: &[String],
     github: &GitHubClient,
     manifest_path: &Path,
-    progress: &dyn InstallProgress,
+    observer: &dyn ProgressObserver,
 ) -> crate::Result<Manifest> {
     let mut manifest = Manifest::load(manifest_path)?;
 
@@ -26,9 +26,9 @@ pub async fn run(
     if manifest.systemd.enabled
         && let Some(unit) = &manifest.systemd.unit
     {
-        progress.started(Step::Systemd, "Stopping daemon");
+        observer.step_started("Stopping daemon");
         let _ = crate::steps::systemd::stop_service(unit).await;
-        progress.completed(Step::Systemd);
+        observer.step_completed("Stopping daemon", "");
     }
 
     // Back up the current binary and persist the manifest immediately, so a
@@ -44,14 +44,14 @@ pub async fn run(
     let bin_dir = manifest.daemon.path.parent().unwrap_or(Path::new("."));
     let result = observe(
         Step::Daemon,
-        progress,
+        observer,
         crate::steps::daemon::execute(
             &DaemonSource::Compile,
             features,
             bin_dir,
             github,
             &release,
-            progress,
+            observer,
         )
         .await,
     )?;
@@ -70,9 +70,9 @@ pub async fn run(
     if manifest.systemd.enabled
         && let Some(unit) = &manifest.systemd.unit
     {
-        progress.started(Step::Systemd, "Starting rebuilt daemon");
+        observer.step_started("Starting rebuilt daemon");
         crate::steps::systemd::start_service(unit).await?;
-        progress.completed(Step::Systemd);
+        observer.step_completed("Starting rebuilt daemon", "");
     }
 
     manifest.save(manifest_path)?;
