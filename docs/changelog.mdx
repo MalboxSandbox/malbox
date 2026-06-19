@@ -3,6 +3,18 @@ title: "Changelog"
 description: "Release notes for Malbox covering new features, plugin SDK updates, CLI changes, UI improvements, and bug fixes shipped each week."
 ---
 
+<Update label="June 19, 2026" tags={["maintenance"]}>
+
+## Updates
+
+- **Polished installer and upgrade output.** The install and upgrade flows now use a branded theme with phase dividers (for example, separate **Configuration** and **Reconfiguration** sections during `malbox daemon upgrade --reconfigure`) so it's easier to see where you are in the run. See [Automatic install](/installation/automatic).
+- **Structured non-TTY install logs.** When the installer isn't attached to a terminal (CI, `curl | bash`, log files), each line is now prefixed with a timestamp and a `[step/total]` counter so progress is easy to follow and grep.
+- **Recovery hints on failed steps.** If an install, upgrade, or rollback step fails, the renderer now prints a short hint with the exact command to retry (for example, `malbox daemon upgrade --rollback` or `systemctl --user start malbox`) directly under the failure.
+
+A quiet week of installer UX polish on top of the [June 18 release](/changelog#june-18-2026).
+
+</Update>
+
 <Update label="June 18, 2026" tags={["release"]}>
 
 ## New features
