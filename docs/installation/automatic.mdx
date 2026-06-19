@@ -1,8 +1,165 @@
 ---
 title: "Automatic install"
 description: "The fastest way to get started with Malbox"
+keywords: ["install", "setup", "automatic", "bootstrap", "curl"]
 ---
 
+## Prerequisites
 
+- A **Linux** host (x86_64 or aarch64)
+- **curl** installed
+- **PostgreSQL 16+** installed and running (or let the installer manage one for you)
 
+<Note>
+  Malbox does not support macOS or Windows hosts directly. Use WSL2 on Windows.
+</Note>
 
+## Bootstrap the CLI
+
+The bootstrap script downloads the `malbox` binary to `~/.local/bin` and verifies its checksum. Use process substitution so stdin stays connected to your terminal and the interactive prompts work:
+
+<Tabs>
+  <Tab title="bash / zsh">
+    ```bash
+    bash <(curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh)
+    ```
+  </Tab>
+  <Tab title="fish">
+    ```fish
+    bash (curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh | psub)
+    ```
+  </Tab>
+  <Tab title="non-interactive">
+    Piping into bash disables interactive prompts. Set the channel via an environment variable instead:
+
+    ```bash
+    MALBOX_CHANNEL=nightly curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh | bash
+    ```
+  </Tab>
+</Tabs>
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `MALBOX_CHANNEL` | `stable`, `nightly` | `stable` | Release channel to download from |
+| `MALBOX_FORCE` | `1` | - | Overwrite an existing binary without prompting |
+
+Make sure `~/.local/bin` is in your `PATH`. If it is not, add it to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+## Run the installer
+
+Once the CLI is on your system, run the interactive installer:
+
+```bash
+malbox daemon install
+```
+
+The installer walks you through each step:
+
+<Steps>
+  <Step title="Release channel">
+    Choose between **stable** (recommended) and **nightly** builds.
+  </Step>
+  <Step title="Daemon source">
+    Download a prebuilt binary or compile from source. Compiling from source lets you choose
+    exactly which virtualization providers and machine provisioners to include.
+  </Step>
+  <Step title="PostgreSQL setup">
+    Connect to an existing PostgreSQL server or let Malbox set up a managed instance.
+    The installer validates the connection before continuing.
+  </Step>
+  <Step title="Systemd service">
+    Optionally install a systemd user service so the daemon starts automatically.
+  </Step>
+</Steps>
+
+The installer shows a live progress display as it downloads binaries, sets up the database, writes configuration, and configures services.
+
+If the install is interrupted, re-running `malbox daemon install` detects the incomplete state and offers to resume from where it stopped.
+
+### Non-interactive install
+
+Skip all prompts with `--yes`. This selects nightly channel, prebuilt binaries, a managed PostgreSQL instance, and systemd:
+
+```bash
+malbox daemon install --yes
+```
+
+<Warning>
+  `--yes` requires PostgreSQL tools (`initdb`, `psql`) to be installed on the system. If they are missing, the command fails immediately with an error.
+</Warning>
+
+## Start the daemon
+
+If you enabled the systemd service:
+
+```bash
+systemctl --user start malbox
+```
+
+Otherwise, start it manually:
+
+```bash
+malbox daemon start
+```
+
+The daemon serves the HTTP API on `http://127.0.0.1:8080` by default.
+
+## What gets installed
+
+| Component | Default path |
+|-----------|-------------|
+| Daemon binary (`malboxd`) | `~/.local/bin/malboxd` |
+| CLI binary (`malbox`) | `~/.local/bin/malbox` |
+| Front-end assets | `~/.local/share/malbox/web` |
+| Configuration | `~/.config/malbox/malbox.toml` |
+| Installation manifest | `~/.config/malbox/manifest.json` |
+| Systemd unit (if enabled) | `~/.config/systemd/user/malbox.service` |
+
+## Upgrading
+
+Upgrade to the latest version on your current release channel:
+
+```bash
+malbox daemon upgrade
+```
+
+To change providers or switch channels during an upgrade:
+
+```bash
+malbox daemon upgrade --reconfigure
+```
+
+To roll back to the previous version:
+
+```bash
+malbox daemon upgrade --rollback
+```
+
+See the [`malbox daemon upgrade`](/reference/cli/malbox-daemon#upgrade) reference for all flags.
+
+## Uninstalling
+
+There is no dedicated uninstall command yet. Remove the installed files manually:
+
+```bash
+# Stop the daemon
+systemctl --user stop malbox
+systemctl --user disable malbox
+
+# Remove binaries and data
+rm ~/.local/bin/malboxd ~/.local/bin/malbox
+rm -rf ~/.local/share/malbox
+rm -rf ~/.config/malbox
+rm ~/.config/systemd/user/malbox.service
+systemctl --user daemon-reload
+```
+
+If the installer set up a managed PostgreSQL instance, stop it first:
+
+```bash
+pg_ctl -D ~/.local/share/malbox/pgdata stop
+```

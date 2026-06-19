@@ -1,7 +1,211 @@
 ---
 title: "Manual install"
-description: "Install Malbox manually"
+description: "Install Malbox step by step without the automated installer"
+keywords: ["install", "manual", "build", "compile", "advanced"]
 ---
 
+Use the manual install when you need full control over the build, want to run on an unusual platform, or cannot use the interactive installer. For most users, the [automatic install](/installation/automatic) is easier and faster.
 
+## Prerequisites
 
+- A **Linux** host (x86_64 or aarch64)
+- **Rust** toolchain (1.85+) via [rustup](https://rustup.rs/)
+- **PostgreSQL 16+** installed and reachable
+- **Node.js 20+** and **pnpm 11+** (for the front-end)
+- Build essentials: `gcc`, `make`, `pkg-config`
+- **Nix** (optional but recommended) - the project flake provides all dependencies automatically. See [dev environment](/contributing/dev-environment).
+
+## Clone the repository
+
+```bash
+git clone https://github.com/DualHorizon/malbox.git
+cd malbox
+```
+
+To build a specific release instead of `main`:
+
+```bash
+git checkout v0.1.0-alpha.6
+```
+
+## Build the daemon
+
+From the `back-end/` directory:
+
+```bash
+cd back-end
+```
+
+### Using the Nix devshell (recommended)
+
+If you have Nix with flakes enabled:
+
+```bash
+nix develop .#backend
+```
+
+This provides the Rust toolchain, PostgreSQL tools, MinGW cross-compilation, and all native dependencies. Then build:
+
+```bash
+SQLX_OFFLINE=true cargo build --release --workspace --exclude malbox-provider-xen
+```
+
+### Without Nix
+
+Make sure you have Rust, `pkg-config`, and the development headers for your system's libvirt (if using the libvirt provider). Then:
+
+```bash
+SQLX_OFFLINE=true cargo build --release -p malboxd -p malbox
+```
+
+<Info>
+  `SQLX_OFFLINE=true` tells sqlx to verify queries against the checked-in cache instead of a live database. This is required unless you have a migrated database running.
+</Info>
+
+### Selecting features
+
+The daemon binary supports Cargo features for choosing which providers and provisioners to compile in. The default build includes all of them. To select specific ones:
+
+```bash
+SQLX_OFFLINE=true cargo build --release -p malboxd \
+  --no-default-features \
+  --features "provider-libvirt,provisioner-ansible"
+```
+
+Available features:
+
+| Feature | Description |
+|---------|-------------|
+| `provider-libvirt` | KVM/QEMU via libvirt |
+| `provisioner-ansible` | Machine provisioning with Ansible |
+
+## Install the binaries
+
+Copy the built binaries to a directory on your `PATH`:
+
+```bash
+install -Dm755 target/release/malboxd ~/.local/bin/malboxd
+install -Dm755 target/release/malbox ~/.local/bin/malbox
+```
+
+## Build and install the front-end
+
+```bash
+cd ../front-end
+pnpm install
+pnpm build
+```
+
+Copy the built assets:
+
+```bash
+mkdir -p ~/.local/share/malbox/web
+cp -r build/* ~/.local/share/malbox/web/
+```
+
+## Set up PostgreSQL
+
+Create the database and role. The exact commands depend on your PostgreSQL setup. For a typical local install:
+
+```bash
+createdb malbox
+```
+
+Run the migrations:
+
+```bash
+cd ../back-end
+DATABASE_URL="postgres://postgres@localhost:5432/malbox" sqlx migrate run \
+  --source crates/malbox-database/migrations
+```
+
+## Generate configuration
+
+Use the CLI to write a default configuration file:
+
+```bash
+malbox daemon config init
+```
+
+This writes `~/.config/malbox/malbox.toml` and `~/.config/malbox/cli.toml`.
+
+Edit `malbox.toml` to match your environment. At minimum, check the `[database]` section:
+
+```toml
+[database]
+host = "127.0.0.1"
+port = 5432
+user = "postgres"
+```
+
+See the [configuration reference](/reference/configuration/workers) for all available settings.
+
+## Start the daemon
+
+```bash
+malbox daemon start
+```
+
+The daemon starts the HTTP API on `http://127.0.0.1:8080` by default.
+
+## Optional: systemd service
+
+Create a systemd user service to start the daemon automatically:
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/malbox.service << 'EOF'
+[Unit]
+Description=Malbox Daemon
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/malboxd
+Environment=MALBOX_CONFIG=%h/.config/malbox/malbox.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+Enable and start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now malbox
+```
+
+<Tip>
+  If you want the service to keep running after you log out, enable lingering:
+  `loginctl enable-linger`
+</Tip>
+
+## Upgrading manually
+
+Pull the latest changes (or check out a new tag), rebuild, and replace the binaries:
+
+```bash
+cd malbox
+git pull
+cd back-end
+SQLX_OFFLINE=true cargo build --release -p malboxd -p malbox
+install -Dm755 target/release/malboxd ~/.local/bin/malboxd
+install -Dm755 target/release/malbox ~/.local/bin/malbox
+```
+
+Run any new migrations:
+
+```bash
+DATABASE_URL="postgres://postgres@localhost:5432/malbox" sqlx migrate run \
+  --source crates/malbox-database/migrations
+```
+
+Restart the daemon:
+
+```bash
+systemctl --user restart malbox
+```

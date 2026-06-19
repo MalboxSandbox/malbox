@@ -25,9 +25,9 @@
  * Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
  */
 enum MalboxEventTag
-#ifdef __cplusplus
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
   : int32_t
-#endif // __cplusplus
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
  {
     MALBOX_EVENT_TAG_TASK_CREATED = 0,
     MALBOX_EVENT_TAG_TASK_STARTING = 1,
@@ -44,16 +44,20 @@ enum MalboxEventTag
     MALBOX_EVENT_TAG_CONFIG_RELOADED = 12,
 };
 #ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum MalboxEventTag MalboxEventTag;
+#else
 typedef int32_t MalboxEventTag;
+#endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
 /**
  * Lifetime policy of a plugin instance.
  */
 enum MalboxPluginState
-#ifdef __cplusplus
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
   : uint8_t
-#endif // __cplusplus
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
  {
     /**
      * The plugin instance is kept alive across tasks.
@@ -69,16 +73,20 @@ enum MalboxPluginState
     MALBOX_PLUGIN_STATE_SCOPED = 2,
 };
 #ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum MalboxPluginState MalboxPluginState;
+#else
 typedef uint8_t MalboxPluginState;
+#endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
 /**
  * Concurrency policy controlling how the scheduler dispatches tasks to a plugin.
  */
 enum MalboxExecutionContext
-#ifdef __cplusplus
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
   : uint8_t
-#endif // __cplusplus
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
  {
     /**
      * Only one task may run in the plugin at a time and no other plugins may
@@ -99,7 +107,11 @@ enum MalboxExecutionContext
     MALBOX_EXECUTION_CONTEXT_UNRESTRICTED = 3,
 };
 #ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum MalboxExecutionContext MalboxExecutionContext;
+#else
 typedef uint8_t MalboxExecutionContext;
+#endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
 /**
