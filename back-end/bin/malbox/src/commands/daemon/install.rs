@@ -6,7 +6,7 @@ use console::style;
 use dialoguer::{Confirm, Input, Select};
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
-use malbox_cli_common::utils::format::Brand;
+use malbox_cli_common::utils::format::{self, Brand};
 use malbox_cli_common::utils::progress::Spinner;
 use malbox_installer::config::{InstallConfig, PostgresStrategy};
 use malbox_installer::features::split_features;
@@ -29,38 +29,45 @@ pub struct InstallCommand {
 
 impl Command for InstallCommand {
     async fn execute(self, _ctx: &Context) -> Result<()> {
-        let header = Brand::accent().bold();
-        println!("{}", header.apply_to("Malbox Installation"));
+        let accent = Brand::accent();
+        for line in [
+            r"            _ _",
+            r" _ __  __ _| | |__  _____ __",
+            r"| '  \/ _` | | '_ \/ _ \ \ /",
+            r"|_|_|_\__,_|_|_.__/\___/_\_\",
+        ] {
+            println!("  {}", accent.apply_to(line));
+        }
         println!();
 
         let manifest_path = Manifest::default_path();
         if manifest_path.exists()
             && let Ok(existing) = Manifest::load(&manifest_path)
         {
+            let theme = format::malbox_theme();
             match existing.last_completed_step {
                 None => {
                     if self.yes {
-                        println!("Reinstalling over the existing installation.");
-                    } else if !Confirm::new()
+                        println!("  Reinstalling over existing installation.");
+                    } else if !Confirm::with_theme(&theme)
                         .with_prompt("Malbox is already installed. Reinstall?")
                         .default(false)
                         .interact()?
                     {
-                        println!("Installation cancelled.");
+                        println!("  Installation cancelled.");
                         return Ok(());
                     }
                 }
                 Some(last_completed) => {
                     println!(
-                        "{}",
-                        Brand::warning().apply_to(format!(
-                            "Found an incomplete installation of v{} (stopped after the {} step).",
-                            existing.version, last_completed
-                        ))
+                        "  {} Incomplete installation of v{} (stopped after {} step)",
+                        Brand::warning().apply_to("!"),
+                        existing.version,
+                        last_completed
                     );
                     let resume = self.yes
-                        || Select::new()
-                            .with_prompt("Resume it or start fresh?")
+                        || Select::with_theme(&theme)
+                            .with_prompt("Resume or start fresh?")
                             .items(["Resume installation", "Start fresh"])
                             .default(0)
                             .interact()?
@@ -72,16 +79,16 @@ impl Command for InstallCommand {
             }
         }
 
-        // Release channel
+        if !self.yes {
+            format::section_divider("Configuration");
+        }
+
         let channel = if self.yes {
             Channel::Nightly
         } else {
             wizard::prompt_channel(Channel::Stable)?
         };
 
-        // Fetch latest release (needed before the strategy prompt so we know
-        // whether a prebuilt binary exists).
-        println!();
         let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
         let release_spinner = Spinner::start("Fetching latest release info");
@@ -91,7 +98,6 @@ impl Command for InstallCommand {
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
         drop(release_spinner);
 
-        // Daemon: prebuilt (all features) or compile (user picks features)
         let daemon_choice = if self.yes {
             wizard::default_daemon_choice(&release)
         } else {
@@ -99,17 +105,14 @@ impl Command for InstallCommand {
         };
         let (providers, provisioners) = split_features(&daemon_choice.features);
 
-        // Frontend - download the prebuilt SPA bundle when the release ships
-        // one, otherwise build it from source.
         let frontend_source = wizard::resolve_frontend_source(&release);
 
-        // Postgres
         let postgres = self.select_postgres().await?;
 
-        // Systemd
+        let theme = format::malbox_theme();
         let systemd = self.yes
-            || Confirm::new()
-                .with_prompt("Set up Malbox as a systemd user service?")
+            || Confirm::with_theme(&theme)
+                .with_prompt("Enable systemd user service?")
                 .default(true)
                 .interact()?;
 
@@ -125,6 +128,8 @@ impl Command for InstallCommand {
         };
 
         // Run installation
+        format::section_divider("Installation");
+
         let renderer = InstallRenderer::new("Installing Malbox");
         renderer.add_pending_steps(&[
             "Installing malbox binaries",
@@ -133,6 +138,32 @@ impl Command for InstallCommand {
             "Generating default configuration",
             "Configuring systemd user services",
         ]);
+        renderer.add_recovery_hints(
+            "Installing malbox binaries",
+            &["Re-run `malbox daemon install` to resume from this step"],
+        );
+        renderer.add_recovery_hints(
+            "Installing front-end assets",
+            &["Re-run `malbox daemon install` to resume from this step"],
+        );
+        renderer.add_recovery_hints(
+            "Setting up PostgreSQL",
+            &[
+                "Ensure PostgreSQL tools are installed: psql --version",
+                "Re-run `malbox daemon install` to resume from this step",
+            ],
+        );
+        renderer.add_recovery_hints(
+            "Generating default configuration",
+            &["Re-run `malbox daemon install` to resume from this step"],
+        );
+        renderer.add_recovery_hints(
+            "Configuring systemd user services",
+            &[
+                "Verify systemd user session: systemctl --user status",
+                "Re-run `malbox daemon install` to resume from this step",
+            ],
+        );
 
         let manifest = malbox_installer::install::run(
             &install_config,
@@ -166,15 +197,11 @@ impl InstallCommand {
             return Ok(PostgresStrategy::Setup);
         }
 
+        let theme = format::malbox_theme();
         let strategy = if detect_postgres_tools() {
-            let choice = Select::new()
-                .with_prompt(
-                    "PostgreSQL client tools detected. Use an existing server or set up a new instance?",
-                )
-                .items([
-                    "Use existing (enter connection URL)",
-                    "Set up new PostgreSQL instance",
-                ])
+            let choice = Select::with_theme(&theme)
+                .with_prompt("PostgreSQL setup")
+                .items(["Use existing server", "Set up new instance"])
                 .default(0)
                 .interact()?;
             match choice {
@@ -187,12 +214,13 @@ impl InstallCommand {
                 }
             }
         } else {
-            let choice = Select::new()
-                .with_prompt("PostgreSQL not found")
-                .items([
-                    "Set up new PostgreSQL instance",
-                    "I'll set it up myself (enter connection URL)",
-                ])
+            println!(
+                "  {} PostgreSQL client tools not found",
+                Brand::warning().apply_to("!")
+            );
+            let choice = Select::with_theme(&theme)
+                .with_prompt("PostgreSQL setup")
+                .items(["Set up new instance", "Enter connection URL"])
                 .default(0)
                 .interact()?;
             match choice {
@@ -223,6 +251,32 @@ async fn resume_install(manifest_path: &std::path::Path) -> Result<()> {
         "Generating default configuration",
         "Configuring systemd user services",
     ]);
+    renderer.add_recovery_hints(
+        "Installing malbox binaries",
+        &["Re-run `malbox daemon install` to retry from this step"],
+    );
+    renderer.add_recovery_hints(
+        "Installing front-end assets",
+        &["Re-run `malbox daemon install` to retry from this step"],
+    );
+    renderer.add_recovery_hints(
+        "Setting up PostgreSQL",
+        &[
+            "Ensure PostgreSQL tools are installed: psql --version",
+            "Re-run `malbox daemon install` to retry from this step",
+        ],
+    );
+    renderer.add_recovery_hints(
+        "Generating default configuration",
+        &["Re-run `malbox daemon install` to retry from this step"],
+    );
+    renderer.add_recovery_hints(
+        "Configuring systemd user services",
+        &[
+            "Verify systemd user session: systemctl --user status",
+            "Re-run `malbox daemon install` to retry from this step",
+        ],
+    );
 
     let manifest = malbox_installer::install::resume(&github, manifest_path, &renderer)
         .await
@@ -251,10 +305,9 @@ fn ensure_setup_tools() -> Result<()> {
 /// surfaces here instead of minutes later after the download steps.
 async fn prompt_postgres_url(default: Option<&str>) -> Result<String> {
     loop {
-        // Scoped so the (non-Send) dialoguer builder is dropped before any
-        // await point.
         let url: String = {
-            let mut input = Input::new().with_prompt("PostgreSQL connection URL");
+            let theme = format::malbox_theme();
+            let mut input = Input::with_theme(&theme).with_prompt("Connection URL");
             if let Some(default) = default {
                 input = input.default(default.to_string());
             }
@@ -269,7 +322,8 @@ async fn prompt_postgres_url(default: Option<&str>) -> Result<String> {
             Ok(()) => return Ok(url),
             Err(e) => {
                 println!("  {} {e}", Brand::warning().apply_to("!"));
-                if Confirm::new()
+                let theme = format::malbox_theme();
+                if Confirm::with_theme(&theme)
                     .with_prompt("Use this URL anyway?")
                     .default(false)
                     .interact()?
@@ -282,46 +336,61 @@ async fn prompt_postgres_url(default: Option<&str>) -> Result<String> {
 }
 
 fn print_summary(manifest: &Manifest, manifest_path: &std::path::Path) {
-    println!();
-    println!(
-        "{}",
-        Brand::success().bold().apply_to(format!(
-            "Malbox v{} installed successfully!",
-            manifest.version
-        ))
-    );
-    println!();
-    println!("  malboxd:   {}", manifest.daemon.path.display());
-    println!("  malbox:    {}", manifest.cli.path.display());
-    println!("  Frontend:  {}", manifest.frontend.path.display());
-    println!("  Config:    ~/.config/malbox/malbox.toml");
-    println!("  Manifest:  {}", manifest_path.display());
-    println!();
+    let dim = Brand::dim();
 
-    if manifest.systemd.enabled {
+    println!();
+    let paths: &[(&str, String)] = &[
+        ("malboxd", manifest.daemon.path.display().to_string()),
+        ("malbox", manifest.cli.path.display().to_string()),
+        ("front-end", manifest.frontend.path.display().to_string()),
+        ("config", "~/.config/malbox/malbox.toml".to_string()),
+        ("manifest", manifest_path.display().to_string()),
+    ];
+    let max_label = paths.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+    for (label, path) in paths {
         println!(
-            "  Start the daemon with: {}",
-            style("systemctl --user start malbox").bold()
+            "  {}  {}",
+            dim.apply_to(format!("{:<width$}", label, width = max_label)),
+            path,
         );
-        if linger_enabled() == Some(false) {
-            println!(
-                "  {} user services stop at logout - keep malbox running with: {}",
-                Brand::warning().apply_to("!"),
-                style("loginctl enable-linger").bold()
-            );
-        }
+    }
+
+    println!();
+    let start_cmd = if manifest.systemd.enabled {
+        "systemctl --user start malbox"
     } else {
+        "malbox daemon start"
+    };
+    println!(
+        "  {} {}",
+        dim.apply_to("Start the daemon with:"),
+        style(start_cmd).bold(),
+    );
+
+    println!(
+        "  {}",
+        dim.apply_to("Documentation: https://docs.malbox.app"),
+    );
+
+    if manifest.systemd.enabled && linger_enabled() == Some(false) {
         println!(
-            "  Start the daemon with: {}",
-            style("malbox daemon start").bold()
+            "  {} {}",
+            Brand::warning().apply_to("!"),
+            dim.apply_to(format!(
+                "User services stop at logout - enable linger: {}",
+                style("loginctl enable-linger").bold()
+            )),
         );
-        if manifest.postgres.strategy == "setup" {
-            println!(
-                "  {} the managed PostgreSQL instance was started for this session only;\n    restart it after a reboot with: {}",
-                Brand::warning().apply_to("!"),
+    }
+    if !manifest.systemd.enabled && manifest.postgres.strategy == "setup" {
+        println!(
+            "  {} {}",
+            Brand::warning().apply_to("!"),
+            dim.apply_to(format!(
+                "Managed PostgreSQL started for this session only - after reboot: {}",
                 style("pg_ctl -D ~/.local/share/malbox/pgdata start").bold()
-            );
-        }
+            )),
+        );
     }
 }
 

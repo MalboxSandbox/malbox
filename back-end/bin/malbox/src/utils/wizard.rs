@@ -3,7 +3,7 @@
 
 use dialoguer::{MultiSelect, Select};
 use malbox_cli_common::error::Result;
-use malbox_cli_common::utils::format::Brand;
+use malbox_cli_common::utils::format::{Brand, malbox_theme};
 use malbox_installer::config::{DaemonSource, FrontendSource};
 use malbox_installer::features::{self, FeatureKind, default_features};
 use malbox_installer::github::{Channel, Release};
@@ -20,7 +20,8 @@ pub fn prompt_channel(current: Channel) -> Result<Channel> {
         Channel::Stable => 0,
         Channel::Nightly => 1,
     };
-    let choice = Select::new()
+    let theme = malbox_theme();
+    let choice = Select::with_theme(&theme)
         .with_prompt("Release channel")
         .items(["stable", "nightly"])
         .default(default_idx)
@@ -52,12 +53,10 @@ pub fn prompt_daemon_choice(release: &Release, current: &[String]) -> Result<Dae
 
     match prebuilt_asset {
         Some(asset) => {
-            let choice = Select::new()
-                .with_prompt("How would you like to install the daemon?")
-                .items([
-                    "Download prebuilt binary (all providers and provisioners)",
-                    "Compile from source (choose specific providers and provisioners)",
-                ])
+            let theme = malbox_theme();
+            let choice = Select::with_theme(&theme)
+                .with_prompt("Daemon source")
+                .items(["Download prebuilt binary", "Compile from source"])
                 .default(0)
                 .interact()?;
 
@@ -90,10 +89,11 @@ pub fn prompt_daemon_choice(release: &Release, current: &[String]) -> Result<Dae
 /// Categorized multi-select: providers first, then provisioners.
 fn prompt_custom_features(current: &[String]) -> Result<Vec<String>> {
     let mut selected = Vec::new();
+    let theme = malbox_theme();
 
     for (kind, label) in [
-        (FeatureKind::Provider, "Select virtualization providers"),
-        (FeatureKind::Provisioner, "Select machine provisioners"),
+        (FeatureKind::Provider, "Virtualization providers"),
+        (FeatureKind::Provisioner, "Machine provisioners"),
     ] {
         let entries: Vec<&features::DaemonFeature> = features::by_kind(kind).collect();
         if entries.is_empty() {
@@ -106,7 +106,7 @@ fn prompt_custom_features(current: &[String]) -> Result<Vec<String>> {
             .map(|f| current.iter().any(|c| c == f.feature))
             .collect();
 
-        let indices = MultiSelect::new()
+        let indices = MultiSelect::with_theme(&theme)
             .with_prompt(label)
             .items(&display)
             .defaults(&defaults)

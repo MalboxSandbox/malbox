@@ -31,7 +31,7 @@ impl Spinner {
                 while running_clone.load(Ordering::Relaxed) {
                     let text = msg_clone.lock().unwrap().clone();
                     eprint!(
-                        "\r\x1b[2K{} {}",
+                        "\r\x1b[2K  {} {}",
                         style.apply_to(rattle.current_frame()),
                         text
                     );

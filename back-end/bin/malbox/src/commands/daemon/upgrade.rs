@@ -5,7 +5,7 @@ use crate::utils::wizard;
 use clap::Parser;
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
-use malbox_cli_common::utils::format::Brand;
+use malbox_cli_common::utils::format::{self, Brand};
 use malbox_cli_common::utils::progress::Spinner;
 use malbox_installer::config::{InstallConfig, PostgresStrategy, UpgradeConfig};
 use malbox_installer::error::InstallError;
@@ -44,6 +44,18 @@ impl Command for UpgradeCommand {
                 "Rolling back front-end assets",
                 "Starting rolled-back daemon",
             ]);
+            renderer.add_recovery_hints(
+                "Rolling back malbox binaries",
+                &["Re-run `malbox daemon upgrade --rollback` to retry"],
+            );
+            renderer.add_recovery_hints(
+                "Rolling back front-end assets",
+                &["Re-run `malbox daemon upgrade --rollback` to retry"],
+            );
+            renderer.add_recovery_hints(
+                "Starting rolled-back daemon",
+                &["Start manually: systemctl --user start malbox"],
+            );
 
             malbox_installer::upgrade::rollback(&manifest_path, &renderer)
                 .await
@@ -57,6 +69,7 @@ impl Command for UpgradeCommand {
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
         let reconfigure = if self.reconfigure {
+            format::section_divider("Configuration");
             Some(prompt_reconfigure(&github, &manifest_path).await?)
         } else {
             None
@@ -66,6 +79,10 @@ impl Command for UpgradeCommand {
             force: self.force,
             reconfigure,
         };
+
+        if self.reconfigure {
+            format::section_divider("Reconfiguration");
+        }
 
         let renderer = InstallRenderer::new(if self.reconfigure {
             "Reconfiguring Malbox"
@@ -79,6 +96,26 @@ impl Command for UpgradeCommand {
             "Setting up PostgreSQL",
             "Starting upgraded daemon",
         ]);
+        renderer.add_recovery_hints(
+            "Stopping daemon",
+            &["Force stop: systemctl --user stop malbox"],
+        );
+        renderer.add_recovery_hints(
+            "Installing malbox binaries",
+            &["Re-run `malbox daemon upgrade` to retry"],
+        );
+        renderer.add_recovery_hints(
+            "Installing front-end assets",
+            &["Re-run `malbox daemon upgrade` to retry"],
+        );
+        renderer.add_recovery_hints(
+            "Setting up PostgreSQL",
+            &["Re-run `malbox daemon upgrade` to retry"],
+        );
+        renderer.add_recovery_hints(
+            "Starting upgraded daemon",
+            &["Start manually: systemctl --user start malbox"],
+        );
 
         match malbox_installer::upgrade::run(&upgrade_config, &github, &manifest_path, &renderer)
             .await

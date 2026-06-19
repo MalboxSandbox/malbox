@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use console::{Style, Term};
 
 pub struct Brand;
@@ -123,6 +123,31 @@ pub fn brand_header() {
 pub fn section_header(title: &str) {
     let accent = Brand::accent();
     println!("\n  {}", accent.apply_to(title));
+}
+
+pub fn section_divider(title: &str) {
+    if Term::stderr().is_term() {
+        let dim = Brand::dim();
+        let width = terminal_width().min(56);
+        let used = 2 + 3 + title.len() + 1;
+        let suffix_len = width.saturating_sub(used).max(3);
+        eprintln!();
+        eprintln!(
+            "  {}",
+            dim.apply_to(format!(
+                "\u{2500}\u{2500} {} {}",
+                title,
+                "\u{2500}".repeat(suffix_len),
+            ))
+        );
+        eprintln!();
+    } else {
+        eprintln!("[{}] --- {} ---", timestamp_hms(), title);
+    }
+}
+
+pub fn timestamp_hms() -> String {
+    Local::now().format("%H:%M:%S").to_string()
 }
 
 fn pad_ansi(s: &str, width: usize) -> String {
@@ -354,6 +379,49 @@ pub fn bytes(size: i64) -> String {
     }
 }
 
+pub fn malbox_theme() -> dialoguer::theme::ColorfulTheme {
+    dialoguer::theme::ColorfulTheme {
+        defaults_style: Style::new().for_stderr().color256(245),
+        prompt_style: Style::new().for_stderr().bold(),
+        prompt_prefix: console::style("  \u{203a}".to_string())
+            .for_stderr()
+            .color256(63),
+        prompt_suffix: console::style("\u{2500}".to_string())
+            .for_stderr()
+            .color256(237),
+        success_prefix: console::style("  \u{203a}".to_string())
+            .for_stderr()
+            .color256(245),
+        success_suffix: console::style("\u{2500}".to_string())
+            .for_stderr()
+            .color256(237),
+        error_prefix: console::style("  \u{2718}".to_string())
+            .for_stderr()
+            .color256(196),
+        error_style: Style::new().for_stderr().color256(196),
+        hint_style: Style::new().for_stderr().color256(245),
+        values_style: Style::new().for_stderr().color256(63),
+        active_item_style: Style::new().for_stderr().color256(63),
+        inactive_item_style: Style::new().for_stderr().color256(245),
+        active_item_prefix: console::style("    \u{276f}".to_string())
+            .for_stderr()
+            .color256(63),
+        inactive_item_prefix: console::style("     ".to_string()).for_stderr(),
+        checked_item_prefix: console::style("    \u{25cf}".to_string())
+            .for_stderr()
+            .color256(63),
+        unchecked_item_prefix: console::style("    \u{25cb}".to_string())
+            .for_stderr()
+            .color256(237),
+        picked_item_prefix: console::style("    \u{276f}".to_string())
+            .for_stderr()
+            .color256(63),
+        unpicked_item_prefix: console::style("     ".to_string()).for_stderr(),
+        fuzzy_cursor_style: Style::new().for_stderr().color256(231).on_color256(63),
+        fuzzy_match_highlight_style: Style::new().for_stderr().bold().color256(63),
+    }
+}
+
 pub fn confirm(prompt: &str, skip: bool) -> bool {
     if skip {
         return true;
@@ -361,7 +429,8 @@ pub fn confirm(prompt: &str, skip: bool) -> bool {
     if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         return true;
     }
-    dialoguer::Confirm::new()
+    let theme = malbox_theme();
+    dialoguer::Confirm::with_theme(&theme)
         .with_prompt(prompt)
         .default(false)
         .interact()
@@ -375,7 +444,8 @@ pub fn fuzzy_select(prompt: &str, items: &[String]) -> Option<usize> {
     if items.is_empty() {
         return None;
     }
-    dialoguer::FuzzySelect::new()
+    let theme = malbox_theme();
+    dialoguer::FuzzySelect::with_theme(&theme)
         .with_prompt(prompt)
         .items(items)
         .interact_opt()

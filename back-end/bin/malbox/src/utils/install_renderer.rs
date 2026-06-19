@@ -1,7 +1,7 @@
 use console::{Style, Term};
-use malbox_cli_common::utils::format::Brand;
+use malbox_cli_common::utils::format::{Brand, timestamp_hms};
 use malbox_installer::progress::ProgressObserver;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -35,6 +35,8 @@ struct RendererState {
     error_lines: Vec<String>,
     rendered_lines: usize,
     step_start: Option<Instant>,
+    recovery_hints: HashMap<String, Vec<String>>,
+    last_nontty_pct: usize,
 }
 
 pub struct InstallRenderer {
@@ -61,6 +63,8 @@ impl InstallRenderer {
                 error_lines: Vec::new(),
                 rendered_lines: 0,
                 step_start: None,
+                recovery_hints: HashMap::new(),
+                last_nontty_pct: 0,
             }),
         }
     }
@@ -181,6 +185,19 @@ impl InstallRenderer {
                             dim.apply_to(err_line),
                         ));
                     }
+
+                    if let Some(hints) = state.recovery_hints.get(&step.label)
+                        && !hints.is_empty()
+                    {
+                        lines.push(format!("    {}", border_dim.apply_to("\u{2502}"),));
+                        for hint in hints {
+                            lines.push(format!(
+                                "    {} {}",
+                                border_dim.apply_to("\u{2502}"),
+                                dim.apply_to(format!("Hint: {hint}")),
+                            ));
+                        }
+                    }
                 }
                 StepStatus::Pending => {
                     lines.push(format!(
@@ -211,28 +228,56 @@ impl InstallRenderer {
         stderr.flush().ok();
     }
 
-    fn render_non_tty(step: &str, msg: &str) {
-        eprintln!("[{step}] {msg}");
+    fn step_pos(steps: &[Step], label: &str) -> (usize, usize) {
+        let total = steps.len();
+        let idx = steps.iter().position(|s| s.label == label).unwrap_or(0);
+        (idx, total)
+    }
+
+    fn render_non_tty(idx: usize, total: usize, step: &str, status: &str) {
+        eprintln!(
+            "[{}] [{}/{}] {}... {}",
+            timestamp_hms(),
+            idx + 1,
+            total,
+            step,
+            status,
+        );
+    }
+
+    fn render_non_tty_detail(msg: &str) {
+        eprintln!("[{}]       {}", timestamp_hms(), msg);
     }
 
     fn count_lines(&self, state: &RendererState) -> usize {
         let mut count = 0;
         for step in &state.steps {
-            count += 1; // step line
+            count += 1;
             match &step.status {
                 StepStatus::Active => {
                     if state.progress.as_ref().is_some_and(|(_, t, _)| *t > 0) {
-                        count += 1; // progress bar
+                        count += 1;
                     }
                     count += state.log_tail.len();
                 }
                 StepStatus::Failed { .. } => {
                     count += state.error_lines.len();
+                    if let Some(hints) = state.recovery_hints.get(&step.label)
+                        && !hints.is_empty()
+                    {
+                        count += 1 + hints.len();
+                    }
                 }
                 _ => {}
             }
         }
         count
+    }
+
+    pub fn add_recovery_hints(&self, step: &str, hints: &[&str]) {
+        let mut state = self.state.lock().unwrap();
+        let entry = state.recovery_hints.entry(step.to_string()).or_default();
+        entry.extend(hints.iter().map(|s| s.to_string()));
     }
 
     pub fn add_pending_steps(&self, steps: &[&str]) {
@@ -253,11 +298,11 @@ impl InstallRenderer {
 
     pub fn finish_line(&self, msg: &str) {
         if self.is_tty {
-            let success = Brand::success();
+            let accent = Brand::accent();
             eprintln!();
-            eprintln!("  {} {}", success.apply_to("\u{2713}"), msg);
+            eprintln!("  {}", accent.bold().apply_to(msg));
         } else {
-            eprintln!("[done] {msg}");
+            Self::render_non_tty_detail(&format!("Done: {msg}"));
         }
     }
 }
@@ -269,6 +314,7 @@ impl ProgressObserver for InstallRenderer {
         state.progress = None;
         state.error_lines.clear();
         state.step_start = Some(Instant::now());
+        state.last_nontty_pct = 0;
 
         if let Some(s) = state.steps.iter_mut().find(|s| s.label == step) {
             s.status = StepStatus::Active;
@@ -283,7 +329,8 @@ impl ProgressObserver for InstallRenderer {
             self.render(&state);
             state.rendered_lines = self.count_lines(&state);
         } else {
-            Self::render_non_tty(step, "started");
+            let (idx, total) = Self::step_pos(&state.steps, step);
+            Self::render_non_tty(idx, total, step, "started");
         }
     }
 
@@ -306,12 +353,20 @@ impl ProgressObserver for InstallRenderer {
             self.render(&state);
             state.rendered_lines = self.count_lines(&state);
         } else {
-            let msg = if detail.is_empty() {
+            let (idx, total) = Self::step_pos(&state.steps, step);
+            let mut parts = Vec::new();
+            if !detail.is_empty() {
+                parts.push(detail.to_string());
+            }
+            if let Some(secs) = elapsed {
+                parts.push(format_elapsed(secs));
+            }
+            let msg = if parts.is_empty() {
                 "done".to_string()
             } else {
-                format!("done ({detail})")
+                format!("done ({})", parts.join(", "))
             };
-            Self::render_non_tty(step, &msg);
+            Self::render_non_tty(idx, total, step, &msg);
         }
     }
 
@@ -335,6 +390,8 @@ impl ProgressObserver for InstallRenderer {
             };
         }
 
+        let pos = Self::step_pos(&state.steps, step);
+
         state
             .steps
             .retain(|s| !matches!(s.status, StepStatus::Pending));
@@ -343,7 +400,13 @@ impl ProgressObserver for InstallRenderer {
             self.render(&state);
             state.rendered_lines = self.count_lines(&state);
         } else {
-            Self::render_non_tty(step, &format!("FAILED: {error}"));
+            let (idx, total) = pos;
+            Self::render_non_tty(idx, total, step, &format!("FAILED: {error}"));
+            if let Some(hints) = state.recovery_hints.get(step) {
+                for hint in hints {
+                    Self::render_non_tty_detail(&format!("Hint: {hint}"));
+                }
+            }
         }
     }
 
@@ -354,6 +417,14 @@ impl ProgressObserver for InstallRenderer {
         if self.is_tty {
             self.render(&state);
             state.rendered_lines = self.count_lines(&state);
+        } else if let Some(pct) = (compiled * 100).checked_div(total) {
+            let threshold = (pct / 25) * 25;
+            if threshold > state.last_nontty_pct || compiled >= total {
+                state.last_nontty_pct = threshold;
+                Self::render_non_tty_detail(&format!(
+                    "{compiled}/{total} crates ({pct}%) - {crate_name}",
+                ));
+            }
         }
     }
 
@@ -372,14 +443,28 @@ impl ProgressObserver for InstallRenderer {
 
     fn download_progress(&self, done: u64, total: Option<u64>, label: &str) {
         let mut state = self.state.lock().unwrap();
-        if let Some(total) = total.filter(|&t| t > 0) {
-            let clamped = done.min(total);
-            state.progress = Some((clamped as usize, total as usize, label.to_string()));
-        }
+        let byte_info = if let Some(total_bytes) = total.filter(|&t| t > 0) {
+            let clamped = done.min(total_bytes);
+            state.progress = Some((clamped as usize, total_bytes as usize, label.to_string()));
+            Some((clamped, total_bytes))
+        } else {
+            None
+        };
 
         if self.is_tty {
             self.render(&state);
             state.rendered_lines = self.count_lines(&state);
+        } else if let Some((clamped, total_bytes)) = byte_info {
+            let pct = ((clamped * 100) / total_bytes) as usize;
+            let threshold = (pct / 25) * 25;
+            if threshold > state.last_nontty_pct || clamped >= total_bytes {
+                state.last_nontty_pct = threshold;
+                Self::render_non_tty_detail(&format!(
+                    "{} / {} ({pct}%)",
+                    format_bytes(clamped),
+                    format_bytes(total_bytes),
+                ));
+            }
         }
     }
 }
@@ -391,5 +476,20 @@ fn format_elapsed(secs: f64) -> String {
         let mins = (secs / 60.0).floor() as u64;
         let remaining = secs - (mins as f64 * 60.0);
         format!("{mins}m{:.0}s", remaining)
+    }
+}
+
+fn format_bytes(n: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
+    let mut value = n as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{n} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }

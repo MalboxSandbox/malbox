@@ -111,6 +111,18 @@ pub(crate) async fn rebuild_daemon(features: &[String]) -> Result<()> {
         "Installing malbox binaries",
         "Starting rebuilt daemon",
     ]);
+    renderer.add_recovery_hints(
+        "Stopping daemon",
+        &["Force stop: systemctl --user stop malbox"],
+    );
+    renderer.add_recovery_hints(
+        "Installing malbox binaries",
+        &["Re-run `malbox daemon provider rebuild` to retry"],
+    );
+    renderer.add_recovery_hints(
+        "Starting rebuilt daemon",
+        &["Start manually: systemctl --user start malbox"],
+    );
 
     let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
         .map_err(|e| CliError::CommandFailed(e.to_string()))?;
