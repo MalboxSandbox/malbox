@@ -1,4 +1,4 @@
-use crate::http::AppState;
+use crate::http::{AppState, Result};
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -7,7 +7,9 @@ use axum::{
     routing::get,
 };
 use malbox_database::PgPool;
-use malbox_plugin_internal::registry::manifest::PluginTypeConfig;
+use malbox_plugin_internal::registry::manifest::{
+    ExecutionContextConfig, PluginStateConfig, PluginTypeConfig,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -28,9 +30,9 @@ struct PluginInfo {
     name: String,
     version: String,
     description: Option<String>,
-    plugin_type: String,
-    state: String,
-    execution: String,
+    plugin_type: PluginTypeConfig,
+    state: PluginStateConfig,
+    execution: ExecutionContextConfig,
     binary_path: String,
     plugin_dir: String,
     status: String,
@@ -46,7 +48,7 @@ struct HostPluginInfo {
     name: String,
     version: String,
     description: Option<String>,
-    execution: String,
+    execution: ExecutionContextConfig,
 }
 
 #[derive(Serialize)]
@@ -54,7 +56,7 @@ struct GuestPluginInfo {
     name: String,
     version: String,
     description: Option<String>,
-    execution: String,
+    execution: ExecutionContextConfig,
     provisioned: bool,
     snapshot_ids: Vec<Uuid>,
 }
@@ -88,9 +90,9 @@ async fn list_plugins(
             name: e.manifest.plugin.name.clone(),
             version: e.manifest.plugin.version.clone(),
             description: e.manifest.plugin.description.clone(),
-            plugin_type: format!("{:?}", e.manifest.plugin.plugin_type).to_lowercase(),
-            state: format!("{:?}", e.manifest.runtime.state).to_lowercase(),
-            execution: format!("{:?}", e.manifest.runtime.execution).to_lowercase(),
+            plugin_type: e.manifest.plugin.plugin_type,
+            state: e.manifest.runtime.state,
+            execution: e.manifest.runtime.execution,
             binary_path: e.binary_path.to_string_lossy().to_string(),
             plugin_dir: e.plugin_dir.to_string_lossy().to_string(),
             status: e.status.to_string(),
@@ -103,7 +105,7 @@ async fn list_plugins(
 async fn available_plugins(
     State(state): State<AppState>,
     Query(query): Query<AvailablePluginsQuery>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse> {
     let registry_snapshot = state.plugin_registry.snapshot();
 
     let host: Vec<HostPluginInfo> = registry_snapshot
@@ -113,21 +115,12 @@ async fn available_plugins(
             name: e.manifest.plugin.name.clone(),
             version: e.manifest.plugin.version.clone(),
             description: e.manifest.plugin.description.clone(),
-            execution: format!("{:?}", e.manifest.runtime.execution).to_lowercase(),
+            execution: e.manifest.runtime.execution,
         })
         .collect();
 
     let provisioned_map: std::collections::HashMap<String, Vec<Uuid>> =
-        match fetch_provisioned_guest_plugins(&state.pool, query.platform.as_deref()).await {
-            Ok(m) => m,
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": e.to_string()})),
-                )
-                    .into_response();
-            }
-        };
+        fetch_provisioned_guest_plugins(&state.pool, query.platform.as_deref()).await?;
 
     let guest: Vec<GuestPluginInfo> = registry_snapshot
         .by_type(PluginTypeConfig::Guest)
@@ -142,18 +135,14 @@ async fn available_plugins(
                 name: name.clone(),
                 version: e.manifest.plugin.version.clone(),
                 description: e.manifest.plugin.description.clone(),
-                execution: format!("{:?}", e.manifest.runtime.execution).to_lowercase(),
+                execution: e.manifest.runtime.execution,
                 provisioned: !snapshot_ids.is_empty(),
                 snapshot_ids,
             }
         })
         .collect();
 
-    (
-        StatusCode::OK,
-        Json(AvailablePluginsResponse { host, guest }),
-    )
-        .into_response()
+    Ok(Json(AvailablePluginsResponse { host, guest }))
 }
 
 async fn fetch_provisioned_guest_plugins(

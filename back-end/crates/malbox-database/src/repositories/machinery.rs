@@ -23,6 +23,29 @@ pub enum MachinePlatform {
     Linux,
 }
 
+impl MachinePlatform {
+    /// Canonical lowercase wire name. Matches the `machine_platform` SQL enum
+    /// and the front-end `Platform` union.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MachinePlatform::Windows => "windows",
+            MachinePlatform::Linux => "linux",
+        }
+    }
+}
+
+impl std::str::FromStr for MachinePlatform {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "windows" => Ok(MachinePlatform::Windows),
+            "linux" => Ok(MachinePlatform::Linux),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "machine_status", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
