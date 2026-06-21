@@ -39,9 +39,12 @@ struct PaginatedResponse {
     has_more: bool,
 }
 
+/// Opaque keyset cursor. `ts` is serialized via `time`'s default serde
+/// representation (a component array) so it round-trips exactly; the cursor is
+/// base64'd JSON and never parsed as a human-readable string.
 #[derive(Serialize, Deserialize)]
 struct Cursor {
-    ts: String,
+    ts: PrimitiveDateTime,
     id: i32,
 }
 
@@ -87,7 +90,7 @@ fn decode_cursor(encoded: &str) -> Option<Cursor> {
 
 fn encode_cursor(task: &Task) -> String {
     let cursor = Cursor {
-        ts: task.created_on.to_string(),
+        ts: task.created_on,
         id: task.id.unwrap_or_default(),
     };
     let json = serde_json::to_vec(&cursor).unwrap_or_default();
