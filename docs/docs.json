@@ -135,7 +135,11 @@
     "footer": {
         "socials": {
             "x": "https://x.com/malbox_sandbox",
-            "github": "https://github.com/DualHorizon/malbox/"
+            "github": "https://github.com/MalboxSandbox/malbox"
         }
-    }
+    },
+    "background": {
+      "decoration": "windows"
+    },
+    "description": "Documentation website for Malbox, the extensible, open-source solution for automated file sandboxing and analysis written in Rust."
 }

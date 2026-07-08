@@ -6,9 +6,9 @@ keywords: ["install", "setup", "automatic", "bootstrap", "curl"]
 
 ## Prerequisites
 
-- A **Linux** host (x86_64 or aarch64)
+- A **Linux** host (x86\_64 or aarch64)
 - **curl** installed
-- **PostgreSQL 16+** installed and running (or let the installer manage one for you)
+- **PostgreSQL 16\+** installed and running (or let the installer manage one for you)
 
 <Note>
   Malbox does not support macOS or Windows hosts directly. Use WSL2 on Windows.
@@ -21,25 +21,25 @@ The bootstrap script downloads the `malbox` binary to `~/.local/bin` and verifie
 <Tabs>
   <Tab title="bash / zsh">
     ```bash
-    bash <(curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh)
+    bash <(curl -sSfL https://raw.githubusercontent.com/MalboxSandbox/malbox/dev/back-end/scripts/install.sh)
     ```
   </Tab>
   <Tab title="fish">
     ```fish
-    bash (curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh | psub)
+    bash (curl -sSfL https://raw.githubusercontent.com/MalboxSandbox/malbox/dev/back-end/scripts/install.sh | psub)
     ```
   </Tab>
   <Tab title="non-interactive">
     Piping into bash disables interactive prompts. Set the channel via an environment variable instead:
 
     ```bash
-    MALBOX_CHANNEL=nightly curl -sSfL https://raw.githubusercontent.com/DualHorizon/malbox/dev/back-end/scripts/install.sh | bash
+    MALBOX_CHANNEL=nightly curl -sSfL https://raw.githubusercontent.com/MalboxSandbox/malbox/dev/back-end/scripts/install.sh | bash
     ```
   </Tab>
 </Tabs>
 
 | Variable | Values | Default | Description |
-|----------|--------|---------|-------------|
+| --- | --- | --- | --- |
 | `MALBOX_CHANNEL` | `stable`, `nightly` | `stable` | Release channel to download from |
 | `MALBOX_FORCE` | `1` | - | Overwrite an existing binary without prompting |
 
@@ -64,12 +64,10 @@ The installer walks you through each step:
     Choose between **stable** (recommended) and **nightly** builds.
   </Step>
   <Step title="Daemon source">
-    Download a prebuilt binary or compile from source. Compiling from source lets you choose
-    exactly which virtualization providers and machine provisioners to include.
+    Download a prebuilt binary or compile from source. Compiling from source lets you choose exactly which virtualization providers and machine provisioners to include.
   </Step>
   <Step title="PostgreSQL setup">
-    Connect to an existing PostgreSQL server or let Malbox set up a managed instance.
-    The installer validates the connection before continuing.
+    Connect to an existing PostgreSQL server or let Malbox set up a managed instance. The installer validates the connection before continuing.
   </Step>
   <Step title="Systemd service">
     Optionally install a systemd user service so the daemon starts automatically.
@@ -111,7 +109,7 @@ The daemon serves the HTTP API on `http://127.0.0.1:8080` by default.
 ## What gets installed
 
 | Component | Default path |
-|-----------|-------------|
+| --- | --- |
 | Daemon binary (`malboxd`) | `~/.local/bin/malboxd` |
 | CLI binary (`malbox`) | `~/.local/bin/malbox` |
 | Front-end assets | `~/.local/share/malbox/web` |

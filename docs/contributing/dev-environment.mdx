@@ -14,7 +14,7 @@ Before you begin, make sure you have the following installed:
 ## Clone and enter the environment
 
 ```bash
-git clone https://github.com/DualHorizon/malbox.git
+git clone https://github.com/MalboxSandbox/malbox.git
 cd malbox
 ```
 
@@ -29,7 +29,7 @@ This automatically sets up:
 - Rust stable toolchain (rustc, cargo, clippy, rustfmt, rust-analyzer)
 - PostgreSQL 16
 - Node.js and pnpm
-- C/C++ build tools (cmake, gcc, clang 18)
+- C/C\+\+ build tools (cmake, gcc, clang 18)
 - Windows cross-compilation toolchain (MinGW)
 - Infrastructure tools (packer, ansible)
 - Protobuf compiler and codegen tools
@@ -62,13 +62,13 @@ This initializes the data directory, starts PostgreSQL, and creates the `malbox_
 
 The `DATABASE_URL` environment variable is set for you automatically by the flake:
 
-| Setting      | Value                                          |
-| ------------ | ---------------------------------------------- |
-| Host         | `127.0.0.1`                                    |
-| Port         | `5432`                                         |
-| Database     | `malbox_db`                                    |
-| User         | `postgres`                                     |
-| DATABASE_URL | `postgres://postgres@localhost:5432/malbox_db` |
+| Setting | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port | `5432` |
+| Database | `malbox_db` |
+| User | `postgres` |
+| DATABASE\_URL | `postgres://postgres@localhost:5432/malbox_db` |
 
 To run pending database migrations:
 

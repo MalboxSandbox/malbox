@@ -8,17 +8,17 @@ Use the manual install when you need full control over the build, want to run on
 
 ## Prerequisites
 
-- A **Linux** host (x86_64 or aarch64)
-- **Rust** toolchain (1.85+) via [rustup](https://rustup.rs/)
-- **PostgreSQL 16+** installed and reachable
-- **Node.js 20+** and **pnpm 11+** (for the front-end)
+- A **Linux** host (x86\_64 or aarch64)
+- **Rust** toolchain (1.85\+) via [rustup](https://rustup.rs/)
+- **PostgreSQL 16\+** installed and reachable
+- **Node.js 20\+** and **pnpm 11\+** (for the front-end)
 - Build essentials: `gcc`, `make`, `pkg-config`
 - **Nix** (optional but recommended) - the project flake provides all dependencies automatically. See [dev environment](/contributing/dev-environment).
 
 ## Clone the repository
 
 ```bash
-git clone https://github.com/DualHorizon/malbox.git
+git clone https://github.com/MalboxSandbox/malbox.git
 cd malbox
 ```
 
@@ -75,7 +75,7 @@ SQLX_OFFLINE=true cargo build --release -p malboxd \
 Available features:
 
 | Feature | Description |
-|---------|-------------|
+| --- | --- |
 | `provider-libvirt` | KVM/QEMU via libvirt |
 | `provisioner-ansible` | Machine provisioning with Ansible |
 
@@ -180,8 +180,7 @@ systemctl --user enable --now malbox
 ```
 
 <Tip>
-  If you want the service to keep running after you log out, enable lingering:
-  `loginctl enable-linger`
+  If you want the service to keep running after you log out, enable lingering: `loginctl enable-linger`
 </Tip>
 
 ## Upgrading manually
