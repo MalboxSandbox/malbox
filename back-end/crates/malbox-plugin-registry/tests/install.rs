@@ -62,6 +62,9 @@ fn soft_deps_all_present() {
             asset: None,
             checksum: None,
             installed_at: "2026-06-07T12:00:00Z".into(),
+            pin: malbox_plugin_registry::lockfile::PinKind::Release,
+            commit: None,
+            path: None,
         },
     );
     let lockfile = Lockfile {

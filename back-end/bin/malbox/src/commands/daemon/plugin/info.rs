@@ -84,12 +84,19 @@ impl Command for InfoCommand {
         if let Some(installed) = lockfile.plugins.get(&self.name) {
             found = true;
             println!();
-            println!("  Installed:     v{}", installed.version);
+            println!(
+                "  Installed:     {}",
+                installed.pin.label(&installed.version)
+            );
+            if let Some(ref commit) = installed.commit {
+                println!("  Commit:        {}", commit);
+            }
             println!("  Install date:  {}", installed.installed_at);
 
             let source = match installed.source {
                 malbox_plugin_registry::lockfile::InstallSource::Registry => "registry",
                 malbox_plugin_registry::lockfile::InstallSource::Direct => "direct",
+                malbox_plugin_registry::lockfile::InstallSource::Local => "local",
             };
             println!("  Source:        {}", source);
         }

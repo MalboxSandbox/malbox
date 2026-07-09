@@ -1,4 +1,6 @@
-use malbox_plugin_registry::lockfile::{InstallMethod, InstallSource, LockedPlugin, Lockfile};
+use malbox_plugin_registry::lockfile::{
+    InstallMethod, InstallSource, LockedPlugin, Lockfile, PinKind,
+};
 use malbox_plugin_registry::remove::remove_plugin;
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -23,6 +25,9 @@ fn remove_tracked_plugin() {
             asset: None,
             checksum: None,
             installed_at: "2026-06-07T12:00:00Z".into(),
+            pin: PinKind::Release,
+            commit: None,
+            path: None,
         },
     );
     let lockfile = Lockfile {

@@ -38,6 +38,26 @@ pub async fn resolve_plugin(
     platform: &Platform,
     strategy: RequestedStrategy,
 ) -> Result<ResolvedPlugin> {
+    if let SpecifierSource::Local { path } = &specifier.source {
+        let manifest_path = path.join("plugin.toml");
+        if !manifest_path.exists() {
+            return Err(RegistryError::InvalidPlugin {
+                path: path.clone(),
+                reason: "plugin.toml not found".into(),
+            });
+        }
+        let manifest = malbox_plugin_manifest::parse_manifest(&manifest_path)?;
+        return Ok(ResolvedPlugin {
+            name: manifest.plugin.name.clone(),
+            version: manifest.plugin.version.clone(),
+            repository: String::new(),
+            source: InstallSource::Local,
+            metadata: None,
+            strategy: InstallStrategy::Local { path: path.clone() },
+            pin: crate::lockfile::PinKind::Local,
+        });
+    }
+
     let (owner, repo, metadata) = match &specifier.source {
         SpecifierSource::Registry => {
             let index = registry_client.fetch_index().await?;
@@ -56,54 +76,85 @@ pub async fn resolve_plugin(
             (owner.to_string(), repo.to_string(), Some(meta))
         }
         SpecifierSource::Direct { owner, repo } => (owner.clone(), repo.clone(), None),
-    };
-
-    let gh = GitHubClient::new(&owner, &repo)?;
-
-    let release = if let Some(ref version) = specifier.version {
-        gh.release_for_version(version).await?
-    } else {
-        gh.latest_release(malbox_installer::Channel::Nightly)
-            .await?
+        SpecifierSource::Local { .. } => unreachable!("local handled above"),
     };
 
     let source = match &specifier.source {
         SpecifierSource::Registry => InstallSource::Registry,
         SpecifierSource::Direct { .. } => InstallSource::Direct,
+        SpecifierSource::Local { .. } => unreachable!("local handled above"),
     };
 
     let clone_url = format!("https://github.com/{owner}/{repo}.git");
 
-    let install_strategy = match strategy {
-        RequestedStrategy::SourceOnly => InstallStrategy::Source {
-            clone_url,
-            git_ref: release.tag_name.clone(),
-        },
-        RequestedStrategy::PrebuiltOnly => {
-            let asset = find_matching_asset(&release, &specifier.name, platform)
-                .ok_or_else(|| RegistryError::NoPlatformAsset {
-                    plugin: specifier.name.clone(),
-                    platform: platform.asset_suffix(),
-                })?
-                .clone();
-            InstallStrategy::Prebuilt { release, asset }
-        }
-        RequestedStrategy::PrebuiltWithFallback => {
-            match find_matching_asset(&release, &specifier.name, platform).cloned() {
-                Some(asset) => InstallStrategy::Prebuilt { release, asset },
-                None => InstallStrategy::Source {
+    use crate::lockfile::PinKind;
+    use crate::resolve::{RefSelector, SourceRef};
+
+    let (install_strategy, version, pin) = match &specifier.selector {
+        RefSelector::Branch(name) => (
+            InstallStrategy::Source {
+                clone_url,
+                source_ref: SourceRef::Named(name.clone()),
+            },
+            name.clone(),
+            PinKind::Branch { name: name.clone() },
+        ),
+        RefSelector::Commit(sha) => (
+            InstallStrategy::Source {
+                clone_url,
+                source_ref: SourceRef::Commit(sha.clone()),
+            },
+            sha.clone(),
+            PinKind::Commit,
+        ),
+        RefSelector::LatestRelease | RefSelector::Release(_) => {
+            let gh = GitHubClient::new(&owner, &repo)?;
+            let release = match &specifier.selector {
+                RefSelector::Release(v) => gh.release_for_version(v).await?,
+                _ => {
+                    gh.latest_release(malbox_installer::Channel::Nightly)
+                        .await?
+                }
+            };
+
+            let strat = match strategy {
+                RequestedStrategy::SourceOnly => InstallStrategy::Source {
                     clone_url,
-                    git_ref: release.tag_name.clone(),
+                    source_ref: SourceRef::Named(release.tag_name.clone()),
                 },
-            }
+                RequestedStrategy::PrebuiltOnly => {
+                    let asset = find_matching_asset(&release, &specifier.name, platform)
+                        .ok_or_else(|| RegistryError::NoPlatformAsset {
+                            plugin: specifier.name.clone(),
+                            platform: platform.asset_suffix(),
+                        })?
+                        .clone();
+                    InstallStrategy::Prebuilt { release, asset }
+                }
+                RequestedStrategy::PrebuiltWithFallback => {
+                    match find_matching_asset(&release, &specifier.name, platform).cloned() {
+                        Some(asset) => InstallStrategy::Prebuilt { release, asset },
+                        None => InstallStrategy::Source {
+                            clone_url,
+                            source_ref: SourceRef::Named(release.tag_name.clone()),
+                        },
+                    }
+                }
+            };
+
+            let version = malbox_installer::github::Release::version_from_tag(match &strat {
+                InstallStrategy::Prebuilt { release, .. } => release.tag_name.as_str(),
+                InstallStrategy::Source { source_ref, .. } => match source_ref {
+                    SourceRef::Named(r) => r.as_str(),
+                    SourceRef::Commit(c) => c.as_str(),
+                },
+                InstallStrategy::Local { .. } => unreachable!("local handled above"),
+            })
+            .to_string();
+
+            (strat, version, PinKind::Release)
         }
     };
-
-    let version = malbox_installer::github::Release::version_from_tag(match &install_strategy {
-        InstallStrategy::Prebuilt { release, .. } => &release.tag_name,
-        InstallStrategy::Source { git_ref, .. } => git_ref,
-    })
-    .to_string();
 
     Ok(ResolvedPlugin {
         name: specifier.name.clone(),
@@ -112,6 +163,7 @@ pub async fn resolve_plugin(
         source,
         metadata,
         strategy: install_strategy,
+        pin,
     })
 }
 
@@ -126,7 +178,14 @@ pub async fn install_resolved_plugin(
         return Err(RegistryError::AlreadyInstalled(resolved.name.clone()));
     }
 
-    let (plugin_type, plugin_dir) = match &resolved.strategy {
+    let pin = resolved.pin.clone();
+
+    let local_path = match &resolved.strategy {
+        InstallStrategy::Local { path } => Some(path.to_string_lossy().to_string()),
+        _ => None,
+    };
+
+    let (plugin_type, plugin_dir, commit) = match &resolved.strategy {
         InstallStrategy::Prebuilt { release, asset } => {
             let (owner, repo) = resolved
                 .repository
@@ -167,18 +226,30 @@ pub async fn install_resolved_plugin(
             observer.step_started("Installing to plugins directory");
             observer.step_completed("Installing to plugins directory", "");
 
-            (ptype, dest)
+            (ptype, dest, None)
         }
-        InstallStrategy::Source { clone_url, git_ref } => {
+        InstallStrategy::Source {
+            clone_url,
+            source_ref,
+        } => {
             let outcome = source::build_from_source(
                 clone_url,
-                git_ref,
+                source_ref,
                 &resolved.name,
                 plugins_dir,
                 observer,
             )
             .await?;
-            (outcome.plugin_type, outcome.plugin_dir)
+            (
+                outcome.plugin_type,
+                outcome.plugin_dir,
+                Some(outcome.commit),
+            )
+        }
+        InstallStrategy::Local { path } => {
+            let (plugin_type, plugin_dir) =
+                source::install_from_local(path, &resolved.name, plugins_dir, observer).await?;
+            (plugin_type, plugin_dir, None)
         }
     };
 
@@ -188,11 +259,13 @@ pub async fn install_resolved_plugin(
     let install_method = match &resolved.strategy {
         InstallStrategy::Prebuilt { .. } => InstallMethod::Prebuilt,
         InstallStrategy::Source { .. } => InstallMethod::Source,
+        InstallStrategy::Local { .. } => InstallMethod::Source,
     };
 
     let (asset_name, checksum) = match &resolved.strategy {
         InstallStrategy::Prebuilt { asset, .. } => (Some(asset.name.clone()), None),
         InstallStrategy::Source { .. } => (None, None),
+        InstallStrategy::Local { .. } => (None, None),
     };
 
     lockfile.plugins.insert(
@@ -205,6 +278,9 @@ pub async fn install_resolved_plugin(
             asset: asset_name,
             checksum,
             installed_at: chrono::Utc::now().to_rfc3339(),
+            pin,
+            commit,
+            path: local_path,
         },
     );
     lockfile.write(&lockfile_path)?;

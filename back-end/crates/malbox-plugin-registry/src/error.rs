@@ -23,6 +23,9 @@ pub enum RegistryError {
     )]
     InvalidSpecifier(String),
 
+    #[error("conflicting version selectors: {0}")]
+    ConflictingSelectors(String),
+
     #[error("lockfile error: {0}")]
     Lockfile(String),
 

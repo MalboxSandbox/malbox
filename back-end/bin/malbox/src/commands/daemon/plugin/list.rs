@@ -27,7 +27,7 @@ impl Command for ListCommand {
         }
 
         println!(
-            "  {:<20} {:<10} {:<8} {:<12} SOURCE",
+            "  {:<20} {:<22} {:<8} {:<12} SOURCE",
             "NAME", "VERSION", "TYPE", "STATUS"
         );
 
@@ -44,11 +44,16 @@ impl Command for ListCommand {
             let source = match plugin.source {
                 malbox_plugin_registry::lockfile::InstallSource::Registry => "registry",
                 malbox_plugin_registry::lockfile::InstallSource::Direct => "direct",
+                malbox_plugin_registry::lockfile::InstallSource::Local => "local",
             };
 
             println!(
-                "  {:<20} {:<10} {:<8} {:<12} {}",
-                name, plugin.version, plugin_type, "tracked", source
+                "  {:<20} {:<22} {:<8} {:<12} {}",
+                name,
+                plugin.pin.label(&plugin.version),
+                plugin_type,
+                "tracked",
+                source
             );
         }
 
@@ -62,7 +67,7 @@ impl Command for ListCommand {
                 .unwrap_or_else(|_| "?".into());
 
             println!(
-                "  {:<20} {:<10} {:<8} {:<12} \u{2014}",
+                "  {:<20} {:<22} {:<8} {:<12} \u{2014}",
                 name, version, plugin_type, "untracked"
             );
         }

@@ -24,7 +24,7 @@ impl Command for RemoveCommand {
         let version = lockfile
             .plugins
             .get(&self.name)
-            .map(|p| format!(" v{}", p.version))
+            .map(|p| format!(" {}", p.pin.label(&p.version)))
             .unwrap_or_default();
 
         println!("  \u{25b8} Removing {}{}...", self.name, version);

@@ -47,6 +47,25 @@ impl Command for PluginCommand {
     }
 }
 
+/// Interactive yes/no for reinstalling something already present. Unlike the
+/// shared `format::confirm`, a non-interactive terminal defaults to No so a
+/// scripted run never silently rebuilds. Pass `skip = true` (from `--force`/`-y`)
+/// to proceed without asking.
+pub(crate) fn confirm_reinstall(prompt: &str, skip: bool) -> bool {
+    use std::io::IsTerminal;
+    if skip {
+        return true;
+    }
+    if !std::io::stderr().is_terminal() {
+        return false;
+    }
+    dialoguer::Confirm::with_theme(&malbox_cli_common::utils::format::malbox_theme())
+        .with_prompt(prompt)
+        .default(false)
+        .interact()
+        .unwrap_or(false)
+}
+
 pub(crate) async fn load_plugin_config() -> Result<(PluginsConfig, RegistryConfig)> {
     match malbox_config::load_config().await {
         Ok(config) => {

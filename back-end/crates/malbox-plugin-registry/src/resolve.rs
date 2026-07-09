@@ -2,11 +2,28 @@ use crate::error::{RegistryError, Result};
 use crate::index::PluginMetadata;
 use crate::lockfile::InstallSource;
 use malbox_installer::github::{Release, ReleaseAsset};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RefSelector {
+    #[default]
+    LatestRelease,
+    Release(String),
+    Branch(String),
+    Commit(String),
+}
+
+/// How the source build checks out the tree. Mechanism, not intent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceRef {
+    Named(String),  // branch or tag: git clone --depth 1 --branch <ref>
+    Commit(String), // sha: shallow fetch-by-sha then checkout FETCH_HEAD
+}
 
 #[derive(Debug, Clone)]
 pub struct PluginSpecifier {
     pub name: String,
-    pub version: Option<String>,
+    pub selector: RefSelector,
     pub source: SpecifierSource,
 }
 
@@ -14,6 +31,7 @@ pub struct PluginSpecifier {
 pub enum SpecifierSource {
     Registry,
     Direct { owner: String, repo: String },
+    Local { path: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +61,7 @@ pub struct ResolvedPlugin {
     pub source: InstallSource,
     pub metadata: Option<PluginMetadata>,
     pub strategy: InstallStrategy,
+    pub pin: crate::lockfile::PinKind,
 }
 
 #[derive(Debug)]
@@ -53,7 +72,10 @@ pub enum InstallStrategy {
     },
     Source {
         clone_url: String,
-        git_ref: String,
+        source_ref: SourceRef,
+    },
+    Local {
+        path: PathBuf,
     },
 }
 
@@ -68,6 +90,32 @@ pub enum RequestedStrategy {
 pub fn parse_specifier(input: &str) -> Result<PluginSpecifier> {
     if input.is_empty() {
         return Err(RegistryError::InvalidSpecifier(input.to_string()));
+    }
+
+    if input.starts_with('/')
+        || input.starts_with("./")
+        || input.starts_with("../")
+        || input.starts_with('~')
+    {
+        let expanded = if let Some(rest) = input.strip_prefix('~') {
+            match std::env::var("HOME") {
+                Ok(home) => PathBuf::from(home).join(rest.trim_start_matches('/')),
+                Err(_) => PathBuf::from(input),
+            }
+        } else {
+            PathBuf::from(input)
+        };
+        // Placeholder; the canonical name is read from the directory's
+        // plugin.toml during resolution.
+        let name = expanded
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| input.to_string());
+        return Ok(PluginSpecifier {
+            name,
+            selector: RefSelector::LatestRelease,
+            source: SpecifierSource::Local { path: expanded },
+        });
     }
 
     let (name_part, version) = match input.split_once('@') {
@@ -95,11 +143,49 @@ pub fn parse_specifier(input: &str) -> Result<PluginSpecifier> {
         (SpecifierSource::Registry, name_part.to_string())
     };
 
+    let selector = match version {
+        Some(v) => RefSelector::Release(v),
+        None => RefSelector::LatestRelease,
+    };
+
     Ok(PluginSpecifier {
         name,
-        version,
+        selector,
         source,
     })
+}
+
+/// Fold the `--release` / `--branch` / `--rev` flags into a final selector.
+/// clap enforces that at most one flag is set and that `--branch`/`--rev` do
+/// not combine with `--prebuilt`; this function only has to reconcile a flag
+/// with a `name@version` already baked into `parsed`.
+pub fn resolve_selector(
+    parsed: RefSelector,
+    release: Option<String>,
+    branch: Option<String>,
+    rev: Option<String>,
+) -> Result<RefSelector> {
+    let flag = match (release, branch, rev) {
+        (None, None, None) => None,
+        (Some(v), None, None) => Some(RefSelector::Release(v)),
+        (None, Some(b), None) => Some(RefSelector::Branch(b)),
+        (None, None, Some(r)) => Some(RefSelector::Commit(r)),
+        _ => {
+            return Err(RegistryError::ConflictingSelectors(
+                "use only one of --release, --branch, --rev".to_string(),
+            ));
+        }
+    };
+
+    match (parsed, flag) {
+        (parsed, None) => Ok(parsed),
+        (RefSelector::LatestRelease, Some(flag)) => Ok(flag),
+        (RefSelector::Release(_), Some(_)) => Err(RegistryError::ConflictingSelectors(
+            "specify the version with --release or name@version, not both".to_string(),
+        )),
+        // parse_specifier only ever produces LatestRelease or Release.
+        (other, Some(_)) => Ok(other),
+    }
 }
 
 pub fn find_matching_asset<'a>(

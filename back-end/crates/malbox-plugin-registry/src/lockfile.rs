@@ -18,6 +18,12 @@ pub struct LockedPlugin {
     pub asset: Option<String>,
     pub checksum: Option<String>,
     pub installed_at: String,
+    #[serde(default)]
+    pub pin: PinKind,
+    #[serde(default)]
+    pub commit: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +31,7 @@ pub struct LockedPlugin {
 pub enum InstallSource {
     Registry,
     Direct,
+    Local,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,10 +41,44 @@ pub enum InstallMethod {
     Source,
 }
 
+/// What the install tracks. Orthogonal to `InstallMethod` (prebuilt vs
+/// source): a `Release` pin can be either, a `Branch` or `Commit` pin is
+/// always source. Drives update behaviour.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum PinKind {
+    #[default]
+    Release,
+    Branch {
+        name: String,
+    },
+    Commit,
+    Local,
+}
+
+impl PinKind {
+    /// Human label for a tracked ref given the recorded version string:
+    /// Release -> "v1.2.3", Branch -> "branch main", Commit -> "commit 1a2b3c4d5e6f".
+    pub fn label(&self, version: &str) -> String {
+        match self {
+            PinKind::Release => format!("v{version}"),
+            PinKind::Branch { name } => format!("branch {name}"),
+            PinKind::Commit => format!("commit {}", short_commit(version)),
+            PinKind::Local => "local".to_string(),
+        }
+    }
+}
+
+/// Display-friendly short commit: first 12 chars of a SHA, or the value as-is
+/// if shorter / not a full SHA.
+fn short_commit(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
+}
+
 impl Lockfile {
     pub fn empty() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             plugins: HashMap::new(),
         }
     }

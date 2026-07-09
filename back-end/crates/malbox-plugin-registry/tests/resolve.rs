@@ -1,13 +1,13 @@
 use malbox_installer::github::{Release, ReleaseAsset};
 use malbox_plugin_registry::resolve::{
-    Platform, SpecifierSource, find_matching_asset, parse_specifier,
+    Platform, RefSelector, SpecifierSource, find_matching_asset, parse_specifier,
 };
 
 #[test]
 fn parse_registry_name() {
     let spec = parse_specifier("yara-scanner").unwrap();
     assert_eq!(spec.name, "yara-scanner");
-    assert!(spec.version.is_none());
+    assert!(matches!(spec.selector, RefSelector::LatestRelease));
     assert!(matches!(spec.source, SpecifierSource::Registry));
 }
 
@@ -15,7 +15,7 @@ fn parse_registry_name() {
 fn parse_registry_name_with_version() {
     let spec = parse_specifier("yara-scanner@0.1.0").unwrap();
     assert_eq!(spec.name, "yara-scanner");
-    assert_eq!(spec.version.as_deref(), Some("0.1.0"));
+    assert!(matches!(&spec.selector, RefSelector::Release(v) if v == "0.1.0"));
     assert!(matches!(spec.source, SpecifierSource::Registry));
 }
 
@@ -23,7 +23,7 @@ fn parse_registry_name_with_version() {
 fn parse_direct_owner_repo() {
     let spec = parse_specifier("someuser/my-plugin").unwrap();
     assert_eq!(spec.name, "my-plugin");
-    assert!(spec.version.is_none());
+    assert!(matches!(spec.selector, RefSelector::LatestRelease));
     match &spec.source {
         SpecifierSource::Direct { owner, repo } => {
             assert_eq!(owner, "someuser");
@@ -37,7 +37,7 @@ fn parse_direct_owner_repo() {
 fn parse_direct_with_version() {
     let spec = parse_specifier("someuser/my-plugin@2.0.0").unwrap();
     assert_eq!(spec.name, "my-plugin");
-    assert_eq!(spec.version.as_deref(), Some("2.0.0"));
+    assert!(matches!(&spec.selector, RefSelector::Release(v) if v == "2.0.0"));
     match &spec.source {
         SpecifierSource::Direct { owner, repo } => {
             assert_eq!(owner, "someuser");
@@ -139,4 +139,67 @@ use malbox_plugin_registry::resolve::RequestedStrategy;
 fn requested_strategy_default_is_prebuilt_with_fallback() {
     let strategy = RequestedStrategy::default();
     assert!(matches!(strategy, RequestedStrategy::PrebuiltWithFallback));
+}
+
+use malbox_plugin_registry::error::RegistryError;
+use malbox_plugin_registry::resolve::resolve_selector;
+
+#[test]
+fn selector_flag_none_keeps_parsed() {
+    let out = resolve_selector(RefSelector::LatestRelease, None, None, None).unwrap();
+    assert!(matches!(out, RefSelector::LatestRelease));
+
+    let out = resolve_selector(RefSelector::Release("1.2.3".into()), None, None, None).unwrap();
+    assert!(matches!(out, RefSelector::Release(v) if v == "1.2.3"));
+}
+
+#[test]
+fn selector_release_flag() {
+    let out =
+        resolve_selector(RefSelector::LatestRelease, Some("1.2.3".into()), None, None).unwrap();
+    assert!(matches!(out, RefSelector::Release(v) if v == "1.2.3"));
+}
+
+#[test]
+fn selector_branch_flag() {
+    let out =
+        resolve_selector(RefSelector::LatestRelease, None, Some("main".into()), None).unwrap();
+    assert!(matches!(out, RefSelector::Branch(b) if b == "main"));
+}
+
+#[test]
+fn selector_rev_flag() {
+    let out = resolve_selector(
+        RefSelector::LatestRelease,
+        None,
+        None,
+        Some("a1b2c3d".into()),
+    )
+    .unwrap();
+    assert!(matches!(out, RefSelector::Commit(c) if c == "a1b2c3d"));
+}
+
+#[test]
+fn selector_at_version_plus_flag_conflicts() {
+    // `foo@1.2.3 --branch main` is contradictory.
+    let out = resolve_selector(
+        RefSelector::Release("1.2.3".into()),
+        None,
+        Some("main".into()),
+        None,
+    );
+    assert!(matches!(out, Err(RegistryError::ConflictingSelectors(_))));
+}
+
+#[test]
+fn selector_multiple_flags_conflict() {
+    // More than one flag set is contradictory regardless of the parsed selector,
+    // and must return a conflict error rather than panicking.
+    let out = resolve_selector(
+        RefSelector::LatestRelease,
+        Some("1.2.3".into()),
+        Some("main".into()),
+        None,
+    );
+    assert!(matches!(out, Err(RegistryError::ConflictingSelectors(_))));
 }
