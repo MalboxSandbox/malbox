@@ -90,6 +90,10 @@ impl<P: HostPlugin> HostRuntime<P> {
     /// `subscribed_plugins` is the list of plugin IDs this plugin subscribes to
     /// for event/result chaining (declared via macro).
     pub fn new(plugin: P, meta: PluginMeta, subscribed_plugins: &[&str]) -> Result<Self> {
+        // Honor IOX2_LOG_LEVEL (default Info) before any iceoryx2 port exists;
+        // iceoryx2 pre-filters at this level before its logs reach `tracing`.
+        malbox_plugin_transport::ipc::set_log_level_from_env_or_default();
+
         info!(plugin = %meta.name(), "Initializing host runtime");
 
         let node = NodeBuilder::new()

@@ -29,9 +29,10 @@ pub fn deserialize_config<T: serde::de::DeserializeOwned>(
 /// subscriber so that log events are captured and can be streamed back to the
 /// daemon via gRPC.
 ///
-/// `filter` is a `tracing_subscriber::EnvFilter` directive string - e.g.
-/// "info", "info,hyper=warn". Callers pass this explicitly (it's baked into
-/// the plugin binary at compile time by the `#[guest_plugin]` macro).
+/// `filter` is the default `tracing_subscriber::EnvFilter` directive - e.g.
+/// "info", "info,hyper=warn" - baked into the plugin binary at compile time.
+/// It applies only when `RUST_LOG` is unset; a valid `RUST_LOG` takes
+/// precedence, letting operators retune verbosity at runtime without a rebuild.
 pub fn init_tracing(
     filter: &str,
     log_bus: Option<Arc<crate::log::LogBus>>,
@@ -40,7 +41,11 @@ pub fn init_tracing(
     use tracing_subscriber::util::SubscriberInitExt;
 
     let fmt_layer = tracing_subscriber::fmt::layer();
-    let filter_layer = tracing_subscriber::EnvFilter::new(filter);
+    // `RUST_LOG` wins when set and valid; otherwise fall back to the compiled-in
+    // default. `EnvFilter::new` never reads the environment, so this is what
+    // makes runtime overrides work.
+    let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter));
 
     if let Some(ref bus) = log_bus {
         let log_layer = bus.layer();
