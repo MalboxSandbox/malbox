@@ -8,5 +8,6 @@ publish = false
 
 [dependencies]
 malbox-plugin-sdk = { path = "../../../crates/malbox-plugin-sdk", features = ["host"] }
-sha2 = "0.10"
+hex = "0.4"
+sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }

@@ -16,9 +16,7 @@ extern crate malbox_plugin_sdk as malbox;
 use std::sync::OnceLock;
 
 use malbox::prelude::*;
-use malbox::types::report::{
-    ArtifactRef, Classification, Confidence, Indicator, ReportBuilder, Ttp,
-};
+use malbox::report::{ArtifactRef, Classification, Confidence, Indicator, ReportBuilder, Ttp};
 use sha2::{Digest, Sha256};
 
 const RULES_SRC: &str = include_str!("rules.yar");
@@ -36,29 +34,21 @@ struct YaraScanner;
 
 #[malbox::handlers]
 impl YaraScanner {
+    /// Static scan happens pre-execution: the sample is scanned as dropped,
+    /// before the SDK launches it and the malware gets a chance to tamper
+    /// with itself on disk.
     #[malbox::on_start]
-    fn init(&self) -> Result<()> {
-        // Touch the rules up front so a bad rules.yar surfaces at startup
-        // rather than on the first task.
+    fn scan(&self, ctx: &Context) -> Result<()> {
+        // Touch the rules up front so a bad rules.yar surfaces immediately.
         let n = rules().iter().count();
         info!(rule_count = n, "YARA scanner ready");
-        Ok(())
-    }
 
-    #[malbox::on_stop]
-    fn shutdown(&self) -> Result<()> {
-        info!("YARA scanner shutting down");
-        Ok(())
-    }
-
-    #[malbox::on_task]
-    fn scan(&self, task: Task, ctx: &Context) -> Result<()> {
-        ctx.emit_progress(0.15, "reading sample")?;
-        let sample = task.sample_bytes()?;
+        ctx.progress(0.15, "reading sample")?;
+        let sample = ctx.task().sample_bytes()?;
         let sample_size = sample.len();
         let sample_sha256 = hex::encode(Sha256::digest(&sample));
 
-        ctx.emit_progress(0.45, "scanning")?;
+        ctx.progress(0.45, "scanning")?;
         let mut scanner = yara_x::Scanner::new(rules());
         let scan_results = scanner
             .scan(&sample)
@@ -70,20 +60,27 @@ impl YaraScanner {
             .collect();
 
         info!(
-            task_id = task.id(),
+            task_id = ctx.task().id(),
             matched = matches.len(),
             "YARA scan complete"
         );
 
-        ctx.emit_progress(0.8, "building report")?;
-        let report = build_report(&task, &sample_sha256, sample_size, &matches);
+        ctx.progress(0.8, "building report")?;
+        let report = build_report(&sample_sha256, sample_size, &matches);
 
         // Emit the report envelope (recognised by the scheduler as a report)
         // and the raw matches JSON as a sibling artifact.
-        ctx.push_result(report.into_plugin_result()?)?;
-        ctx.push_result(PluginResult::json("yara_matches", &matches)?)?;
+        ctx.results().push(report.into_plugin_result()?)?;
+        ctx.results()
+            .push(PluginResult::json("yara_matches", &matches)?)?;
 
-        ctx.emit_progress(1.0, "done")?;
+        ctx.progress(1.0, "done")?;
+        Ok(())
+    }
+
+    #[malbox::on_stop]
+    fn shutdown(&self) -> Result<()> {
+        info!("YARA scanner shutting down");
         Ok(())
     }
 }
@@ -174,11 +171,10 @@ fn score_for(matches: &[MatchSummary]) -> u8 {
 }
 
 fn build_report(
-    task: &Task,
     sample_sha256: &str,
     sample_size: usize,
     matches: &[MatchSummary],
-) -> malbox::types::report::Report {
+) -> malbox::report::Report {
     let worst = matches
         .iter()
         .map(|m| m.severity)
@@ -241,17 +237,17 @@ fn build_report(
     b = b.section("overview", "Overview", |s| {
         let size = sample_size.to_string();
         let s = s.kv(vec![
-            malbox::types::report::KvPair {
+            malbox::report::KvPair {
                 key: "SHA-256".into(),
                 value: sample_sha256.to_string(),
                 mono: true,
             },
-            malbox::types::report::KvPair {
+            malbox::report::KvPair {
                 key: "Size (bytes)".into(),
                 value: size,
                 mono: false,
             },
-            malbox::types::report::KvPair {
+            malbox::report::KvPair {
                 key: "Rules matched".into(),
                 value: matches.len().to_string(),
                 mono: false,
@@ -259,15 +255,15 @@ fn build_report(
         ]);
         if matches.is_empty() {
             s.callout(
-                malbox::types::report::CalloutLevel::Success,
+                malbox::report::CalloutLevel::Success,
                 "No rules matched — nothing suspicious observed.",
             )
         } else {
             s.callout(
                 match classification {
-                    Classification::Malicious => malbox::types::report::CalloutLevel::Error,
-                    Classification::Suspicious => malbox::types::report::CalloutLevel::Warn,
-                    _ => malbox::types::report::CalloutLevel::Info,
+                    Classification::Malicious => malbox::report::CalloutLevel::Error,
+                    Classification::Suspicious => malbox::report::CalloutLevel::Warn,
+                    _ => malbox::report::CalloutLevel::Info,
                 },
                 format!(
                     "{} matching rule{} — see the Matches section for details.",
@@ -282,22 +278,22 @@ fn build_report(
     if !matches.is_empty() {
         b = b.section("matches", "Matches", |s| {
             let cols = vec![
-                malbox::types::report::Column {
+                malbox::report::Column {
                     key: "rule".into(),
                     label: "Rule".into(),
                     r#type: "string".into(),
                 },
-                malbox::types::report::Column {
+                malbox::report::Column {
                     key: "severity".into(),
                     label: "Severity".into(),
                     r#type: "string".into(),
                 },
-                malbox::types::report::Column {
+                malbox::report::Column {
                     key: "mitre".into(),
                     label: "ATT&CK".into(),
                     r#type: "string".into(),
                 },
-                malbox::types::report::Column {
+                malbox::report::Column {
                     key: "description".into(),
                     label: "Description".into(),
                     r#type: "string".into(),
@@ -321,7 +317,6 @@ fn build_report(
     // Raw escape hatch: stash the plugin-native match list too.
     b = b.raw(matches);
 
-    let _ = task; // silence unused-warning if the above never references task
     b.build()
 }
 
@@ -393,7 +388,7 @@ mod tests {
 
     #[test]
     fn clean_sample_produces_clean_verdict_in_report() {
-        use malbox::types::report::Classification;
+        use malbox::report::Classification;
         let matches: Vec<MatchSummary> = vec![];
         assert_eq!(classification_for(Severity::Info), Classification::Clean);
         assert_eq!(score_for(&matches), 0);
@@ -408,11 +403,11 @@ mod tests {
             mitre: Some("T1055".into()),
             tags: vec![],
         };
-        let score = score_for(&[m.clone()]);
+        let score = score_for(std::slice::from_ref(&m));
         assert!(score >= 80, "expected malicious score >= 80, got {score}");
         assert_eq!(
             classification_for(Severity::Malicious),
-            malbox::types::report::Classification::Malicious
+            malbox::report::Classification::Malicious
         );
     }
 }
