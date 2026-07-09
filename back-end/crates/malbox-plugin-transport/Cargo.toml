@@ -6,15 +6,10 @@ edition = "2024"
 [features]
 default = []
 grpc = ["dep:tonic", "dep:prost", "dep:tonic-prost", "dep:tokio", "dep:tokio-stream", "dep:tonic-prost-build"]
-ipc = ["dep:iceoryx2", "dep:postcard", "dep:serde"]
+ipc = ["dep:iceoryx2", "dep:postcard", "dep:serde", "iceoryx2/tracing"]
 
 [dependencies]
-# `std` is mandatory: it selects iceoryx2's recommended on-disk serializer.
-# Every process sharing malbox services
-# must agree on it or cross-process opens fail with ServiceInCorruptedState.
-# default-features stay off to keep the `console` logger out; the daemon
-# layers `tracing` on top (see malbox-plugin-internal).
-iceoryx2 = { version = "0.9.1", default-features = false, features = ["std"], optional = true }
+iceoryx2 = { workspace = true, optional = true }
 postcard = { version = "1", features = ["alloc"], optional = true }
 serde = { workspace = true, optional = true }
 

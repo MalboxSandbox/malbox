@@ -49,3 +49,4 @@ notify = "8.2.0"
 sha2 = "0.11"
 hex = "0.4"
 reqwest = { version = "0.13", features = ["json"] }
+iceoryx2 = { version = "=0.9.3", default-features = false, features = ["std"] }

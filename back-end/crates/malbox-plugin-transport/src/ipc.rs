@@ -21,6 +21,13 @@ pub use iceoryx2::prelude::{CallbackProgression, WaitSetBuilder};
 pub use iceoryx2::service::ipc::Service as IpcService;
 pub use iceoryx2::service::ipc_threadsafe::Service as IpcServiceThreadsafe;
 
+/// Set iceoryx2's internal log level from the `IOX2_LOG_LEVEL` env var,
+/// defaulting to iceoryx2's built-in `Info`. iceoryx2 pre-filters against this
+/// level before its logs reach the `tracing` logger, so call this once at host
+/// startup (before creating any port) for `RUST_LOG` to be able to surface
+/// iceoryx2's debug/trace lines.
+pub use iceoryx2::prelude::set_log_level_from_env_or_default;
+
 pub use cleanup::{CleanupReport, cleanup_stale_resources};
 pub use daemon_notify::{DaemonNotifier, DaemonNotifyKind, DaemonNotifyListener};
 pub use events::{

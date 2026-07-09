@@ -12,11 +12,6 @@ plugin = []
 malbox-plugin-transport = { path = "../malbox-plugin-transport", features = ["ipc", "grpc"] }
 malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
 
-# Route iceoryx2's internal logs into `tracing`. In 0.9 the standalone
-# `iceoryx2-loggers` override crate was folded into the main crate's
-# `tracing` feature flag.
-iceoryx2 = { version = "0.9.1", default-features = false, features = ["std", "tracing"] }
-
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
