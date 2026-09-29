@@ -21,7 +21,7 @@ jobs:
         working-directory: back-end
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
@@ -64,7 +64,7 @@ jobs:
         working-directory: back-end
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
@@ -98,7 +98,7 @@ jobs:
         working-directory: back-end
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
@@ -132,7 +132,7 @@ jobs:
         working-directory: front-end
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
@@ -161,7 +161,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
 

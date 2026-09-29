@@ -28,7 +28,7 @@ jobs:
         working-directory: front-end
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
