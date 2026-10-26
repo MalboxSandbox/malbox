@@ -16,6 +16,22 @@ The full API reference for the `malbox-plugin-sdk` crate is hosted on our crate 
 
 For a step-by-step walkthrough on building a plugin, see the [Creating a Rust Plugin](/plugin-guides/creating-a-rust-plugin) guide.
 
+## Logging
+
+The SDK routes `tracing` events through a `tracing_subscriber::EnvFilter`. The filter compiled into the plugin is only a default. Guest plugins use the `log_filter` value from `[runtime]` in `plugin.toml`, and host plugins use `info`.
+
+Set `RUST_LOG` to a valid `EnvFilter` directive to override that default at runtime. You don't need to rebuild the plugin. If `RUST_LOG` is unset or invalid, the SDK falls back to the compiled-in default.
+
+```bash
+RUST_LOG="debug,hyper=warn"
+```
+
+Host plugins also read `IOX2_LOG_LEVEL` to set the log level of the iceoryx2 IPC transport. The default is `Info`. iceoryx2 drops messages below this level before they reach `tracing`, so raise both variables when you debug transport issues.
+
+```bash
+IOX2_LOG_LEVEL=Debug
+```
+
 </View>
 
 <View title="C++" icon="C">
