@@ -1,5 +1,5 @@
 [remote.github]
-owner = "DualHorizon"
+owner = "MalboxSandbox"
 repo = "malbox"
 
 [changelog]
@@ -73,7 +73,7 @@ protect_breaking_commits = true
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
 link_parsers = [
-    { pattern = "#(\\d+)", href = "https://github.com/DualHorizon/malbox/issues/$1" },
+    { pattern = "#(\\d+)", href = "https://github.com/MalboxSandbox/malbox/issues/$1" },
 ]
 
 [bump]
