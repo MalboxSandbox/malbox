@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PipelineStep } from '$lib/transforms';
+	import type { PipelineStep } from '#lib/transforms/index.ts';
 
 	interface Props {
 		steps: PipelineStep[];

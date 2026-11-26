@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Indicator } from '$lib/api/types';
+	import type { Indicator } from '#lib/api/types.ts';
 
 	interface Props {
 		indicators: Indicator[];

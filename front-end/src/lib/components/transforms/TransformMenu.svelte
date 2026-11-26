@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { transformStore } from '$lib/stores/transforms.svelte';
-	import type { TransformDefinition } from '$lib/transforms';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
+	import type { TransformDefinition } from '#lib/transforms/index.ts';
 
 	interface Props {
 		onSelect: (transform: TransformDefinition) => void;

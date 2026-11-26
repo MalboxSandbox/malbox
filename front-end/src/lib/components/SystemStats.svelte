@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Machine, MachineStatus } from '$lib/api/types';
+	import type { Machine, MachineStatus } from '#lib/api/types.ts';
 
 	interface Props {
 		machines: Machine[];

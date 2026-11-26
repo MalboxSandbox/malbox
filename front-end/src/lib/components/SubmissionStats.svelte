@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { TaskCounts } from '$lib/api/types';
+	import type { TaskCounts } from '#lib/api/types.ts';
 
 	interface Props {
 		counts: TaskCounts;

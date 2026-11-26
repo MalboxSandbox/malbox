@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { calloutClasses } from '../styles';
-	import type { CalloutLevel } from '$lib/api/types';
+	import type { CalloutLevel } from '#lib/api/types.ts';
 
 	interface Props {
 		level: CalloutLevel;

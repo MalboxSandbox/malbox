@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { icons, type IconName } from '$lib/icons';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { icons, type IconName } from '#lib/icons/index.ts';
 	import { GlobeIcon } from '@lucide/svelte';
 	import type { MenuItemAction, MenuItemSubmenu } from './types';
 

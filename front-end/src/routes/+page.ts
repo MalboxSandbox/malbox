@@ -1,6 +1,6 @@
-import { auth } from '$lib/stores/auth.svelte';
+import { auth } from '#lib/stores/auth.svelte.ts';
 import { redirect } from '@sveltejs/kit';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 export function load() {
 	if (browser) {

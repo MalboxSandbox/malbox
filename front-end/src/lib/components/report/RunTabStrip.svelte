@@ -1,8 +1,8 @@
 <script lang="ts">
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { icons } from '$lib/icons';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { icons } from '#lib/icons/index.ts';
 	import { BanIcon } from '@lucide/svelte';
-	import type { TaskSummary } from '$lib/api/types';
+	import type { TaskSummary } from '#lib/api/types.ts';
 
 	interface Props {
 		tasks: TaskSummary[];

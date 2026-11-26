@@ -4,9 +4,9 @@
 		createCustomTransform,
 		deleteCustomTransform,
 		updateCustomTransform
-	} from '$lib/api/transforms';
-	import { deleteRecipe } from '$lib/api/recipes';
-	import type { TransformKind, CustomTransform, Recipe, RecipeScope } from '$lib/api/types';
+	} from '#lib/api/transforms.ts';
+	import { deleteRecipe } from '#lib/api/recipes.ts';
+	import type { TransformKind, CustomTransform, Recipe, RecipeScope } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

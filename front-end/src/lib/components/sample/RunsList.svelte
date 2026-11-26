@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { TaskSummary } from '$lib/api/types';
+	import type { TaskSummary } from '#lib/api/types.ts';
 	import RunCard from './RunCard.svelte';
 
 	interface Props {

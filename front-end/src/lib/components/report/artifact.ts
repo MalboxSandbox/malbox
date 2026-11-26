@@ -1,4 +1,4 @@
-import type { ArtifactLink } from '$lib/api/types';
+import type { ArtifactLink } from '#lib/api/types.ts';
 
 export type PreviewKind = 'image' | 'text' | 'json' | 'code' | 'pdf' | 'none';
 

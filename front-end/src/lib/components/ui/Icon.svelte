@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { IconDef } from '$lib/icons';
+	import type { IconDef } from '#lib/icons/index.ts';
 
 	let {
 		path,

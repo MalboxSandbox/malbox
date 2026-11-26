@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Icon from './Icon.svelte';
-	import { icons } from '$lib/icons';
+	import { icons } from '#lib/icons/index.ts';
 
 	interface Props {
 		platform: string;

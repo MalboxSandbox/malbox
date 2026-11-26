@@ -1,4 +1,4 @@
-import { listTasks } from '$lib/api/tasks';
+import { listTasks } from '#lib/api/tasks.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends, url }) => {

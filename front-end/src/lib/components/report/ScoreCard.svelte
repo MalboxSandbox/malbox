@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ScoreCircle from './ScoreCircle.svelte';
-	import type { Classification } from '$lib/api/types';
+	import type { Classification } from '#lib/api/types.ts';
 
 	interface Props {
 		score: number;

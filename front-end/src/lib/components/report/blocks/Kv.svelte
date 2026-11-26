@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { KvPair } from '$lib/api/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
-	import { truncateWithTail } from '$lib/utils/truncate';
+	import type { KvPair } from '#lib/api/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
+	import { truncateWithTail } from '#lib/utils/truncate.ts';
 
 	interface Props {
 		pairs: KvPair[];

@@ -1,4 +1,4 @@
-import type { ContextPayload, MenuItem } from '$lib/components/context-menu/types';
+import type { ContextPayload, MenuItem } from '#lib/components/context-menu/types.ts';
 
 class ContextMenuStore {
 	open = $state(false);

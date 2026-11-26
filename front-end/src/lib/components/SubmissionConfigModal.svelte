@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { createDialog } from '@melt-ui/svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { icons } from '$lib/icons';
-	import { listAvailablePlugins } from '$lib/api/plugins';
-	import { listMachines, listSnapshots } from '$lib/api/machines';
-	import type { Platform, AvailablePlugins, Machine, Snapshot } from '$lib/api/types';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { icons } from '#lib/icons/index.ts';
+	import { listAvailablePlugins } from '#lib/api/plugins.ts';
+	import { listMachines, listSnapshots } from '#lib/api/machines.ts';
+	import type { Platform, AvailablePlugins, Machine, Snapshot } from '#lib/api/types.ts';
 
 	interface SubmissionConfig {
 		timeout: number | null;

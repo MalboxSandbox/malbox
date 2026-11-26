@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import { slide } from 'svelte/transition';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import { contextmenu } from '$lib/actions/contextmenu';
-	import type { Indicator, Ttp } from '$lib/api/types';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
+	import type { Indicator, Ttp } from '#lib/api/types.ts';
 
 	interface Props {
 		indicators: Indicator[];

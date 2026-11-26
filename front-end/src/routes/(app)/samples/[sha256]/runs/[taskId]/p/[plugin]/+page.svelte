@@ -1,5 +1,5 @@
 <script lang="ts">
-	import PluginReport from '$lib/components/report/PluginReport.svelte';
+	import PluginReport from '#lib/components/report/PluginReport.svelte';
 	import type { PageData } from './$types';
 
 	interface Props {

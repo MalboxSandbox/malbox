@@ -1,9 +1,9 @@
 <script lang="ts">
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
 	import { SearchIcon, CornerDownRightIcon } from '@lucide/svelte';
-	import { contextMenuStore } from '$lib/stores/contextMenu.svelte';
-	import { resolveMenuItems } from '$lib/context-menu/registry';
-	import type { ContextPayload } from '$lib/components/context-menu/types';
+	import { contextMenuStore } from '#lib/stores/contextMenu.svelte.ts';
+	import { resolveMenuItems } from '#lib/context-menu/registry.ts';
+	import type { ContextPayload } from '#lib/components/context-menu/types.ts';
 
 	interface Props {
 		bytes_b64: string;

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { TreeNode } from '$lib/api/types';
+	import type { TreeNode } from '#lib/api/types.ts';
 	import Self from './Tree.svelte';
 
 	interface Props {

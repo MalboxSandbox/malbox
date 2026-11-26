@@ -1,4 +1,4 @@
-import { listImages } from '$lib/api/images';
+import { listImages } from '#lib/api/images.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PluginType } from '$lib/api/types';
+	import type { PluginType } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

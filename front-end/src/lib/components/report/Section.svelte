@@ -1,6 +1,6 @@
 <script lang="ts">
 	import BlockRenderer from './BlockRenderer.svelte';
-	import type { ArtifactLink, Block, Section } from '$lib/api/types';
+	import type { ArtifactLink, Block, Section } from '#lib/api/types.ts';
 
 	interface Props {
 		section: Section;

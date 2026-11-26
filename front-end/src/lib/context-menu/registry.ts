@@ -1,10 +1,10 @@
-import type { ContextPayload, ContextType, MenuItem } from '$lib/components/context-menu/types';
-import { lookupProviders } from '$lib/stores/lookupProviders.svelte';
-import { transformStore } from '$lib/stores/transforms.svelte';
-import { isTerminalStatus } from '$lib/api/format';
-import { toasts } from '$lib/stores/toasts.svelte';
-import { contextMenuSettings } from '$lib/stores/contextMenuSettings.svelte';
-import { valuePreviewStore } from '$lib/stores/valuePreview.svelte';
+import type { ContextPayload, ContextType, MenuItem } from '#lib/components/context-menu/types.ts';
+import { lookupProviders } from '#lib/stores/lookupProviders.svelte.ts';
+import { transformStore } from '#lib/stores/transforms.svelte.ts';
+import { isTerminalStatus } from '#lib/api/format.ts';
+import { toasts } from '#lib/stores/toasts.svelte.ts';
+import { contextMenuSettings } from '#lib/stores/contextMenuSettings.svelte.ts';
+import { valuePreviewStore } from '#lib/stores/valuePreview.svelte.ts';
 
 function defang(value: string): string {
 	const { dotReplacement, protocolReplacement } = contextMenuSettings.settings;

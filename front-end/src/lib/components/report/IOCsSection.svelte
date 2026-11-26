@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Indicator } from '$lib/api/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import type { Indicator } from '#lib/api/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 	import CopyButton from './CopyButton.svelte';
 
 	interface Props {

@@ -1,27 +1,27 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
-	import { startPolling } from '$lib/api/polling';
-	import { formatBytes } from '$lib/api/format';
-	import { rescanSample } from '$lib/api/tasks';
-	import { isApiError } from '$lib/api/errors';
-	import { reportStore } from '$lib/stores/report.svelte';
+	import { startPolling } from '#lib/api/polling.ts';
+	import { formatBytes } from '#lib/api/format.ts';
+	import { rescanSample } from '#lib/api/tasks.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import { reportStore } from '#lib/stores/report.svelte.ts';
 	import { SvelteMap } from 'svelte/reactivity';
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { icons } from '$lib/icons';
-	import SubmissionConfigModal from '$lib/components/SubmissionConfigModal.svelte';
-	import { toasts } from '$lib/stores/toasts.svelte';
-	import ScoreCard from '$lib/components/report/ScoreCard.svelte';
-	import RunTabStrip from '$lib/components/report/RunTabStrip.svelte';
-	import SectionDivider from '$lib/components/report/SectionDivider.svelte';
-	import DataRow from '$lib/components/report/DataRow.svelte';
-	import VerdictsSummary from '$lib/components/report/VerdictsSummary.svelte';
-	import AIInsight from '$lib/components/report/AIInsight.svelte';
-	import IOCsSection from '$lib/components/report/IOCsSection.svelte';
-	import MITRESection from '$lib/components/report/MITRESection.svelte';
-	import PluginDetailView from '$lib/components/report/PluginDetailView.svelte';
-	import BlockRenderer from '$lib/components/report/BlockRenderer.svelte';
-	import ScoreBadge from '$lib/components/report/ScoreBadge.svelte';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { icons } from '#lib/icons/index.ts';
+	import SubmissionConfigModal from '#lib/components/SubmissionConfigModal.svelte';
+	import { toasts } from '#lib/stores/toasts.svelte.ts';
+	import ScoreCard from '#lib/components/report/ScoreCard.svelte';
+	import RunTabStrip from '#lib/components/report/RunTabStrip.svelte';
+	import SectionDivider from '#lib/components/report/SectionDivider.svelte';
+	import DataRow from '#lib/components/report/DataRow.svelte';
+	import VerdictsSummary from '#lib/components/report/VerdictsSummary.svelte';
+	import AIInsight from '#lib/components/report/AIInsight.svelte';
+	import IOCsSection from '#lib/components/report/IOCsSection.svelte';
+	import MITRESection from '#lib/components/report/MITRESection.svelte';
+	import PluginDetailView from '#lib/components/report/PluginDetailView.svelte';
+	import BlockRenderer from '#lib/components/report/BlockRenderer.svelte';
+	import ScoreBadge from '#lib/components/report/ScoreBadge.svelte';
 	import { FileTextIcon, PlayIcon, BanIcon, RefreshCwIcon, HistoryIcon } from '@lucide/svelte';
 	import type {
 		PluginReportView,
@@ -30,14 +30,14 @@
 		Platform,
 		KvPair,
 		Block
-	} from '$lib/api/types';
+	} from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {
 		data: PageData;
 	}
-	let { data }: Props = $props();
 
+	let { data }: Props = $props();
 	const sample = $derived(data.sample);
 	const tasks = $derived(data.tasks);
 	const taskReports = $derived(data.taskReports);
@@ -52,7 +52,7 @@
 	});
 
 	const initialRunId = $derived.by(() => {
-		const fromUrl = $page.url.searchParams.get('run');
+		const fromUrl = page.url.searchParams.get('run');
 		if (fromUrl && tasks.some((t) => String(t.id) === fromUrl)) return fromUrl;
 		if (latestTaskId) return latestTaskId;
 		if (sortedTasks.length > 0) return String(sortedTasks[0].id);
@@ -229,16 +229,18 @@
 {:else}
 	<div class="space-y-0">
 		<!-- Breadcrumb -->
+
 		<div class="mb-3.5 flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
 			<a href="/submissions" class="hover:text-[var(--color-text-primary)] transition-colors"
 				>Submissions</a
 			>
+
 			<svg class="size-3 text-[var(--color-border)]" viewBox="0 0 20 20" fill="currentColor">
 				<path
 					fill-rule="evenodd"
 					d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.168 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
 					clip-rule="evenodd"
-				/>
+				></path>
 			</svg>
 			<span class="text-[var(--color-text-primary)]"
 				>{data.sampleReport.sample.sha256.slice(0, 12)}...</span
@@ -257,10 +259,8 @@
 				</span>
 				<button
 					class="ml-auto text-xs font-medium text-[var(--color-accent)] transition-colors hover:text-[var(--color-accent)]/80"
-					onclick={() => (activeRunId = null)}
+					onclick={() => (activeRunId = null)}>View latest</button
 				>
-					View latest
-				</button>
 			</div>
 		{/if}
 
@@ -419,6 +419,7 @@
 		/>
 		<div class="flex flex-col gap-3">
 			<AIInsight plugins={currentPlugins} />
+
 			<VerdictsSummary plugins={currentPlugins} onpluginclick={(p) => (activePluginView = p)} />
 		</div>
 

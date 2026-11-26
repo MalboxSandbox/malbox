@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { openSearchPanel } from '@codemirror/search';
-	import { valuePreviewStore } from '$lib/stores/valuePreview.svelte';
-	import CodeMirrorEditor from '$lib/components/CodeMirrorEditor.svelte';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import ContextMenu from '$lib/components/context-menu/ContextMenu.svelte';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import { valuePreviewStore } from '#lib/stores/valuePreview.svelte.ts';
+	import CodeMirrorEditor from '#lib/components/CodeMirrorEditor.svelte';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import ContextMenu from '#lib/components/context-menu/ContextMenu.svelte';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 	import { HashIcon, WrapTextIcon, SearchIcon } from '@lucide/svelte';
 
 	let dialogEl: HTMLDialogElement | undefined = $state();

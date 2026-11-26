@@ -1,4 +1,4 @@
-import type { CalloutLevel, Classification } from '$lib/api/types';
+import type { CalloutLevel, Classification } from '#lib/api/types.ts';
 
 /**
  * Tailwind class set for a verdict classification — use for pills, borders,

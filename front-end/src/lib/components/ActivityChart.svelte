@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ActivityData, TimeRange } from '$lib/types/automation';
+	import type { ActivityData, TimeRange } from '#lib/types/automation.ts';
 
 	interface Props {
 		data: ActivityData[];

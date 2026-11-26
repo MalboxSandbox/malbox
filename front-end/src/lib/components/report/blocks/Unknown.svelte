@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Json from './Json.svelte';
-	import type { Block } from '$lib/api/types';
+	import type { Block } from '#lib/api/types.ts';
 
 	interface Props {
 		// We receive the full block because its shape is, by definition, unknown.

@@ -2,12 +2,12 @@
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { invalidate, goto } from '$app/navigation';
-	import { toasts } from '$lib/stores/toasts.svelte';
-	import { createTaskFromFile, createTaskFromUrl, lookupSample } from '$lib/api/tasks';
-	import { looksLikeHash, resolveHashToSample } from '$lib/api/submission';
-	import { isApiError } from '$lib/api/errors';
-	import SubmissionConfigModal from '$lib/components/SubmissionConfigModal.svelte';
-	import type { Platform } from '$lib/api/types';
+	import { toasts } from '#lib/stores/toasts.svelte.ts';
+	import { createTaskFromFile, createTaskFromUrl, lookupSample } from '#lib/api/tasks.ts';
+	import { looksLikeHash, resolveHashToSample } from '#lib/api/submission.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import SubmissionConfigModal from '#lib/components/SubmissionConfigModal.svelte';
+	import type { Platform } from '#lib/api/types.ts';
 
 	let activeTab = $state<'file' | 'url'>('file');
 	let urlInput = $state('');

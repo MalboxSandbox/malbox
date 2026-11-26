@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Submission } from '$lib/types/automation';
+	import type { Submission } from '#lib/types/automation.ts';
 
 	interface Props {
 		submissions: Submission[];

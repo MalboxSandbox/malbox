@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { getSampleOverview } from '$lib/api/samples';
-import { isApiError } from '$lib/api/errors';
+import { getSampleOverview } from '#lib/api/samples.ts';
+import { isApiError } from '#lib/api/errors.ts';
 import type { LayoutLoad } from './$types';
 
 export const load: LayoutLoad = async ({ fetch, params, depends }) => {

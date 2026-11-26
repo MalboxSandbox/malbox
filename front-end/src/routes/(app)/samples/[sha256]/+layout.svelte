@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
-	import { startPolling } from '$lib/api/polling';
+	import { startPolling } from '#lib/api/polling.ts';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 

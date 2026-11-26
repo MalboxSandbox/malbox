@@ -1,10 +1,10 @@
 <script lang="ts">
-	import AggregateSummary from '$lib/components/report/AggregateSummary.svelte';
+	import AggregateSummary from '#lib/components/report/AggregateSummary.svelte';
 	import { invalidate } from '$app/navigation';
-	import { startPolling } from '$lib/api/polling';
-	import { isTerminalStatus } from '$lib/api/format';
-	import { isApiError } from '$lib/api/errors';
-	import { reportStore } from '$lib/stores/report.svelte';
+	import { startPolling } from '#lib/api/polling.ts';
+	import { isTerminalStatus } from '#lib/api/format.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import { reportStore } from '#lib/stores/report.svelte.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

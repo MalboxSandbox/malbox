@@ -1,16 +1,8 @@
 import { goto } from '$app/navigation';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
-type User = {
-	id: string;
-	email: string;
-	name: string;
-};
-
-type AuthState = {
-	user: User | null;
-	isAuthenticated: boolean;
-};
+type User = { id: string; email: string; name: string };
+type AuthState = { user: User | null; isAuthenticated: boolean };
 
 class AuthStore {
 	private state = $state<AuthState>({

@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { page } from '$app/stores';
-	import Logo from '$lib/components/ui/Logo.svelte';
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { sidebar } from '$lib/stores/sidebar.svelte';
-	import { reportStore } from '$lib/stores/report.svelte';
-	import { icons, type IconName } from '$lib/icons';
+	import { page } from '$app/state';
+	import Logo from '#lib/components/ui/Logo.svelte';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
+	import { reportStore } from '#lib/stores/report.svelte.ts';
+	import { icons, type IconName } from '#lib/icons/index.ts';
 
 	const navItems: { href: string; icon: IconName; label: string }[] = [
 		{ href: '/dashboard', icon: 'home', label: 'Home' },
@@ -20,7 +20,7 @@
 		{ id: 'verdicts', label: 'Verdicts', icon: 'chart' }
 	];
 
-	const isActive = (href: string) => $page.url.pathname === href;
+	const isActive = (href: string) => page.url.pathname === href;
 
 	const samplePage = $derived(reportStore.samplePage);
 	const activePlugins = $derived(reportStore.activePlugins);
@@ -205,7 +205,7 @@
 				fill-rule="evenodd"
 				d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"
 				clip-rule="evenodd"
-			/>
+			></path>
 		</svg>
 	</button>
 
@@ -322,9 +322,9 @@
 						stroke="currentColor"
 						stroke-width="2"
 					>
-						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-						<polyline points="16 17 21 12 16 7" />
-						<line x1="21" y1="12" x2="9" y2="12" />
+						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+						<polyline points="16 17 21 12 16 7"></polyline>
+						<line x1="21" y1="12" x2="9" y2="12"></line>
 					</svg>
 				</button>
 			</div>

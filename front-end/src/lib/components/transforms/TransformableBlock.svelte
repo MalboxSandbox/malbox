@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { transformStore } from '$lib/stores/transforms.svelte';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
 	import TransformTrail from './TransformTrail.svelte';
 	import TransformMenu from './TransformMenu.svelte';
-	import type { PipelineStep, TransformDefinition, PipelineResult } from '$lib/transforms';
+	import type { PipelineStep, TransformDefinition, PipelineResult } from '#lib/transforms/index.ts';
 	import type { Snippet } from 'svelte';
 
 	interface Props {

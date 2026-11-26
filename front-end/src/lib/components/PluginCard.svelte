@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { MarketplaceItem } from '$lib/types/marketplace';
+	import type { MarketplaceItem } from '#lib/types/marketplace.ts';
 
 	interface Props {
 		item: MarketplaceItem;

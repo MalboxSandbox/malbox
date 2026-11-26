@@ -147,7 +147,7 @@ Manage host-local plugin installations. These commands talk to the plugin regist
 
 ### plugin install
 
-Install a plugin from the registry or directly from a GitHub repository.
+Install a plugin from the registry, directly from a GitHub repository, or from a local directory.
 
 ```bash
 malbox daemon plugin install <plugin> [options]
@@ -155,28 +155,69 @@ malbox daemon plugin install <plugin> [options]
 
 | Argument / Flag | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `plugin` | `string` | Yes | - | `name`, `name@version`, or `owner/repo` |
+| `plugin` | `string` | Yes | - | `name`, `name@version`, `owner/repo`, or a local directory path |
+| `--release <VERSION>` | `string` | No | - | Install a specific published release (for example, `1.2.3`) |
+| `--branch <NAME>` | `string` | No | - | Build from source at the latest commit on a branch |
+| `--rev <SHA>` | `string` | No | - | Build from source at a specific commit. Requires the full 40-character commit SHA. |
 | `--source` | - | No | `false` | Force build from source (skip prebuilt asset search) |
 | `--prebuilt` | - | No | `false` | Only use prebuilt assets; error if none available |
-| `--force` | - | No | `false` | Overwrite an existing installation |
-| `--dry-run` | - | No | `false` | Print what would happen without changing anything |
+| `--force` | - | No | `false` | Reinstall over an existing installation without prompting |
 
-`--source` and `--prebuilt` are mutually exclusive.
+Flag rules:
+
+- `--release`, `--branch`, and `--rev` are mutually exclusive.
+- `--branch` and `--rev` always build from source, so you can't combine them with `--prebuilt`.
+- `--source` and `--prebuilt` are mutually exclusive.
+- Pass the version either as `name@version` or with `--release`, not both.
 
 ```bash
-# Install the latest version from the registry
+# Install the latest release from the registry
 malbox daemon plugin install yara-scanner
 
-# Pin a specific version
+# Pin a specific release
 malbox daemon plugin install yara-scanner@1.2.0
+malbox daemon plugin install yara-scanner --release 1.2.0
+
+# Build from the latest commit on a branch
+malbox daemon plugin install yara-scanner --branch main
+
+# Build from an exact commit
+malbox daemon plugin install yara-scanner --rev 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b
 
 # Install directly from a GitHub repository
 malbox daemon plugin install acme-corp/custom-plugin
+
+# Install from a local directory
+malbox daemon plugin install ./my-plugin
+```
+
+#### Install from a local directory
+
+Use a local path to install a plugin you're developing or one you've already built. Malbox treats the argument as a local path when it starts with `/`, `./`, `../`, or `~`.
+
+- The directory must contain a `plugin.toml`. Malbox reads the plugin's canonical name from that manifest, not from the directory name.
+- If Malbox detects a build system in the directory, it builds the plugin in place and installs the result. Otherwise, Malbox copies the directory as an already-built plugin.
+- `--release`, `--branch`, `--rev`, `--source`, and `--prebuilt` don't apply to local paths. Malbox rejects the command if you pass any of them.
+
+#### Reinstalling
+
+If the plugin is already installed, `install` asks you to confirm the reinstall. The prompt defaults to No. In a non-interactive run (no terminal attached), Malbox skips the reinstall unless you pass `--force` or the [global](/reference/cli/malbox#global-flags) `-y` flag.
+
+```bash
+# Reinstall without prompting
+malbox daemon plugin install yara-scanner --force
 ```
 
 ### plugin update
 
-Update an installed plugin to its latest version, or update everything.
+Update an installed plugin, or update everything. What counts as an update depends on how you installed the plugin:
+
+| Installed from | Update behavior |
+| --- | --- |
+| A release (default, `name@version`, or `--release`) | Installs the latest published release if it's newer |
+| `--branch` | Rebuilds if the branch has new commits since the last install |
+| `--rev` | Stays on the pinned commit. Only `--force` (or confirming the reinstall prompt) rebuilds it. |
+| A local path | Skipped. Run `malbox daemon plugin install <path>` again to pick up changes. |
 
 ```bash
 malbox daemon plugin update [name] [options]
@@ -185,8 +226,17 @@ malbox daemon plugin update [name] [options]
 | Argument / Flag | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
 | `name` | `string` | No | - | Plugin to update. If omitted, all installed plugins are updated. |
-| `--force` | - | No | `false` | Reinstall even if already at the latest version |
-| `--dry-run` | - | No | `false` | Print what would happen without changing anything |
+| `--force` | - | No | `false` | Reinstall even if already up to date, without prompting |
+
+When you update a single plugin that's already up to date, `update` offers to reinstall it. For a plugin pinned with `--rev`, the prompt offers to rebuild the same commit. The prompt defaults to No, and non-interactive runs skip the reinstall unless you pass `--force` or `-y`. When you update all plugins, Malbox doesn't prompt and reports up-to-date plugins as such.
+
+```bash
+# Update every installed plugin
+malbox daemon plugin update
+
+# Update one plugin, reinstalling without a prompt if it's already current
+malbox daemon plugin update yara-scanner -y
+```
 
 ### plugin remove
 
@@ -202,7 +252,7 @@ malbox daemon plugin remove <name>
 
 ### plugin list
 
-List plugins installed on this host.
+List plugins installed on this host. The version column shows what each plugin is pinned to: a release (`v1.2.3`), a branch (`branch main`), a commit (`commit 1a2b3c4d5e6f`), or `local`. The source column shows where the plugin came from, including `local` for plugins installed from a local directory.
 
 ```bash
 malbox daemon plugin list
@@ -222,7 +272,7 @@ malbox daemon plugin search <query>
 
 ### plugin info
 
-Show detailed information about a plugin (version, description, categories, dependencies).
+Show detailed information about a plugin (version, description, categories, dependencies). For installed plugins, the `Installed` line shows the pin (release, branch, commit, or `local`). A `Commit` line shows the exact commit when Malbox built the plugin from source.
 
 ```bash
 malbox daemon plugin info <name>

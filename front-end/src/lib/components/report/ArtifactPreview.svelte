@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { formatBytes } from '$lib/api/format';
+	import { formatBytes } from '#lib/api/format.ts';
 	import { previewKind, previewLanguage, type PreviewKind } from './artifact';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import CodeViewer from '$lib/components/CodeViewer.svelte';
-	import type { ArtifactLink } from '$lib/api/types';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import CodeViewer from '#lib/components/CodeViewer.svelte';
+	import type { ArtifactLink } from '#lib/api/types.ts';
 
 	const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 

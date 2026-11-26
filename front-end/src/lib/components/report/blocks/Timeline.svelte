@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { TimelineEvent } from '$lib/api/types';
+	import type { TimelineEvent } from '#lib/api/types.ts';
 
 	interface Props {
 		events: TimelineEvent[];

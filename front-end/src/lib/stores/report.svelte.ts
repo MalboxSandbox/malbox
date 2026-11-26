@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { TaskReport, TaskSummary, SampleInfo, PluginReportView } from '$lib/api/types';
+import type { TaskReport, TaskSummary, SampleInfo, PluginReportView } from '#lib/api/types.ts';
 
 let current = $state<TaskReport | null>(null);
 

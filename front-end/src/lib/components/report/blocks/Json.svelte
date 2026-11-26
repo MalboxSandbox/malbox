@@ -1,5 +1,5 @@
 <script lang="ts">
-	import CodeViewer from '$lib/components/CodeViewer.svelte';
+	import CodeViewer from '#lib/components/CodeViewer.svelte';
 
 	interface Props {
 		data: unknown;

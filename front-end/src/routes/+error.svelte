@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 
-	const status = $derived($page.status);
-	const message = $derived($page.error?.message ?? 'Something went wrong.');
+	const status = $derived(page.status);
+	const message = $derived(page.error?.message ?? 'Something went wrong.');
 </script>
 
 <div class="flex min-h-screen items-center justify-center bg-[var(--color-bg-primary)] p-8">

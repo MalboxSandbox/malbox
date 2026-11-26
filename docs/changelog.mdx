@@ -3,6 +3,19 @@ title: "Changelog"
 description: "Release notes for Malbox covering new features, plugin SDK updates, CLI changes, UI improvements, and bug fixes shipped each week."
 ---
 
+<Update label="July 9, 2026" tags={["release"]}>
+
+## New features
+
+- **Local-path plugin sources.** `malbox daemon plugin install` now accepts a local directory in addition to registry entries and GitHub repos, so you can install a plugin straight from a checkout on disk — useful for testing an in-progress plugin before publishing it. See [`malbox daemon plugin install`](/reference/cli/malbox-daemon#plugin-install).
+- **Branch- and revision-pinned plugin installs.** You can now pin a plugin install to a specific branch or Git revision instead of only a tagged version, which makes it easier to track pre-release fixes or an internal fork. See [`malbox daemon plugin install`](/reference/cli/malbox-daemon#plugin-install).
+
+## Updates
+
+- **Plugin log verbosity honors `RUST_LOG` and `IOX2_LOG_LEVEL`.** Host plugins now pick up the same `RUST_LOG` and `IOX2_LOG_LEVEL` environment variables the daemon uses, so you can dial plugin logs up or down without editing plugin code or config. See the environment variables in the [`malboxd` reference](/reference/cli/malboxd).
+
+</Update>
+
 <Update label="June 19, 2026" tags={["maintenance"]}>
 
 ## Updates

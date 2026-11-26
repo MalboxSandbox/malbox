@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { formatBytes } from '$lib/api/format';
+	import { formatBytes } from '#lib/api/format.ts';
 	import { previewKind } from './artifact';
 	import ArtifactPreview from './ArtifactPreview.svelte';
-	import type { ArtifactLink } from '$lib/api/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import type { ArtifactLink } from '#lib/api/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 
 	interface Props {
 		artifacts: ArtifactLink[];

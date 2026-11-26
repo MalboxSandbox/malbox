@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolveArtifactUrl, resolveArtifact, previewKind } from '../artifact';
 	import ArtifactPreview from '../ArtifactPreview.svelte';
-	import type { ArtifactLink } from '$lib/api/types';
+	import type { ArtifactLink } from '#lib/api/types.ts';
 
 	interface Props {
 		artifact: string;

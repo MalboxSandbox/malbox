@@ -1,9 +1,9 @@
 <script lang="ts">
-	import FileUpload from '$lib/components/FileUpload.svelte';
-	import SubmissionStats from '$lib/components/SubmissionStats.svelte';
-	import SystemStats from '$lib/components/SystemStats.svelte';
+	import FileUpload from '#lib/components/FileUpload.svelte';
+	import SubmissionStats from '#lib/components/SubmissionStats.svelte';
+	import SystemStats from '#lib/components/SystemStats.svelte';
 	import { invalidate } from '$app/navigation';
-	import { startPolling } from '$lib/api/polling';
+	import { startPolling } from '#lib/api/polling.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

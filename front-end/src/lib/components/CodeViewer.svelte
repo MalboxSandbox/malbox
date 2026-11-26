@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { openSearchPanel } from '@codemirror/search';
-	import CodeMirrorEditor from '$lib/components/CodeMirrorEditor.svelte';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
+	import CodeMirrorEditor from '#lib/components/CodeMirrorEditor.svelte';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
 	import { HashIcon, WrapTextIcon, SearchIcon } from '@lucide/svelte';
 
 	interface Props {

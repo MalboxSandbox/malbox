@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { SampleInfo, SampleAggregate } from '$lib/api/types';
-	import VerdictBadge from '$lib/components/report/VerdictBadge.svelte';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import { formatBytes } from '$lib/api/format';
-	import type { Classification } from '$lib/api/types';
+	import type { SampleInfo, SampleAggregate } from '#lib/api/types.ts';
+	import VerdictBadge from '#lib/components/report/VerdictBadge.svelte';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import { formatBytes } from '#lib/api/format.ts';
+	import type { Classification } from '#lib/api/types.ts';
 
 	interface Props {
 		sample: SampleInfo;

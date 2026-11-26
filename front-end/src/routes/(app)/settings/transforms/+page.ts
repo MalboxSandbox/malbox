@@ -1,5 +1,5 @@
-import { listCustomTransforms } from '$lib/api/transforms';
-import { listRecipes } from '$lib/api/recipes';
+import { listCustomTransforms } from '#lib/api/transforms.ts';
+import { listRecipes } from '#lib/api/recipes.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

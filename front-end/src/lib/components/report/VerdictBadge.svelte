@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { classificationClasses } from './styles';
-	import type { Classification, Confidence } from '$lib/api/types';
+	import type { Classification, Confidence } from '#lib/api/types.ts';
 
 	interface Props {
 		classification?: Classification | string;

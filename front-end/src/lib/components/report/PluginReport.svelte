@@ -3,9 +3,15 @@
 	import Section from './Section.svelte';
 	import BlockRenderer from './BlockRenderer.svelte';
 	import ArtifactPreview from './ArtifactPreview.svelte';
-	import { formatBytes } from '$lib/api/format';
+	import { formatBytes } from '#lib/api/format.ts';
 	import { previewKind } from './artifact';
-	import type { PluginReportView, SinglePluginReport, Sample, KvPair, Block } from '$lib/api/types';
+	import type {
+		PluginReportView,
+		SinglePluginReport,
+		Sample,
+		KvPair,
+		Block
+	} from '#lib/api/types.ts';
 
 	interface Props {
 		view: PluginReportView | SinglePluginReport;

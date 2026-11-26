@@ -1,4 +1,4 @@
-import { listPlugins } from '$lib/api/plugins';
+import { listPlugins } from '#lib/api/plugins.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

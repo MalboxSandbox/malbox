@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { lookupProviders } from '$lib/stores/lookupProviders.svelte';
-	import { contextMenuSettings } from '$lib/stores/contextMenuSettings.svelte';
-	import { transformStore } from '$lib/stores/transforms.svelte';
-	import { listRecipes } from '$lib/api/recipes';
+	import { lookupProviders } from '#lib/stores/lookupProviders.svelte.ts';
+	import { contextMenuSettings } from '#lib/stores/contextMenuSettings.svelte.ts';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
+	import { listRecipes } from '#lib/api/recipes.ts';
 	import { GlobeIcon } from '@lucide/svelte';
 	import type {
 		LookupProvider,
 		CustomAction,
 		CustomActionType,
 		ContextType
-	} from '$lib/components/context-menu/types';
-	import type { Recipe } from '$lib/api/types';
+	} from '#lib/components/context-menu/types.ts';
+	import type { Recipe } from '#lib/api/types.ts';
 
 	type Tab = 'providers' | 'behavior';
 	let activeTab = $state<Tab>('providers');

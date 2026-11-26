@@ -1,4 +1,4 @@
-import type { LookupProvider } from '$lib/components/context-menu/types';
+import type { LookupProvider } from '#lib/components/context-menu/types.ts';
 
 const STORAGE_KEY = 'malbox:lookupProviders';
 

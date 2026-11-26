@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Classification } from '$lib/api/types';
+	import type { Classification } from '#lib/api/types.ts';
 
 	interface Props {
 		score: number;

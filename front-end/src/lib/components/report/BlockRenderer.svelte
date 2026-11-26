@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ArtifactLink, Block } from '$lib/api/types';
+	import type { ArtifactLink, Block } from '#lib/api/types.ts';
 
 	import Markdown from './blocks/Markdown.svelte';
 	import Callout from './blocks/Callout.svelte';

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
-	import { deleteSnapshot, provisionMachine } from '$lib/api/machines';
-	import { toasts } from '$lib/stores/toasts.svelte';
-	import { isApiError } from '$lib/api/errors';
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
-	import type { MachineStatus, ProvisionRunStatus } from '$lib/api/types';
+	import { deleteSnapshot, provisionMachine } from '#lib/api/machines.ts';
+	import { toasts } from '#lib/stores/toasts.svelte.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
+	import type { MachineStatus, ProvisionRunStatus } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

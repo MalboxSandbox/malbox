@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PluginReportView, Confidence } from '$lib/api/types';
+	import type { PluginReportView, Confidence } from '#lib/api/types.ts';
 
 	interface Props {
 		plugins: PluginReportView[];

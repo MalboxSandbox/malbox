@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 
-	const status = $derived($page.status);
-	const message = $derived($page.error?.message ?? 'Something went wrong.');
+	const status = $derived(page.status);
+	const message = $derived(page.error?.message ?? 'Something went wrong.');
 
 	const headline = $derived.by(() => {
 		if (status === 404) return 'Not found';

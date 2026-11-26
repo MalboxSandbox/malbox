@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Ttp } from '$lib/api/types';
+	import type { Ttp } from '#lib/api/types.ts';
 
 	interface Props {
 		items: Ttp[];

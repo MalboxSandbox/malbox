@@ -1,6 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
-import { getTask } from '$lib/api/tasks';
-import { isApiError } from '$lib/api/errors';
+import { getTask } from '#lib/api/tasks.ts';
+import { isApiError } from '#lib/api/errors.ts';
 import type { LayoutLoad } from './$types';
 
 export const load: LayoutLoad = async ({ fetch, params }) => {

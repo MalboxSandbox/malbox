@@ -1,9 +1,9 @@
 <script lang="ts">
-	import ApiKeyHeader from '$lib/components/ApiKeyHeader.svelte';
-	import ActivityChart from '$lib/components/ActivityChart.svelte';
-	import StatisticsChart from '$lib/components/StatisticsChart.svelte';
-	import RecentSubmissions from '$lib/components/RecentSubmissions.svelte';
-	import type { ActivityData, TimeRange, Statistics, Submission } from '$lib/types/automation';
+	import ApiKeyHeader from '#lib/components/ApiKeyHeader.svelte';
+	import ActivityChart from '#lib/components/ActivityChart.svelte';
+	import StatisticsChart from '#lib/components/StatisticsChart.svelte';
+	import RecentSubmissions from '#lib/components/RecentSubmissions.svelte';
+	import type { ActivityData, TimeRange, Statistics, Submission } from '#lib/types/automation.ts';
 
 	// Mock data - replace with actual API calls
 	let selectedKey = $state<string | null>('No keys selected');

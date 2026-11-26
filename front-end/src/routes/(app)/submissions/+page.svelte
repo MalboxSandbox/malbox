@@ -1,10 +1,10 @@
 <script lang="ts">
-	import SubmissionsTable from '$lib/components/SubmissionsTable.svelte';
-	import FiltersModal from '$lib/components/FiltersModal.svelte';
+	import SubmissionsTable from '#lib/components/SubmissionsTable.svelte';
+	import FiltersModal from '#lib/components/FiltersModal.svelte';
 	import { goto } from '$app/navigation';
-	import { listTasks } from '$lib/api/tasks';
+	import { listTasks } from '#lib/api/tasks.ts';
 	import type { PageData } from './$types';
-	import type { Task } from '$lib/api/types';
+	import type { Task } from '#lib/api/types.ts';
 
 	interface Props {
 		data: PageData;
@@ -29,10 +29,7 @@
 
 	function setFilter(filter: 'all' | 'finished' | 'pending') {
 		const qs = filter !== 'all' ? `?filter=${filter}` : '';
-		goto(`/submissions${qs}`, {
-			keepFocus: true,
-			noScroll: true
-		});
+		goto(`/submissions${qs}`, { reset: false });
 	}
 
 	function filterToStatus(filter: string): string | undefined {

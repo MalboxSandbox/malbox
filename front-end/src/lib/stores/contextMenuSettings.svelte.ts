@@ -1,4 +1,4 @@
-import type { CustomAction } from '$lib/components/context-menu/types';
+import type { CustomAction } from '#lib/components/context-menu/types.ts';
 
 const STORAGE_KEY = 'malbox:contextMenuSettings';
 

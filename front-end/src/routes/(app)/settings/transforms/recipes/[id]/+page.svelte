@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { goto, invalidate } from '$app/navigation';
-	import { updateRecipe, deleteRecipe } from '$lib/api/recipes';
-	import { transformStore } from '$lib/stores/transforms.svelte';
-	import type { RecipeScope, RecipeStep } from '$lib/api/types';
+	import { updateRecipe, deleteRecipe } from '#lib/api/recipes.ts';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
+	import type { RecipeScope, RecipeStep } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

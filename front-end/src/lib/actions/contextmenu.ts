@@ -1,6 +1,6 @@
-import type { ContextPayload } from '$lib/components/context-menu/types';
-import { contextMenuStore } from '$lib/stores/contextMenu.svelte';
-import { resolveMenuItems } from '$lib/context-menu/registry';
+import type { ContextPayload } from '#lib/components/context-menu/types.ts';
+import { contextMenuStore } from '#lib/stores/contextMenu.svelte.ts';
+import { resolveMenuItems } from '#lib/context-menu/registry.ts';
 
 type ContextMenuParam = (ContextPayload & { selectionOnly?: boolean }) | undefined;
 

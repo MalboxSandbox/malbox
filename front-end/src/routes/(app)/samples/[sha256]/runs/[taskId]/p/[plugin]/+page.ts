@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { getPluginReport, getTask } from '$lib/api/tasks';
-import { isApiError } from '$lib/api/errors';
+import { getPluginReport, getTask } from '#lib/api/tasks.ts';
+import { isApiError } from '#lib/api/errors.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, params }) => {

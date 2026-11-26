@@ -1,6 +1,6 @@
 <script lang="ts">
 	/* eslint-disable svelte/prefer-svelte-reactivity -- Maps used as local computation variables in $derived, not reactive state */
-	import type { GraphEdge, GraphNode } from '$lib/api/types';
+	import type { GraphEdge, GraphNode } from '#lib/api/types.ts';
 
 	interface Props {
 		nodes: GraphNode[];

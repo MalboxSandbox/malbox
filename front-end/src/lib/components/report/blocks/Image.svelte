@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolveArtifactUrl } from '../artifact';
-	import type { ArtifactLink } from '$lib/api/types';
+	import type { ArtifactLink } from '#lib/api/types.ts';
 
 	interface Props {
 		artifact: string;

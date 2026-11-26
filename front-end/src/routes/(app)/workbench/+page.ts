@@ -1,4 +1,4 @@
-import { listRecipes } from '$lib/api/recipes';
+import { listRecipes } from '#lib/api/recipes.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

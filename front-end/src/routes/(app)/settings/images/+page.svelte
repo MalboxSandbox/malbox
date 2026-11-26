@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { invalidate } from '$app/navigation';
-	import { registerImage, deleteImage } from '$lib/api/images';
-	import { toasts } from '$lib/stores/toasts.svelte';
-	import { isApiError } from '$lib/api/errors';
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
-	import type { Platform, Arch } from '$lib/api/types';
+	import { registerImage, deleteImage } from '#lib/api/images.ts';
+	import { toasts } from '#lib/stores/toasts.svelte.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
+	import type { Platform, Arch } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

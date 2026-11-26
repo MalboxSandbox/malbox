@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { splitDateTime, isTerminalStatus, formatBytes } from '$lib/api/format';
-	import { cancelTask } from '$lib/api/tasks';
+	import { splitDateTime, isTerminalStatus, formatBytes } from '#lib/api/format.ts';
+	import { cancelTask } from '#lib/api/tasks.ts';
 	import ScoreCard from './ScoreCard.svelte';
 	import PluginTile from './PluginTile.svelte';
 	import ThreatOverview from './ThreatOverview.svelte';
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
 	import { FileTextIcon, PlayIcon } from '@lucide/svelte';
-	import type { Task, TaskReport } from '$lib/api/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import type { Task, TaskReport } from '#lib/api/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 
 	interface Props {
 		task: Task;

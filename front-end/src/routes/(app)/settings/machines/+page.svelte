@@ -1,6 +1,6 @@
 <script lang="ts">
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
-	import type { MachineStatus } from '$lib/api/types';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
+	import type { MachineStatus } from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
 	interface Props {

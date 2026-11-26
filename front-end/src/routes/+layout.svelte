@@ -1,10 +1,10 @@
 <script lang="ts">
 	import '../app.css';
-	import favicon from '$lib/assets/favicon.svg';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { navigating } from '$app/stores';
+	import favicon from '#lib/assets/favicon.svg';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { navigating } from '$app/state';
 	import { onMount } from 'svelte';
-	import Toasts from '$lib/components/Toasts.svelte';
+	import Toasts from '#lib/components/Toasts.svelte';
 
 	let { children } = $props();
 
@@ -17,7 +17,7 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-{#if $navigating}
+{#if navigating.to}
 	<div class="fixed left-0 top-0 z-50 h-0.5 w-full overflow-hidden bg-[var(--color-bg-tertiary)]">
 		<div class="nav-progress h-full bg-[var(--color-accent)]"></div>
 	</div>

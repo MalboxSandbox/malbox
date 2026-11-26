@@ -1,6 +1,6 @@
 <script lang="ts">
-	import PluginCard from '$lib/components/PluginCard.svelte';
-	import type { MarketplaceItem, MarketplaceFilter } from '$lib/types/marketplace';
+	import PluginCard from '#lib/components/PluginCard.svelte';
+	import type { MarketplaceItem, MarketplaceFilter } from '#lib/types/marketplace.ts';
 
 	// State
 	let searchQuery = $state('');

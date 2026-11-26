@@ -1,4 +1,4 @@
-import { listMachines } from '$lib/api/machines';
+import { listMachines } from '#lib/api/machines.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

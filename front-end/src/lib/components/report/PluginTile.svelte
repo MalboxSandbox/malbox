@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ScoreBadge from './ScoreBadge.svelte';
-	import type { PluginReportView } from '$lib/api/types';
+	import type { PluginReportView } from '#lib/api/types.ts';
 
 	interface Props {
 		view: PluginReportView;

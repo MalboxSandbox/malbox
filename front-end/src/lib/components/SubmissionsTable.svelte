@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { Task } from '$lib/api/types';
-	import { splitDateTime, taskStatusLabel, isTerminalStatus } from '$lib/api/format';
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import type { Task } from '#lib/api/types.ts';
+	import { splitDateTime, taskStatusLabel, isTerminalStatus } from '#lib/api/format.ts';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 
 	interface Props {
 		tasks: Task[];

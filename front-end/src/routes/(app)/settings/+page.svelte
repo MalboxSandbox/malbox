@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Icon from '$lib/components/ui/Icon.svelte';
-	import { icons } from '$lib/icons';
+	import Icon from '#lib/components/ui/Icon.svelte';
+	import { icons } from '#lib/icons/index.ts';
 
 	const sections: { href: string; title: string; description: string; icon: keyof typeof icons }[] =
 		[

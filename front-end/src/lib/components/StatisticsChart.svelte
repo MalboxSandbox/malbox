@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Statistics } from '$lib/types/automation';
+	import type { Statistics } from '#lib/types/automation.ts';
 
 	interface Props {
 		stats: Statistics;

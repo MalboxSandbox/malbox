@@ -10,8 +10,8 @@
 	import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 	import { keymap } from '@codemirror/view';
 	import { untrack } from 'svelte';
-	import { malboxEditorTheme } from '$lib/codemirror/theme';
-	import { loadLanguage } from '$lib/codemirror/languages';
+	import { malboxEditorTheme } from '#lib/codemirror/theme.ts';
+	import { loadLanguage } from '#lib/codemirror/languages.ts';
 
 	interface Props {
 		value: string;

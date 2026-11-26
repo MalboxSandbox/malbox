@@ -85,7 +85,7 @@ Controls how the plugin runtime behaves. For guest plugins, the build process ba
 | `state` | `string` | Yes | - | Plugin state management mode (`"ephemeral"`, `"persistent"`, or `"scoped"`). |
 | `execution` | `string` | Yes | - | Execution context (`"exclusive"`, `"sequential"`, `"parallel"`, or `"unrestricted"`). |
 | `port` | `u16` | No | `50051` | gRPC listen port. Must be >= 1024. Guest plugins only. |
-| `log_filter` | `string` | No | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. |
+| `log_filter` | `string` | No | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. A valid `RUST_LOG` environment variable overrides this value at runtime. |
 | `analysis_timeout` | `integer` | No | `300` | Maximum analysis time in seconds. Must be >= 1. The daemon wraps this with an additional grace period for result flushing. |
 
 ### Plugin types

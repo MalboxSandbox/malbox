@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PluginReportView, Sample } from '$lib/api/types';
+	import type { PluginReportView, Sample } from '#lib/api/types.ts';
 	import { classificationClasses } from './styles';
 	import PluginReport from './PluginReport.svelte';
 	import ScoreBadge from './ScoreBadge.svelte';

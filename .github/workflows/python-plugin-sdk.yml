@@ -34,14 +34,14 @@ jobs:
       SQLX_OFFLINE: "true"
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: cachix/install-nix-action@v31
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
 
-    - uses: DeterminateSystems/magic-nix-cache-action@v14
+    - uses: DeterminateSystems/magic-nix-cache-action@v15
 
     - name: Lint Python
       run: nix develop ..#backend --command ruff check crates/malbox-plugin-sdk-python/

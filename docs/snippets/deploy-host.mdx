@@ -6,3 +6,9 @@ Place the compiled binary and `plugin.toml` in a subdirectory of the daemon's pl
     <Tree.File name="plugin.toml" />
   </Tree.Folder>
 </Tree>
+
+You can also install the plugin from its source directory with [`malbox daemon plugin install`](/reference/cli/malbox-daemon#install-from-a-local-directory). Malbox builds the plugin if it detects a build system, then installs it into the plugin directory:
+
+```bash
+malbox daemon plugin install ./my-host-plugin
+```

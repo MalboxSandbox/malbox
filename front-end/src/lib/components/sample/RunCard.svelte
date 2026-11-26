@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { TaskSummary } from '$lib/api/types';
-	import { splitDateTime, taskStatusLabel } from '$lib/api/format';
-	import PlatformLabel from '$lib/components/ui/PlatformLabel.svelte';
+	import type { TaskSummary } from '#lib/api/types.ts';
+	import { splitDateTime, taskStatusLabel } from '#lib/api/format.ts';
+	import PlatformLabel from '#lib/components/ui/PlatformLabel.svelte';
 
 	interface Props {
 		task: TaskSummary;

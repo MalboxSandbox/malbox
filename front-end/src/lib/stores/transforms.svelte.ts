@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import {
 	TransformRegistry,
 	AutoDetect,
@@ -7,11 +7,11 @@ import {
 	loadYamlTransform,
 	loadJsTransform,
 	loadWasmTransform
-} from '$lib/transforms';
-import { runInSandbox } from '$lib/transforms/engines/sandbox';
-import { listCustomTransforms } from '$lib/api/transforms';
-import type { TransformDefinition, TransformProvenance } from '$lib/transforms';
-import type { CustomTransform } from '$lib/api/types';
+} from '#lib/transforms/index.ts';
+import { runInSandbox } from '#lib/transforms/engines/sandbox.ts';
+import { listCustomTransforms } from '#lib/api/transforms.ts';
+import type { TransformDefinition, TransformProvenance } from '#lib/transforms/index.ts';
+import type { CustomTransform } from '#lib/api/types.ts';
 
 class TransformRegistryStore {
 	registry = $state(new TransformRegistry());

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { createDialog } from '@melt-ui/svelte';
-	import Input from '$lib/components/ui/Input.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
+	import Input from '#lib/components/ui/Input.svelte';
+	import Button from '#lib/components/ui/Button.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 
 	let email = $state('');
 	let password = $state('');

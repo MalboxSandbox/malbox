@@ -1,19 +1,19 @@
 <script lang="ts">
-	import CodeMirrorEditor from '$lib/components/CodeMirrorEditor.svelte';
-	import { transformStore } from '$lib/stores/transforms.svelte';
-	import TransformStepEditor from '$lib/components/transforms/TransformStepEditor.svelte';
+	import CodeMirrorEditor from '#lib/components/CodeMirrorEditor.svelte';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
+	import TransformStepEditor from '#lib/components/transforms/TransformStepEditor.svelte';
 	import type {
 		PipelineStep,
 		TransformDefinition,
 		PipelineResult,
 		TransformCategory
-	} from '$lib/transforms';
+	} from '#lib/transforms/index.ts';
 	import type { PageData } from './$types';
-	import type { Recipe, RecipeStep } from '$lib/api/types';
-	import { createRecipe } from '$lib/api/recipes';
-	import { page } from '$app/stores';
+	import type { Recipe, RecipeStep } from '#lib/api/types.ts';
+	import { createRecipe } from '#lib/api/recipes.ts';
+	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
-	import { detectFileExtension } from '$lib/transforms/file-type';
+	import { detectFileExtension } from '#lib/transforms/file-type.ts';
 
 	interface Props {
 		data: PageData;
@@ -63,13 +63,13 @@
 	let recipeName = $state('');
 	let recipeDescription = $state('');
 	let recipeTags = $state('');
-	let recipeScope = $state<import('$lib/api/types').RecipeScope>('personal');
+	let recipeScope = $state<import('#lib/api/types.ts').RecipeScope>('personal');
 	let savingRecipe = $state(false);
 
 	let showRecipeLoad = $state(false);
 
 	$effect(() => {
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		const dataParam = url.searchParams.get('data');
 		const stepsParam = url.searchParams.get('steps');
 		if (dataParam) {
@@ -480,7 +480,7 @@
 						>
 							<path
 								d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-							/>
+							></path>
 						</svg>
 					</button>
 				</div>
@@ -600,7 +600,7 @@
 								fill-rule="evenodd"
 								d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z"
 								clip-rule="evenodd"
-							/>
+							></path>
 						</svg>
 						<input
 							type="text"
@@ -635,7 +635,7 @@
 												fill-rule="evenodd"
 												d="M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.17 1.699c.484.12.94.312 1.356.562l1.321-.916a.5.5 0 0 1 .67.055l.774.774a.5.5 0 0 1 .055.67l-.916 1.321c.25.417.443.872.562 1.356l1.699.17a.5.5 0 0 1 .45.497v1.096a.5.5 0 0 1-.45.497l-1.699.17c-.12.484-.312.94-.562 1.356l.916 1.321a.5.5 0 0 1-.055.67l-.774.774a.5.5 0 0 1-.67.055l-1.321-.916c-.417.25-.872.443-1.356.562l-.17 1.699a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.17-1.699a4.973 4.973 0 0 1-1.356-.562l-1.321.916a.5.5 0 0 1-.67-.055l-.774-.774a.5.5 0 0 1-.055-.67l.916-1.321a4.973 4.973 0 0 1-.562-1.356l-1.699-.17A.5.5 0 0 1 1 8.548V7.452a.5.5 0 0 1 .45-.497l1.699-.17c.12-.484.312-.94.562-1.356L2.795 4.108a.5.5 0 0 1 .055-.67l.774-.774a.5.5 0 0 1 .67-.055l1.321.916c.417-.25.872-.443 1.356-.562l.17-1.699ZM8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
 												clip-rule="evenodd"
-											/>
+											></path>
 										</svg>
 									{/if}
 									{#if t.terminal}
@@ -741,7 +741,7 @@
 										fill-rule="evenodd"
 										d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576l-2.846-.813a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 7.466 7.89l.813-2.846A.75.75 0 0 1 9 4.5ZM18 1.5a.75.75 0 0 1 .728.568l.258 1.036c.236.94.97 1.674 1.91 1.91l1.036.258a.75.75 0 0 1 0 1.456l-1.036.258c-.94.236-1.674.97-1.91 1.91l-.258 1.036a.75.75 0 0 1-1.456 0l-.258-1.036a2.625 2.625 0 0 0-1.91-1.91l-1.036-.258a.75.75 0 0 1 0-1.456l1.036-.258a2.625 2.625 0 0 0 1.91-1.91l.258-1.036A.75.75 0 0 1 18 1.5ZM16.5 15a.75.75 0 0 1 .712.513l.394 1.183c.15.447.5.799.948.948l1.183.395a.75.75 0 0 1 0 1.422l-1.183.395c-.447.15-.799.5-.948.948l-.395 1.183a.75.75 0 0 1-1.422 0l-.395-1.183a1.5 1.5 0 0 0-.948-.948l-1.183-.395a.75.75 0 0 1 0-1.422l1.183-.395c.447-.15.799-.5.948-.948l.395-1.183A.75.75 0 0 1 16.5 15Z"
 										clip-rule="evenodd"
-									/>
+									></path>
 								</svg>
 								<span class="text-xs text-[var(--color-accent)]/70">{nextDetection?.name}</span>
 							{/if}
@@ -766,10 +766,10 @@
 							>
 								<path
 									d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z"
-								/>
+								></path>
 								<path
 									d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.439A1.5 1.5 0 0 0 8.378 6H4.5Z"
-								/>
+								></path>
 							</svg>
 						</button>
 						<button
@@ -785,10 +785,10 @@
 							>
 								<path
 									d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z"
-								/>
+								></path>
 								<path
 									d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z"
-								/>
+								></path>
 							</svg>
 						</button>
 					{/if}
@@ -823,7 +823,7 @@
 									fill-rule="evenodd"
 									d="M9 4.5a.75.75 0 0 1 .721.544l.813 2.846a3.75 3.75 0 0 0 2.576 2.576l2.846.813a.75.75 0 0 1 0 1.442l-2.846.813a3.75 3.75 0 0 0-2.576 2.576l-.813 2.846a.75.75 0 0 1-1.442 0l-.813-2.846a3.75 3.75 0 0 0-2.576-2.576l-2.846-.813a.75.75 0 0 1 0-1.442l2.846-.813A3.75 3.75 0 0 0 7.466 7.89l.813-2.846A.75.75 0 0 1 9 4.5ZM18 1.5a.75.75 0 0 1 .728.568l.258 1.036c.236.94.97 1.674 1.91 1.91l1.036.258a.75.75 0 0 1 0 1.456l-1.036.258c-.94.236-1.674.97-1.91 1.91l-.258 1.036a.75.75 0 0 1-1.456 0l-.258-1.036a2.625 2.625 0 0 0-1.91-1.91l-1.036-.258a.75.75 0 0 1 0-1.456l1.036-.258a2.625 2.625 0 0 0 1.91-1.91l.258-1.036A.75.75 0 0 1 18 1.5ZM16.5 15a.75.75 0 0 1 .712.513l.394 1.183c.15.447.5.799.948.948l1.183.395a.75.75 0 0 1 0 1.422l-1.183.395c-.447.15-.799.5-.948.948l-.395 1.183a.75.75 0 0 1-1.422 0l-.395-1.183a1.5 1.5 0 0 0-.948-.948l-1.183-.395a.75.75 0 0 1 0-1.422l1.183-.395c.447-.15.799-.5.948-.948l.395-1.183A.75.75 0 0 1 16.5 15Z"
 									clip-rule="evenodd"
-								/>
+								></path>
 							</svg>
 							<span
 								class="text-xs text-[var(--color-text-secondary)]/40 transition-colors group-hover:text-[var(--color-text-secondary)]"

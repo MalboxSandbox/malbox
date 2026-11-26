@@ -1,7 +1,7 @@
 <script lang="ts">
-	import CopyButton from '$lib/components/ui/CopyButton.svelte';
-	import type { Indicator } from '$lib/api/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import CopyButton from '#lib/components/ui/CopyButton.svelte';
+	import type { Indicator } from '#lib/api/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 
 	interface Props {
 		items: Indicator[];

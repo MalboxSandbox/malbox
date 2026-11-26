@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { ContextPayload } from '$lib/components/context-menu/types';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import type { ContextPayload } from '#lib/components/context-menu/types.ts';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 	import CopyButton from './CopyButton.svelte';
 
 	interface Props {

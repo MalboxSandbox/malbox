@@ -1,6 +1,6 @@
 <script lang="ts">
-	import CodeViewer from '$lib/components/CodeViewer.svelte';
-	import { contextmenu } from '$lib/actions/contextmenu';
+	import CodeViewer from '#lib/components/CodeViewer.svelte';
+	import { contextmenu } from '#lib/actions/contextmenu.ts';
 
 	interface Props {
 		language: string;

@@ -1,4 +1,4 @@
-import { getRecipe } from '$lib/api/recipes';
+import { getRecipe } from '#lib/api/recipes.ts';
 import { error } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 

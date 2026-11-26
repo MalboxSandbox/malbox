@@ -1,5 +1,5 @@
-import { listTasks, getTaskCounts } from '$lib/api/tasks';
-import { listMachines } from '$lib/api/machines';
+import { listTasks, getTaskCounts } from '#lib/api/tasks.ts';
+import { listMachines } from '#lib/api/machines.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, depends }) => {

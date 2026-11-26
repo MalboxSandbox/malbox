@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { transformStore } from '$lib/stores/transforms.svelte';
-	import type { PipelineStep, TransformParamSchema } from '$lib/transforms';
+	import { transformStore } from '#lib/stores/transforms.svelte.ts';
+	import type { PipelineStep, TransformParamSchema } from '#lib/transforms/index.ts';
 
 	interface Props {
 		step: PipelineStep;
