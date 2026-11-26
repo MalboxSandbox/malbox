@@ -144,6 +144,9 @@
           pkgs.libclang.lib
           pkgs.libvirt
         ];
+        # Nix glibc can't read the host's locale archive; without this, any
+        # LANG other than C/C.UTF-8 makes initdb (and others) reject the locale.
+        LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
         DATABASE_URL = "postgres://postgres@localhost:5432/malbox";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingwCc}/bin/${mingwCc.targetPrefix}gcc";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${mingwCrt}/lib -L native=${mingwPthreadsWin}/lib -L native=${mingwPthreads}/lib -L native=${mingwMcfgthreads}/lib";
