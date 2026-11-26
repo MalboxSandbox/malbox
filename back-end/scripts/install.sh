@@ -38,7 +38,7 @@ split__4_v0() {
     return 0
 }
 
-__GITHUB_REPO_3="DualHorizon/malbox"
+__GITHUB_REPO_3="MalboxSandbox/malbox"
 __BINARY_NAME_4="malboxd"
 # Channel used for non-interactive installs (curl|bash with no MALBOX_CHANNEL).
 __DEFAULT_CHANNEL_5="stable"

@@ -1,6 +1,6 @@
 import { split } from "std/text"
 
-let GITHUB_REPO = "DualHorizon/malbox"
+let GITHUB_REPO = "MalboxSandbox/malbox"
 let BINARY_NAME = "malboxd"
 // Channel used for non-interactive installs (curl|bash with no MALBOX_CHANNEL).
 let DEFAULT_CHANNEL = "stable"
