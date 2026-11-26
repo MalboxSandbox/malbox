@@ -110,7 +110,7 @@ fn build_filter(params: &ListParams) -> TaskFilter {
         .cursor
         .as_deref()
         .and_then(decode_cursor)
-        .map(|c| (parse_iso_datetime(&c.ts), Some(c.id)))
+        .map(|c| (Some(c.ts), Some(c.id)))
         .unwrap_or((None, None));
 
     TaskFilter {
