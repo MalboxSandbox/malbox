@@ -126,7 +126,6 @@
         ]);
 
       backendBuildInputs = with pkgs; [
-        openssl
         libGL
         glib
         zlib
