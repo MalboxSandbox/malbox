@@ -196,7 +196,8 @@ async fn snapshot_list(ctx: &Context, args: SnapshotListArgs) -> Result<()> {
         return Ok(());
     }
 
-    let mut table = Table::new(&["ACTIVE", "NAME", "TAGS", "CREATED"]);
+    let mut table = Table::new(&["ACTIVE", "ID", "NAME", "TAGS", "CREATED"]);
+    table.pin(1);
 
     for s in &snaps {
         let active = if s.is_active {
@@ -215,7 +216,13 @@ async fn snapshot_list(ctx: &Context, args: SnapshotListArgs) -> Result<()> {
             .map(|v| format::format_time(&display_json(v)))
             .unwrap_or_else(|| "-".to_string());
 
-        table.add_row(vec![active, s.name.clone(), tags, created]);
+        table.add_row(vec![
+            active,
+            display_json(&s.id),
+            s.name.clone(),
+            tags,
+            created,
+        ]);
     }
 
     table.print();

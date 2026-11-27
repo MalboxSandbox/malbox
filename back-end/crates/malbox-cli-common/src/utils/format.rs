@@ -177,6 +177,8 @@ pub struct Table {
     rows: Vec<Vec<String>>,
     indent: usize,
     gap: usize,
+    /// Columns never shrunk to fit the terminal (e.g. IDs users copy).
+    pinned: Vec<usize>,
 }
 
 impl Table {
@@ -186,11 +188,17 @@ impl Table {
             rows: Vec::new(),
             indent: 0,
             gap: 2,
+            pinned: Vec::new(),
         }
     }
 
     pub fn set_indent(&mut self, indent: usize) {
         self.indent = indent;
+    }
+
+    /// Never truncate column `col` when the table is wider than the terminal.
+    pub fn pin(&mut self, col: usize) {
+        self.pinned.push(col);
     }
 
     pub fn add_row(&mut self, cells: Vec<String>) {
@@ -216,7 +224,7 @@ impl Table {
 
         if total_used > term_width && term_width > 40 {
             let budget = term_width.saturating_sub(total_gap + self.indent);
-            shrink_columns(&mut widths, budget);
+            shrink_columns(&mut widths, budget, &self.pinned);
         }
 
         let header_style = Brand::accent().bold();
@@ -256,7 +264,7 @@ impl Table {
     }
 }
 
-fn shrink_columns(widths: &mut [usize], budget: usize) {
+fn shrink_columns(widths: &mut [usize], budget: usize, pinned: &[usize]) {
     let current: usize = widths.iter().sum();
     if current <= budget {
         return;
@@ -265,7 +273,7 @@ fn shrink_columns(widths: &mut [usize], budget: usize) {
     let mut shrinkable: Vec<(usize, usize)> = widths
         .iter()
         .enumerate()
-        .filter(|&(_, w)| *w > 4)
+        .filter(|&(i, w)| *w > 4 && !pinned.contains(&i))
         .map(|(i, w)| (i, *w))
         .collect();
     shrinkable.sort_by_key(|b| std::cmp::Reverse(b.1));
