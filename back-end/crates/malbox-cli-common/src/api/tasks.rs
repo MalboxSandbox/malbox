@@ -17,7 +17,6 @@ pub struct TaskResultInfo {
     pub result_name: String,
     pub format: String,
     pub size_bytes: i64,
-    pub file_path: String,
     pub created_on: String,
 }
 
