@@ -36,17 +36,20 @@ pub struct TaskInfo {
     pub completed_on: Option<String>,
 }
 
+/// Multipart fields accepted by `POST /v1/tasks`.
 pub struct SubmitTaskRequest {
     pub file_path: String,
-    pub package: Option<String>,
-    pub module: Option<String>,
     pub timeout: Option<i64>,
     pub priority: Option<i64>,
     pub tags: Option<Vec<String>>,
     pub owner: Option<String>,
-    pub memory: bool,
-    pub unique: bool,
-    pub enforce_timeout: bool,
+    /// `linux` or `windows`. With `snapshot_id`, the task runs on a machine.
+    pub platform: Option<String>,
+    /// Machine snapshot UUID to analyse on.
+    pub snapshot_id: Option<String>,
+    pub plugins: Option<Vec<String>>,
+    /// Sample file name inside the guest; defaults to the uploaded name.
+    pub target_filename: Option<String>,
 }
 
 impl ApiClient {
@@ -80,12 +83,6 @@ impl ApiClient {
 
         let mut form = multipart::Form::new().part("file", file_part);
 
-        if let Some(package) = request.package {
-            form = form.text("package", package);
-        }
-        if let Some(module) = request.module {
-            form = form.text("module", module);
-        }
         if let Some(timeout) = request.timeout {
             form = form.text("timeout", timeout.to_string());
         }
@@ -98,19 +95,22 @@ impl ApiClient {
         if let Some(owner) = request.owner {
             form = form.text("owner", owner);
         }
-        if request.memory {
-            form = form.text("memory", "true");
+        if let Some(platform) = request.platform {
+            form = form.text("platform", platform);
         }
-        if request.unique {
-            form = form.text("unique", "true");
+        if let Some(snapshot_id) = request.snapshot_id {
+            form = form.text("snapshot_id", snapshot_id);
         }
-        if request.enforce_timeout {
-            form = form.text("enforce_timeout", "true");
+        if let Some(plugins) = request.plugins {
+            form = form.text("plugins", plugins.join(","));
+        }
+        if let Some(target_filename) = request.target_filename {
+            form = form.text("target_filename", target_filename);
         }
 
         let response = self
             .client
-            .post(self.url("/v1/tasks/create/file"))
+            .post(self.url("/v1/tasks"))
             .multipart(form)
             .send()
             .await?;

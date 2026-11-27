@@ -16,7 +16,7 @@ use std::io::{IsTerminal, Write};
                   malbox task list\n  \
                   malbox task get 7\n  \
                   malbox task get 7 --result 2\n  \
-                  malbox task submit sample.exe --package default --timeout 120"
+                  malbox task submit sample.exe --timeout 120"
 )]
 pub struct TaskCommand {
     #[command(subcommand)]
@@ -36,7 +36,7 @@ enum TaskCommands {
     /// Submit a file for analysis
     #[command(after_help = "Examples:\n  \
                             malbox task submit malware.exe\n  \
-                            malbox task submit sample.dll --package dll --timeout 300\n  \
+                            malbox task submit sample.bin --platform linux --snapshot-id <uuid> --timeout 300\n  \
                             malbox task submit doc.pdf --tags phishing campaign-2024 --priority 5")]
     Submit(SubmitArgs),
 }
@@ -56,12 +56,6 @@ struct GetArgs {
 struct SubmitArgs {
     /// Path to the file to analyze
     file: String,
-    /// Analysis package to use
-    #[arg(long)]
-    package: Option<String>,
-    /// Analysis module to use
-    #[arg(long)]
-    module: Option<String>,
     /// Analysis timeout in seconds
     #[arg(long)]
     timeout: Option<i64>,
@@ -74,15 +68,18 @@ struct SubmitArgs {
     /// Task owner
     #[arg(long)]
     owner: Option<String>,
-    /// Enable memory dump
+    /// Guest platform; with --snapshot-id the task runs on a machine
+    #[arg(long, value_parser = ["linux", "windows"])]
+    platform: Option<String>,
+    /// Machine snapshot ID to analyse on (see `malbox machine snapshot list`)
     #[arg(long)]
-    memory: bool,
-    /// Only analyze if sample is unique
+    snapshot_id: Option<uuid::Uuid>,
+    /// Plugins to run
+    #[arg(long, num_args = 1..)]
+    plugins: Option<Vec<String>>,
+    /// Sample file name inside the guest (defaults to the local file name)
     #[arg(long)]
-    unique: bool,
-    /// Enforce timeout strictly
-    #[arg(long)]
-    enforce_timeout: bool,
+    target_filename: Option<String>,
 }
 
 impl Command for TaskCommand {
@@ -261,15 +258,14 @@ async fn submit(api: &ApiClient, args: SubmitArgs) -> Result<()> {
     let response = api
         .submit_task(SubmitTaskRequest {
             file_path: args.file,
-            package: args.package,
-            module: args.module,
             timeout: args.timeout,
             priority: args.priority,
             tags: args.tags,
             owner: args.owner,
-            memory: args.memory,
-            unique: args.unique,
-            enforce_timeout: args.enforce_timeout,
+            platform: args.platform,
+            snapshot_id: args.snapshot_id.map(|id| id.to_string()),
+            plugins: args.plugins,
+            target_filename: args.target_filename,
         })
         .await?;
 

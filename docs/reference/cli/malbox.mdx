@@ -39,15 +39,16 @@ malbox task submit <file> [options]
 | Argument / Flag | Type | Required | Default | Description |
 |-----------------|------|----------|---------|-------------|
 | `file` | `string` | Yes | - | Path to the file to analyze |
-| `--package` | `string` | No | - | Analysis package to use |
-| `--module` | `string` | No | - | Analysis module to use |
-| `--timeout` | `integer` | No | - | Analysis timeout in seconds |
-| `--priority` | `integer` | No | - | Task priority (higher = more urgent) |
+| `--timeout` | `integer` | No | `300` | Analysis timeout in seconds |
+| `--priority` | `integer` | No | `1` | Task priority (higher = more urgent) |
 | `--tags` | `string[]` | No | - | Tags for the task (accepts multiple values) |
 | `--owner` | `string` | No | - | Task owner |
-| `--memory` | - | No | `false` | Enable memory dump |
-| `--unique` | - | No | `false` | Only analyze if the sample is unique |
-| `--enforce-timeout` | - | No | `false` | Enforce the timeout strictly |
+| `--platform` | `linux` \| `windows` | No | - | Guest platform |
+| `--snapshot-id` | `uuid` | No | - | Machine snapshot to analyse on |
+| `--plugins` | `string[]` | No | - | Plugins to run (accepts multiple values) |
+| `--target-filename` | `string` | No | file name | Sample file name inside the guest |
+
+A task runs on a machine only when both `--platform` and `--snapshot-id` are given; otherwise only host plugins run.
 
 ### task list
 
