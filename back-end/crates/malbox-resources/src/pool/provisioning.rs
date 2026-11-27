@@ -65,6 +65,7 @@ fn build_create_params(config: &MachineConfig, image_path: &str) -> CreateMachin
 fn build_create_params_from_db(
     db_machine: &machinery::Machine,
     image_path: &str,
+    provider_config: Option<toml::Value>,
 ) -> CreateMachineParams {
     let platform = match db_machine.platform {
         MachinePlatform::Windows => malbox_machinery::Platform::Windows,
@@ -87,7 +88,7 @@ fn build_create_params_from_db(
         } else {
             Some(image_path.to_string())
         },
-        provider_config: None,
+        provider_config,
     }
 }
 
@@ -108,7 +109,13 @@ impl MachinePool {
             .await
             .map_err(|e| ResourceError::Database(e.to_string()))?;
 
-        let params = build_create_params_from_db(&db_machine, image_path);
+        let provider_config = self
+            .provider_configs
+            .read()
+            .unwrap()
+            .get(&db_machine.name)
+            .cloned();
+        let params = build_create_params_from_db(&db_machine, image_path, provider_config);
         let mut machine = allocate
             .create(&params)
             .await

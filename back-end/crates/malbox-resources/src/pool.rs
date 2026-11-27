@@ -10,8 +10,9 @@ use malbox_database::repositories::machinery::{self, MachinePlatform, MachineSta
 use malbox_machinery::ProviderHandle;
 use malbox_machinery::machine::MachineEndpoint;
 use malbox_machinery::{Machine as RuntimeMachine, MachineId, Platform};
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::sync::Notify;
 use tracing::{debug, error, info};
 
@@ -27,6 +28,10 @@ pub struct MachinePool {
     pub(crate) provider: Arc<ProviderHandle>,
     pub(crate) db: PgPool,
     pub machine_available: Arc<Notify>,
+    /// Config-declared `provider_config` per machine name. The DB stores only
+    /// its hash, so revert-by-reprovision reads the value from here.
+    /// Populated by `reconcile_config`.
+    pub(crate) provider_configs: Arc<RwLock<HashMap<String, toml::Value>>>,
 }
 
 impl MachinePool {
@@ -35,6 +40,7 @@ impl MachinePool {
             provider,
             db,
             machine_available: Arc::new(Notify::new()),
+            provider_configs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

@@ -298,6 +298,11 @@ impl MachinePool {
 
     /// Reconcile DB machines against config-declared machines.
     pub async fn reconcile_config(&self, declared: &[MachineConfig]) -> Result<()> {
+        *self.provider_configs.write().unwrap() = declared
+            .iter()
+            .filter_map(|m| m.provider_config.clone().map(|c| (m.name.clone(), c)))
+            .collect();
+
         if declared.is_empty() {
             warn!("Config declares zero machines — all existing machines will be destroyed");
         }
