@@ -627,7 +627,7 @@ async fn wait_for_endpoint(
     }
 
     let start = Instant::now();
-    let mut interval = std::time::Duration::from_secs(2);
+    let mut interval = std::time::Duration::from_millis(200);
     let max_interval = std::time::Duration::from_secs(10);
 
     info!(
@@ -637,8 +637,6 @@ async fn wait_for_endpoint(
     );
 
     loop {
-        tokio::time::sleep(interval).await;
-
         match allocate.resolve_endpoint(machine).await {
             Ok(Some(endpoint)) => {
                 info!(
@@ -668,6 +666,7 @@ async fn wait_for_endpoint(
             )));
         }
 
+        tokio::time::sleep(interval).await;
         interval = (interval * 2).min(max_interval);
     }
 }

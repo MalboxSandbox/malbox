@@ -196,7 +196,7 @@ impl MachinePool {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(120);
         let connect_timeout = std::time::Duration::from_secs(5);
-        let mut interval = std::time::Duration::from_secs(3);
+        let mut interval = std::time::Duration::from_millis(200);
         let max_interval = std::time::Duration::from_secs(10);
 
         loop {
