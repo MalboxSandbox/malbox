@@ -1,18 +1,15 @@
 ---
 title: "Event hooks"
-description: "How plugins respond to system events through hooks"
+description: "How host plugins react to system events through hooks"
 ---
 
-Malbox's plugin system is event-driven. Rather than polling for changes or running on fixed schedules, plugins subscribe to specific events and respond when those events occur. This approach enables efficient, reactive analysis workflows where plugins only activate when relevant activity happens.
+Besides running jobs, host plugins can react to system events, such as a task completing or the daemon shutting down. Event hooks are notifications only: they are not tied to a job, carry at most one identifier, and cannot push results.
 
 ## How event hooks work
 
-When you register a plugin with Malbox, you declare which events your plugin should respond to. The system uses two types of event channels:
+The daemon broadcasts system-wide events on a shared channel (`malbox/events/daemon`) that every host plugin listens to. Each plugin also publishes its own lifecycle events (`PluginStarted`, `PluginStopped`) on its per-plugin channel (`malbox/events/plugin/{id}`).
 
-- **Per-plugin channels** - each plugin publishes events on its own channel (`malbox/events/plugin/{id}`). Other plugins can subscribe to these to react to lifecycle and result events.
-- **Daemon broadcast channel** - a shared channel (`malbox/events/daemon`) that delivers system-wide events (like `DaemonShutdown` and `ConfigReloaded`) to all plugins simultaneously.
-
-The runtime uses a WaitSet-based reactor pattern. Your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler, or to a catch-all `on_event` method if no specific handler exists.
+The runtime uses a WaitSet-based reactor pattern. Your plugin sleeps until an event arrives, then routes it to the matching `#[malbox::on_event(...)]` handler, or to a catch-all `on_event` method if no specific handler exists. No manifest configuration is needed.
 
 ## Event categories
 
@@ -21,45 +18,38 @@ Events are grouped into four categories based on what triggers them:
 | Category | Description |
 |----------|-------------|
 | **Task events** | Fired during task lifecycle stages |
-| **Plugin events** | Fired when plugin processes start, stop, or produce results |
+| **Plugin events** | Fired when plugin processes start or stop |
 | **Sample events** | Fired when samples are received or finish processing |
 | **System events** | Fired for system-wide occurrences like shutdown or configuration changes |
 
-## Subscribing to events
-
-Plugins declare subscriptions in the `[events]` section of their `plugin.toml`. The subscription model is declarative - you specify which plugins to subscribe to, and the SDK runtime handles the IPC channel setup and routing.
-
-```toml
-[events]
-subscribe = ["string-extractor", "network-analyzer"]
-
-[events.filters.PluginResultAvailable]
-from_plugins = ["string-extractor"]
-```
+## Handling events
 
 In your plugin code, use `#[malbox::on_event(...)]` handlers inside `#[malbox::handlers]` to react to specific event variants:
 
 ```rust
 #[malbox::handlers]
 impl MyPlugin {
-    #[malbox::on_event(PluginResultAvailable)]
-    fn on_upstream_result(&self) -> Result<()> {
-        info!("An upstream plugin produced a result");
+    #[malbox::on_event(TaskCompleted)]
+    fn on_task_done(&self) -> Result<()> {
+        info!("A task completed");
         Ok(())
     }
 }
 ```
 
-## Plugin result chaining
-
-Beyond reacting to lifecycle events, plugins can subscribe to other plugins' event channels. When a subscribed plugin produces a result, a `PluginResultAvailable` event fires with the source plugin name and result name. Your plugin's `on_event` handler receives this event, enabling reactive analysis pipelines where plugins chain off each other's output.
-
 <Note>
-Events are lightweight signals - they carry minimal metadata (source plugin name and result name). Handle `PluginResultAvailable` events in your `on_event` handler to build analysis pipelines. Event hooks are only available to host plugins - guest plugins do not support event subscriptions.
+Event hooks are only available to host plugins. Guest plugins do not receive events.
 </Note>
+
+## Passing data between plugins
+
+Events do not carry plugin results. To build on another plugin's output, use the orchestrator instead:
+
+- Put your plugin in a later [stage](/task-management/orchestration#stages) with [`[routing]`](/reference/configuration/plugins#routing), so it runs after the plugins it depends on.
+- Read task-wide data that earlier plugins wrote with `shared_put`, and re-run automatically when a key changes with `monitored_keys`. See [Shared data between plugins](/task-management/orchestration#shared-data-between-plugins).
+- Read indicators from earlier reports with `uses_indicators = true`.
+- Receive files that other plugins extracted as their own jobs: a plugin that pushes an artifact with `push_artifact` makes it a child that is routed to every matching plugin.
 
 ## Reference
 
-For the complete list of available events and their parameters, see the [events reference](/reference/plugin-sdk/events).
-
-
+For the complete list of available events, see the [events reference](/reference/plugin-sdk/events).

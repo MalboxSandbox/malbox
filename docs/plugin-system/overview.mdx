@@ -25,18 +25,17 @@ Malbox's plugin system uses [iceoryx2](https://github.com/eclipse-iceoryx/iceory
 
 ### IPC architecture
 
-The host plugin IPC layer uses four iceoryx2 services per plugin:
+The host plugin IPC layer uses three iceoryx2 services per plugin:
 
-- **Task channel** (`malbox/plugin/{id}/tasks`) - the daemon dispatches tasks to plugins and receives streamed results back via request/response. Uses postcard serialization directly into shared memory for zero-copy requests.
-- **Event channel** (`malbox/events/plugin/{id}`) - each plugin has its own lightweight pub/sub event channel. Plugins can subscribe to other plugins' event channels to react to their lifecycle and results.
-- **Result channel** (`malbox/plugin/{id}/results`) - each plugin has a pub/sub channel for publishing result data from self-initiated work (event-driven chaining). Chaining plugins subscribe to these channels to access upstream results directly without routing through the daemon.
+- **Task channel** (`malbox/plugin/{id}/tasks`) - the daemon dispatches jobs to plugins and receives streamed results back via request/response. Uses postcard serialization directly into shared memory for zero-copy requests. Each host plugin serves one job at a time.
+- **Event channel** (`malbox/events/plugin/{id}`) - each plugin publishes its own lifecycle events on a lightweight pub/sub channel.
 - **Notification service** (`malbox/plugin/{id}/notify`) - an iceoryx2 event service that enables efficient WaitSet-based wakeup. The runtime uses `EventId` discriminants to signal which channel has data, so plugins sleep until signaled, consuming zero CPU when idle.
 
-In addition, there is a shared **daemon event channel** (`malbox/events/daemon`) that broadcasts system-wide events (like shutdown and config reload) from the daemon to all plugins simultaneously.
+In addition, there is a shared **daemon event channel** (`malbox/events/daemon`) that broadcasts system-wide events (like task completion and shutdown) from the daemon to all plugins simultaneously.
 
-### Plugin chaining
+### Data between plugins
 
-Plugins can optionally chain with other plugins by subscribing to their event and result channels. When Plugin A completes and publishes a result, Plugin B (if subscribed) receives the data directly and can self-initiate processing. This enables reactive analysis pipelines without daemon mediation.
+Plugins do not talk to each other directly. The daemon's [orchestrator](/task-management/orchestration) routes every file a plugin extracts to the plugins that accept its type, runs plugins in stage order, and passes task-wide shared data, the artifact's ancestry, and earlier indicators to later plugins.
 
 ### Why IPC?
 
@@ -44,5 +43,5 @@ We chose the IPC approach over more traditional approaches for several reasons:
 
 - **Unstable Rust ABI**: the Rust Abstract Binary Interface (ABI) is not stable, making it significantly harder to achieve a good developer experience with dynamic linking
 - **Process isolation**: a dedicated process architecture provides better control and guarantees over system behavior, resulting in more robust and reliable operation
-- **Future flexibility**: this architecture enables experimentation with new features such as decentralized analysis and plugin-to-plugin chaining
+- **Future flexibility**: this architecture enables experimentation with new features such as decentralized analysis
 - **Performance**: iceoryx2 is highly efficient and provides excellent support for Linux, the primary platform for Malbox

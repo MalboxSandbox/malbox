@@ -40,17 +40,27 @@ include  = ["**/*"]
 exclude  = []
 max_file_size = 52428800
 
+[[runtime.auto_collect.artifacts.rules]]
+include  = ["drops/**"]
+relation = "dropped"
+analyze  = true
+
 [runtime.auto_collect.external_logs]
 enabled  = true
 include  = ["**/*"]
 exclude  = []
 max_file_size = 52428800
 
-[events]
-subscribe = ["string-extractor", "network-analyzer"]
+# Host plugins only: remove [routing] for guest plugins
+[routing]
+stage = "extract"
+accepts = "archive/zip"
+monitored_keys = ["passwords"]
 
-[events.filters.PluginResultAvailable]
-from_plugins = ["string-extractor"]
+[parameters.passwords]
+type = "list"
+default = []
+description = "Extra passwords to try"
 
 [scope]
 plugins = ["related-plugin"]
@@ -86,7 +96,7 @@ Controls how the plugin runtime behaves. For guest plugins, the build process ba
 | `execution` | `string` | Yes | - | Execution context (`"exclusive"`, `"sequential"`, `"parallel"`, or `"unrestricted"`). |
 | `port` | `u16` | No | `50051` | gRPC listen port. Must be >= 1024. Guest plugins only. |
 | `log_filter` | `string` | No | `"info"` | Tracing directive string (same syntax as `tracing_subscriber::EnvFilter`). Examples: `"info"`, `"debug"`, `"info,hyper=warn"`. A valid `RUST_LOG` environment variable overrides this value at runtime. |
-| `analysis_timeout` | `integer` | No | `300` | Maximum analysis time in seconds. Must be >= 1. The daemon wraps this with an additional grace period for result flushing. |
+| `analysis_timeout` | `integer` | No | `300` | Maximum analysis time in seconds. Must be >= 1. For host plugins, `[routing] timeout` takes precedence. In detonations, the daemon sends the detonation timeout with each job, which takes precedence. |
 
 ### Plugin types
 
@@ -103,6 +113,10 @@ Controls how the plugin runtime behaves. For guest plugins, the build process ba
 | `"sequential"` | Tasks are dispatched one at a time, in order. |
 | `"parallel"` | Multiple tasks may run concurrently. |
 | `"unrestricted"` | No constraints on concurrency or ordering. |
+
+<Note>
+The daemon currently runs at most one job at a time on each host plugin, whatever `execution` is set to.
+</Note>
 
 ### State management
 
@@ -137,10 +151,10 @@ All paths must be absolute. Guest plugins may use Windows-style absolute paths (
 
 ### `[runtime.auto_collect]`
 
-Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. The runtime streams files in these directories back to the daemon as results, so your plugin does not need to send them explicitly.
+Controls automatic file collection from `artifact_dir` and `external_log_dir` after each task completes. The runtime streams files in these directories back to the daemon, so your plugin does not need to send them explicitly. Collected files become stored `output` artifacts of the detonated artifact, unless an artifact rule below matches.
 
 <Note>
-For artifacts, the runtime skips files you already sent explicitly (via `ctx.results().push(PluginResult::file(...))`) or marked with `ctx.mark_collected()` to avoid duplicates. External logs are always collected without deduplication.
+For artifacts, the runtime skips files you already sent explicitly (via `ctx.results().push(PluginResult::file(...))` or `push_artifact`) or marked with `ctx.mark_collected()` to avoid duplicates. External logs are always collected without deduplication.
 </Note>
 
 #### `[runtime.auto_collect.artifacts]`
@@ -152,6 +166,19 @@ For artifacts, the runtime skips files you already sent explicitly (via `ctx.res
 | `exclude` | `string[]` | `[]` | Glob patterns for files to exclude. |
 | `max_file_size` | `integer` | `52428800` (50 MiB) | Files larger than this are skipped. |
 
+##### `[[runtime.auto_collect.artifacts.rules]]`
+
+Rules push matching collected files as artifacts with a relation, so they can be analysed like files a plugin pushed with `push_artifact`. For each file, the first rule whose `include` matches and whose `exclude` does not decides. Files that no rule matches are collected as plain outputs.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `include` | `string[]` | Yes | - | Glob patterns, relative to `artifact_dir`. |
+| `exclude` | `string[]` | No | `[]` | Glob patterns to skip. |
+| `relation` | `string` | Yes | - | One of `extracted`, `dropped`, `unpacked`, `memdump`, `downloaded`, `pcap`, `output`. See [Relations](/task-management/orchestration#relations). |
+| `analyze` | `bool` | No | relation default | Request analysis of the file. Defaults to `true` for every relation except `memdump` and `output`. |
+
+Rules are only supported for `artifacts`, not `external_logs`.
+
 #### `[runtime.auto_collect.external_logs]`
 
 | Field | Type | Default | Description |
@@ -161,21 +188,36 @@ For artifacts, the runtime skips files you already sent explicitly (via `ctx.res
 | `exclude` | `string[]` | `[]` | Glob patterns for files to exclude. |
 | `max_file_size` | `integer` | `52428800` (50 MiB) | Files larger than this are skipped. |
 
-## `[events]`
+## `[routing]`
 
-Configures event subscriptions for host plugins. Guest plugins do not support event hooks.
+Host plugins only. Decides which artifacts the plugin runs on and in which stage. Every field is optional; without the section, the plugin runs in the `static` stage on every analysed artifact. See [Orchestration](/task-management/orchestration) for how routing, stages, and caching fit together.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stage` | `string` | `"static"` | `"filter"`, `"extract"`, `"static"`, `"post"`, or `"review"`. `"dynamic"` is reserved for detonations. |
+| `category` | `string` | stage name | Category used by other plugins' `recursion_prevention`. |
+| `accepts` | `string` | `".*"` | Regular expression over the [artifact type](/task-management/orchestration#file-types). Anchored: it must match the whole type. |
+| `rejects` | `string` | `""` | Regular expression over the artifact type; matching artifacts are skipped. Empty rejects nothing. |
+| `sources_exclude` | `string[]` | `[]` | Plugin names. Artifacts produced by these plugins are skipped. |
+| `timeout` | `integer` | `analysis_timeout`, else `300` | Job timeout in seconds. |
+| `cacheable` | `bool` | `true` | Whether results may be reused from the [result cache](/task-management/orchestration#result-cache). |
+| `recursion_prevention` | `string[]` | `[]` | Categories that may not run on descendants of artifacts this plugin ran on. `"dynamic"` prevents detonation. |
+| `uses_indicators` | `bool` | `false` | Receive indicators from earlier reports on the artifact and its ancestors. Disables caching. |
+| `monitored_keys` | `string[]` | `[]` | Shared-data keys. The plugin re-runs on the same artifact when another plugin changes one of them. Disables caching. |
+
+## `[parameters]`
+
+Host plugins only. Each `[parameters.<name>]` table declares a parameter that submissions can override through `params.plugin_params.<plugin>.<name>`. Plugins read the resolved values with `params()` on the task info.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `subscribe` | `string[]` | No | List of plugin names to subscribe to. Your plugin will receive events from these plugins' event channels. |
+| `type` | `string` | Yes | `"bool"`, `"int"`, `"string"`, or `"list"` (a list of strings). |
+| `default` | any | Yes | Default value. Must match `type`. |
+| `description` | `string` | No | Human-readable description. |
 
-### `[events.filters.<EventName>]`
-
-Per-event-type filters. `<EventName>` is the event variant name (e.g. `PluginResultAvailable`).
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `from_plugins` | `string[]` | No | Only deliver this event type when it originates from one of these plugins. |
+<Note>
+The `[events]` section from earlier releases has been removed. Manifests that still contain it load, and the section is ignored.
+</Note>
 
 ## `[scope]`
 
@@ -212,6 +254,12 @@ The daemon validates the manifest when scanning plugin directories. It marks plu
 | `analysis_timeout` | Must be >= 1. |
 | `log_filter` | Must be a valid `tracing_subscriber::EnvFilter` directive. |
 | Scoped state | Requires a `[scope]` section. |
+| `routing.stage` | Must not be `"dynamic"`. |
+| `[routing]` | Only allowed on host plugins. |
+| `routing.accepts`, `routing.rejects` | Must be valid regular expressions. |
+| Parameter names | Must match `[A-Za-z0-9_]+`. |
+| Parameter defaults | Must match the declared `type`. |
+| Auto-collect rules | `relation` must be a known relation other than `root`; globs must be valid; only allowed under `artifacts`. |
 
 <Note>
 Changing any runtime setting requires rebuilding the plugin (for guest plugins) or restarting the daemon (for host plugins).

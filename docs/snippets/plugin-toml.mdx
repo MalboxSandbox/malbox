@@ -26,9 +26,10 @@ external_log_dir = "C:\\malbox\\ext-logs"     # external tool/driver logs (auto-
 threshold_bytes = 1048576
 ttl_secs = 120
 
-# Event subscriptions (host plugins only)
-[events]
-subscribe = ["other-plugin"]
+# Routing (host plugins only): which artifacts this plugin analyses, and when
+# [routing]
+# stage = "static"                # filter, extract, static, post, review
+# accepts = ".*"                  # regex over the artifact type
 
 [results.my_result]
 description = "What this result contains"

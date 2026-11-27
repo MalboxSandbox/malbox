@@ -3,6 +3,57 @@ title: "Changelog"
 description: "Release notes for Malbox covering new features, plugin SDK updates, CLI changes, UI improvements, and bug fixes shipped each week."
 ---
 
+<Update label="November 27, 2026" tags={["release"]}>
+
+This release replaces the flat task runner with a recursive analysis orchestrator. It is a breaking release: read the breaking changes below before upgrading.
+
+## New features
+
+- **Recursive analysis.** Each task now owns a tree of artifacts: the submitted sample plus every file plugins extract, drop, unpack, dump, or output. Analysed artifacts get their own jobs, so an archive inside an archive is unpacked and analysed level by level, bounded by depth, artifact count, total size, and deadline limits. See [Orchestration](/task-management/orchestration).
+- **Stage-ordered, type-routed jobs.** Host plugins declare a stage (`filter`, `extract`, `static`, `post`, `review`) and the artifact types they accept in a new `[routing]` manifest section. Malbox identifies every artifact with a built-in [file-type taxonomy](/task-management/orchestration#file-types), such as `executable/windows/pe32` or `archive/zip`. See [`[routing]`](/reference/configuration/plugins#routing).
+- **Detonation profiles.** `[[orchestration.detonation_profiles]]` in `malbox.toml` picks which artifacts are detonated automatically and on which platform, snapshot, architecture, and machine tags. A per-task detonation budget goes to the most interesting candidates first. The daemon now launches the sample itself, with a launch package chosen from the file type, once every guest plugin is ready. See [Detonation profiles](/reference/configuration/orchestration#detonation-profiles).
+- **Durable jobs with retries and caching.** Jobs are stored in PostgreSQL and resume after a daemon restart. Failed jobs are retried by error class (`recoverable`, `timeout`, `machine_lost`; never `nonrecoverable`), and host plugin results are cached and replayed for identical inputs.
+- **Plugin SDK: artifacts and job context.** Rust, Python, and C++ plugins can push child artifacts with `push_artifact` and a relation (`extracted`, `dropped`, `unpacked`, `memdump`, `downloaded`, `pcap`, `output`), share task-wide data with `shared_put`, and skip an artifact's later stages with `drop_artifact`. New task-info accessors expose the job ID, artifact, ancestry, shared data, resolved parameters, earlier indicators, and the deep-scan flag. See the [SDK reference](/reference/plugin-sdk/sdk).
+- **Plugin parameters.** Declare typed `[parameters]` in `plugin.toml` and override them per submission. See [`[parameters]`](/reference/configuration/plugins#parameters).
+- **Auto-collect rules.** `[[runtime.auto_collect.artifacts.rules]]` turns files a guest plugin writes into analysable artifacts, such as dropped files. See the [plugin configuration reference](/reference/configuration/plugins).
+- **Per-artifact control.** Cancel, rescan, re-prioritize, or promote a single artifact to its own task through new `/v1/tasks/{id}/artifacts/{artifact_id}/...` endpoints, plus `/v1/tasks/{id}/tree`, `/v1/tasks/{id}/jobs`, and per-job cancel. See [Per-artifact control](/task-management/orchestration#per-artifact-control).
+- **Submission parameters.** Submissions accept a `params` object to control detonation, child detonation, limits, deep scans, caching, plugin parameters, and archive passwords. See [Submission parameters](/task-management/orchestration#submission-parameters).
+- **CLI.** New `malbox task tree` and `malbox task cancel` commands, `malbox task get --artifact`, and new `malbox task submit` flags: `--machine-id`, `--exclude-plugin`, `--no-detonate`, `--detonate-children`, `--max-detonations`, `--deep-scan`, `--ignore-cache`, `--password`, and `--param`. See the [`malbox` reference](/reference/cli/malbox#task).
+- **Artifact tree in the web UI.** Sample and run pages show the task's artifact tree with job chips. Right-click an artifact to cancel, rescan, analyse it separately, or raise its priority. Sample pages show where a sample was also found inside other tasks, and the submission dialog gained deep-scan, ignore-cache, child-detonation, and max-detonation options.
+- **Machine tags.** `[[machines]]` entries accept `tags`, which detonation profiles can require.
+- **Example archive extractor.** A new `host-archive-extractor` example plugin extracts zip archives (including password-protected ones) as child artifacts.
+
+## Updates
+
+- **`[orchestration]` configuration.** Limits, retries, concurrency, and caching are configured in an optional `[orchestration]` section. See the [orchestration reference](/reference/configuration/orchestration).
+- **Plugin reports per artifact.** Reports are stored per artifact. `GET /v1/tasks/{id}/report` and its plugin endpoint accept an optional `artifact_id`; without it, the aggregate verdict covers the whole artifact tree.
+- **Structured plugin failures.** Host plugin timeouts, crashes, and reported errors are now distinguished. Timed-out or crashed host plugins are killed, and persistent ones are restarted.
+- **Guest command execution and stop.** The guest `ExecuteCommand` RPC now runs commands, and a new `StopTask` RPC ends observation early.
+- **Stricter submissions.** An unknown `platform` or an invalid `snapshot_id` is now rejected with HTTP 422 instead of silently falling back.
+- **Task list and details.** `malbox task list` and `malbox task get` show artifact and error counts and mark partial tasks.
+
+## Breaking changes
+
+<Warning>
+- **Fresh database required.** The database schema was rewritten and existing data is not migrated. Starting the daemon against a database created by an earlier release exits with `database schema was created by an incompatible malbox version; drop and recreate the "malbox" database`. Drop and recreate the database before upgrading.
+- **Worker configuration removed.** `[analysis]`, `general.max_workers`, `general.min_workers`, and `general.idle_timeout_ms` no longer exist. A `malbox.toml` that still contains them fails to load with an `unknown field` error. Remove them and use [`[orchestration]`](/reference/configuration/orchestration) instead.
+- **Result chaining removed.** The `[events]` manifest section, the `PluginResultAvailable` event, `#[on_event(..., from = [...])]`, and the per-plugin result channels are gone. Old manifests with `[events]` still load; the section is ignored. Use stages, shared data, and child artifacts instead. See [Passing data between plugins](/plugin-system/event-hooks#passing-data-between-plugins).
+- **C++ plugin ABI 8.** `MALBOX_ABI_VERSION` is now 8. Rebuild C++ plugins against the new SDK headers. `MalboxEvent.source`, `MalboxEvent.result_name`, and the plugin-result event tag were removed.
+- **Results endpoints removed.** `GET /v1/tasks/{id}/results` and `GET /v1/tasks/{id}/results/{rid}/content` were removed. Use `GET /v1/tasks/{id}/tree` and `GET /v1/tasks/{id}/artifacts/{artifact_id}/content`. `malbox task get --result` is replaced by `--artifact`.
+- **Fewer task states.** Task status is now one of `pending`, `running`, `completed`, `failed`, or `canceled`.
+- **`HostRuntime::new` signature.** Rust host plugins that construct the runtime by hand call `HostRuntime::new(plugin, meta)`; the subscriptions argument was removed.
+</Warning>
+
+## Bug fixes
+
+- Fixed `push_file` and file results on host plugins, which never reached the daemon. Files up to 256 MiB are now sent inline.
+- Fixed a deadlock when a host plugin pushed more than 256 results in one task.
+- Fixed stashed and file results reaching the daemon without a name.
+- Fixed plugin report storage failing with `RowNotFound` when a report for the same plugin already existed.
+- Fixed `malbox task list` failing because it expected a different response shape from the paginated API.
+
+</Update>
+
 <Update label="July 9, 2026" tags={["release"]}>
 
 ## New features

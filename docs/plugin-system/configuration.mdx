@@ -14,7 +14,7 @@ Plugins can run either on the host system or inside a sandboxed (guest) environm
 | **Host** | iceoryx2 IPC (shared memory) | Can persist across tasks | Analysis that needs host-level access or long-lived state (ML models, signature databases) |
 | **Guest** | gRPC | Terminated with sandbox after each task | Analysis inside a VM that monitors the sample at runtime (ETW, syscall tracing) |
 
-Host plugins implement the `HostPlugin` trait with `on_task`, `on_start`, `on_stop`, `on_event`, and `health_check` handlers. Guest plugins implement the `GuestPlugin` trait with `on_start`, `on_stop`, `execute_sample`, and `health_check` handlers.
+Host plugins implement the `HostPlugin` trait with `on_task`, `on_start`, `on_stop`, `on_event`, and `health_check` handlers. Guest plugins implement the `GuestPlugin` trait with `on_start`, `on_stop`, `execute_sample`, and `health_check` handlers. In detonations run by the daemon, the daemon launches the sample after every guest plugin's `on_start` returns, so `execute_sample` is not called; see [Sample launch](/task-management/orchestration#sample-launch).
 
 ## Execution contexts
 
@@ -33,6 +33,10 @@ Set via `execution` in the `[runtime]` section of `plugin.toml`:
 [runtime]
 execution = "parallel"
 ```
+
+<Note>
+The daemon currently runs at most one job at a time on each host plugin, whatever `execution` is set to. Concurrency across plugins is controlled by [`host_concurrency`](/reference/configuration/orchestration#concurrency).
+</Note>
 
 ## State management
 
@@ -65,22 +69,36 @@ To change a runtime setting, edit `plugin.toml` and rebuild the plugin (guest) o
 
 The log filter is the exception. It only sets the default verbosity. Set `RUST_LOG` to a valid `EnvFilter` directive to override it at runtime without a rebuild. Host plugins also read `IOX2_LOG_LEVEL` (default `Info`) for the iceoryx2 transport log level. See [Logging](/reference/plugin-sdk/sdk#logging) in the SDK reference.
 
-## Custom plugin settings
+## Routing
 
-Beyond system-level configuration, you can expose custom settings. The daemon passes a `HashMap<String, String>` config map to the plugin's `on_start` handler. In Rust host plugins, the `#[malbox::handlers]` macro can automatically deserialize this map into a typed struct if your `on_start` method takes a typed parameter.
-
-## Event subscriptions
-
-Host plugins can subscribe to other plugins' event channels via the `[events]` section in `plugin.toml`. This enables reactive analysis pipelines where plugins chain off each other's output. See [Event Hooks](/plugin-system/event-hooks) for details.
+Host plugins declare which artifacts they analyse and when, in the `[routing]` section. The orchestrator uses it to plan a job for every artifact whose [type](/task-management/orchestration#file-types) the plugin accepts:
 
 ```toml
-[events]
-subscribe = ["string-extractor"]
+[routing]
+stage = "extract"                 # filter, extract, static (default), post, review
+accepts = "archive/(zip|7-zip)"   # regex over the artifact type, default ".*"
+rejects = ""                      # regex; empty rejects nothing
+monitored_keys = ["passwords"]    # re-run when these shared-data keys change
 ```
 
-<Note>
-Guest plugins do not support event subscriptions.
-</Note>
+Without a `[routing]` section, a host plugin runs in the `static` stage on every analysed artifact. Guest plugins cannot have a `[routing]` section; they run during detonations. See the [`[routing]` reference](/reference/configuration/plugins#routing) for every field, and [Orchestration](/task-management/orchestration) for how stages, caching, and recursion prevention work.
+
+## Plugin parameters
+
+Host plugins declare user-tunable settings in `[parameters]`. Each parameter has a type and a default, and a submission can override it per task through `params.plugin_params`:
+
+```toml
+[parameters.passwords]
+type = "list"
+default = []
+description = "Extra passwords to try"
+```
+
+Your plugin reads the resolved values (defaults overlaid with the submission's overrides) through `params()` on the task info. See the [`[parameters]` reference](/reference/configuration/plugins#parameters).
+
+## Event hooks
+
+Host plugins can react to system events such as task completion. No manifest configuration is needed. See [Event Hooks](/plugin-system/event-hooks).
 
 ## Reference
 

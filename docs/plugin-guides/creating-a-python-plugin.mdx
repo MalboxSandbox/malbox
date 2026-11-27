@@ -129,6 +129,19 @@ def on_task(self, ctx: malbox.Context):
     task.config_value("key")  # str | None - look up a single config value
 ```
 
+The daemon also describes the job: which artifact it analyses and what earlier plugins found.
+
+```python
+task = ctx.task()
+task.job_id        # int | None
+task.artifact      # dict | None - keys: id, sha256, artifact_type, name, depth
+task.deep_scan     # bool - the submitter asked for a deeper scan
+task.ancestry      # list[dict] - {sha256, artifact_type, relation}, root first
+task.shared        # dict - task-wide data written by earlier plugins
+task.params        # dict - [parameters] defaults plus submission overrides
+task.indicators    # list[dict] - earlier indicators (with uses_indicators = true)
+```
+
 <Note>
 `Context` and `TaskInfo` are only valid during the handler call. Do not store references to them.
 </Note>
@@ -152,6 +165,22 @@ ctx.results().push_all([result1, result2, result3])
 ```
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+## Pushing artifacts
+
+When your plugin extracts, unpacks, or decodes a file, push it as an artifact. The daemon stores it as a child of the current artifact and, if analysis is requested, routes it to every plugin that accepts its type. See [Orchestration](/task-management/orchestration).
+
+```python
+try:
+    ctx.results().push_artifact("payload.exe", data=buf)          # relation "extracted"
+except malbox.ArtifactLimitError:
+    pass                                                          # budget spent: stop pushing
+
+ctx.results().push_artifact("strings.txt", path="/tmp/strings.txt",
+                            relation="output", analyze=False)
+```
+
+Pass exactly one of `data` or `path`. `relation` is one of `extracted`, `dropped`, `unpacked`, `memdump`, `downloaded`, `pcap`, or `output`; it decides whether the artifact is [analysed by default](/task-management/orchestration#relations), and `analyze` overrides that. Once the job's artifact budget is spent, `push_artifact` raises `malbox.ArtifactLimitError`.
 
 ## Reports
 
@@ -185,6 +214,8 @@ ctx.results().push(result)                    # push analysis result
 ctx.emit_event(event)                         # emit system event
 ctx.warn("suspicious file detected")          # attach warning to task
 ctx.mark_collected("/path/to/file")           # prevent auto-collection
+ctx.shared_put("passwords", ["infected"])     # merge into task-wide shared data
+ctx.drop_artifact()                           # skip this artifact's later stages
 ```
 
 ## Logging
@@ -202,7 +233,7 @@ malbox.error("failed to parse header")
 
 Python exceptions in handlers are caught and reported to the daemon:
 
-- Exceptions in `on_task` result in a `TaskFailed` event
+- Exceptions in `on_task` are reported to the daemon as a plugin error, and the job fails without a retry
 - Exceptions in `on_start` prevent the plugin from reaching `Ready` state
 - Tracebacks are captured and included in error messages
 
@@ -216,7 +247,7 @@ def on_task(self, ctx: malbox.Context):
     ctx.results().push(malbox.PluginResult.json("result", {"status": "ok"}))
 ```
 
-## Subscribing to events
+## Handling events
 
 Override `on_event` to react to system-wide or plugin lifecycle events:
 
@@ -224,8 +255,6 @@ Override `on_event` to react to system-wide or plugin lifecycle events:
 def on_event(self, event: malbox.Event):
     if event.kind == "TaskCompleted":
         malbox.info(f"Task {event.id} completed")
-    elif event.kind == "PluginResultAvailable":
-        malbox.info(f"Result '{event.result_name}' from {event.source}")
     elif event.kind == "ConfigReloaded":
         malbox.info("Configuration reloaded")
 ```

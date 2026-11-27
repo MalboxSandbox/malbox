@@ -117,6 +117,42 @@ ctx.results().push_file("name", "/path/to/file");
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
 
+## Pushing artifacts
+
+When your plugin extracts, unpacks, or decodes a file, push it as an artifact. The daemon stores it as a child of the current artifact and, if analysis is requested, routes it to every plugin that accepts its type. See [Orchestration](/task-management/orchestration).
+
+```cpp
+// In-memory bytes, analysed by default (relation "extracted")
+ctx.results().push_artifact("payload.exe", byte_span);
+
+// A file on disk, kept but not analysed
+malbox::ArtifactOpts opts{.relation = malbox::ArtifactRelation::Output, .analyze = 0};
+ctx.results().push_artifact_file("strings.txt", "/tmp/strings.txt", opts);
+```
+
+`ArtifactOpts::analyze` is `-1` (use the [relation](/task-management/orchestration#relations) default), `0`, or `1`. When the job's artifact budget is spent, the call throws `malbox::Error` with the message `artifact limit reached (N)`.
+
+## Job context
+
+The daemon describes the current job in the task config. Read it with `ctx.task().config_value(...)`; JSON values are strings you parse yourself:
+
+| Key | Value |
+|-----|-------|
+| `malbox.job_id`, `malbox.artifact_id` | Decimal IDs |
+| `malbox.artifact_sha256`, `malbox.artifact_type`, `malbox.artifact_name`, `malbox.artifact_depth` | The artifact being analysed |
+| `malbox.deep_scan` | `true` or `false` |
+| `malbox.shared` | JSON object of task-wide shared data |
+| `malbox.ancestry` | JSON array of `{sha256, artifact_type, relation}`, root first |
+| `malbox.params` | JSON object of resolved `[parameters]` |
+| `malbox.indicators` | JSON array of earlier indicators (only with `uses_indicators = true`) |
+
+Share data with later plugins, or stop the artifact's later stages:
+
+```cpp
+ctx.shared_put("passwords", R"(["infected"])");   // value is JSON text
+ctx.drop_artifact();
+```
+
 ## Reports
 
 <ReportsGuide />
@@ -152,15 +188,14 @@ if (something_wrong) {
 
 SDK methods like `ctx.task().sample_bytes()` also throw `malbox::Error` on failure.
 
-## Subscribing to events
+## Handling events
 
 Override `on_event` to react to system-wide or plugin lifecycle events:
 
 ```cpp
 void on_event(const malbox::Event& event) override {
-    if (event.tag() == malbox::EventTag::PluginResultAvailable) {
-        auto source = event.source();
-        auto name = event.result_name();
+    if (event.tag() == malbox::EventTag::TaskCompleted) {
+        auto task_id = event.task_id();
     }
 }
 ```
@@ -292,6 +327,10 @@ Override virtual methods on the `malbox::GuestPlugin` base class:
 | `execute_sample` | `(const std::filesystem::path&) -> LaunchResult` | No |
 | `health_check` | `() -> HealthStatus` | No |
 
+<Note>
+In detonations scheduled by the daemon, the daemon launches the sample itself once every guest plugin's `on_start` has returned, so `execute_sample` is not called. See [Sample launch](/task-management/orchestration#sample-launch).
+</Note>
+
 ## Pushing results
 
 Results are pushed to the daemon via the `ResultSink` obtained from `ctx.results()`. You can call push methods multiple times to stream results incrementally:
@@ -309,6 +348,8 @@ ctx.results().push_file("name", "/path/to/file");
 ```
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
+
+To make files written during the detonation analysable child artifacts (for example, dropped files), push them with `ctx.results().push_artifact_file(...)`, or add `[[runtime.auto_collect.artifacts.rules]]` to `plugin.toml`. The generated runtime config carries the rules in `AutoCollectConfig::rules`.
 
 ## Reports
 

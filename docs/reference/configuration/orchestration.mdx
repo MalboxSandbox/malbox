@@ -1,0 +1,123 @@
+---
+title: "Orchestration"
+description: "Reference for the [orchestration] section of malbox.toml: analysis limits, retries, caching, concurrency, and detonation profiles"
+---
+
+This page documents the `[orchestration]` section of `malbox.toml`. For how tasks, artifacts, and jobs fit together, see [Orchestration](/task-management/orchestration).
+
+The whole section is optional. Every key has a default, so you only list the values you want to change.
+
+<Warning>
+Earlier releases configured a worker pool through `[analysis]` and the `general.max_workers`, `general.min_workers`, and `general.idle_timeout_ms` keys. Those keys no longer exist. A `malbox.toml` that still contains them fails to load with an `unknown field` error. Remove them, and add an `[orchestration]` section if you need non-default values.
+</Warning>
+
+## `[orchestration]`
+
+```toml
+[orchestration]
+max_depth = 6
+max_artifacts = 500
+max_artifacts_per_job = 1000
+max_detonations = 3
+max_total_bytes = 2147483648
+max_file_size = 104857600
+task_deadline_secs = 7200
+max_artifact_time_secs = 1800
+stall_check_secs = 600
+max_attempts = 3
+retry_backoff_secs = 10
+max_reruns = 2
+host_concurrency = 4
+max_running_jobs_per_task = 8
+max_concurrent_vm_boots = 2
+detonation_decision_window_secs = 60
+cache_ttl_secs = 604800
+empty_result_cache_ttl_secs = 86400
+```
+
+### Per-task limits
+
+These are the defaults for every task. A submission can lower them through its [`params`](/task-management/orchestration#submission-parameters), but never raise them above the configured value.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_depth` | `integer` | `6` | Maximum artifact depth. The submitted sample is depth 0. A child whose depth would reach this value is stored but not analysed (drop reason `max_depth`). |
+| `max_artifacts` | `integer` | `500` | Maximum number of analysed artifacts per task, including the submitted sample. Further children are stored but not analysed (`max_artifacts`). |
+| `max_artifacts_per_job` | `integer` | `1000` | Maximum number of artifacts of any kind that one job may emit. Extra outputs are discarded and recorded in the job's error message. |
+| `max_detonations` | `integer` | `3` | Maximum number of detonation jobs per task. |
+| `max_total_bytes` | `integer` | `2147483648` (2 GiB) | Maximum total size of stored artifacts per task. An artifact that would exceed it is recorded without content (`max_total_bytes`). |
+| `max_file_size` | `integer` | `104857600` (100 MiB) | Artifacts larger than this are kept but not analysed (`too_large`). |
+| `task_deadline_secs` | `integer` | `7200` | Wall-clock limit for a task. When it passes, every unfinished job is canceled and the task completes as partial. |
+| `max_artifact_time_secs` | `integer` | `1800` | Time limit for one artifact's jobs, counted from when its jobs are planned. When it passes, the artifact is canceled; its children continue. |
+
+### Retries and re-runs
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_attempts` | `integer` | `3` | Attempts per job, including the first. Must be at least 1. Jobs that fail with a non-recoverable error are never retried. |
+| `retry_backoff_secs` | `integer` | `10` | Delay before a retry, multiplied by the number of attempts so far. |
+| `max_reruns` | `integer` | `2` | How many times a job may re-run because a shared-data key it monitors changed. See [`monitored_keys`](/reference/configuration/plugins#routing). |
+| `stall_check_secs` | `integer` | `600` | If a task with unfinished jobs sees no event for this long, the orchestrator reloads its state from the database and logs a warning. |
+
+### Concurrency
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host_concurrency` | `integer` | `4` | Maximum number of host jobs running at once across the daemon. Must be at least 1. Each host plugin still runs at most one job at a time. |
+| `max_running_jobs_per_task` | `integer` | `8` | A host job is not started while its task already has this many running jobs. Must be at least 1. |
+| `max_concurrent_vm_boots` | `integer` | `2` | Maximum number of machines booting at once. Must be at least 1. |
+| `detonation_decision_window_secs` | `integer` | `60` | How long child artifacts wait for the detonation budget decision. The orchestrator decides earlier once static analysis of the task is finished. See [Detonation](/task-management/orchestration#detonation). |
+
+### Result cache
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cache_ttl_secs` | `integer` | `604800` (7 days) | How long a cached host-job result stays valid. |
+| `empty_result_cache_ttl_secs` | `integer` | `86400` (1 day) | How long a cached result with no report and no artifacts stays valid. |
+
+## Detonation profiles
+
+A detonation profile decides which artifacts are detonated automatically and on which machine. The first profile, in file order, whose `accepts` matches an artifact's [type](/task-management/orchestration#file-types) is used. With no profiles configured, only submissions that name a platform, snapshot, or machine are detonated.
+
+```toml
+[[orchestration.detonation_profiles]]
+name = "win10-default"
+accepts = "executable/windows/.*|installer/windows/msi|document/office/.*|document/pdf|code/(javascript|vbs|powershell|batch|hta)|shortcut/windows"
+platform = "windows"
+snapshot = "with-plugins"
+tags = []
+guest_plugins = []
+timeout_secs = 300
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Unique profile name. Detonation jobs are named after it. |
+| `accepts` | `string` | Yes | - | Regular expression over the artifact type. It is anchored, so it must match the whole type. |
+| `platform` | `windows` \| `linux` | Yes | - | Machine platform. |
+| `snapshot` | `string` | No | active snapshot | Snapshot name to detonate on. Without it, the machine's active snapshot is used. |
+| `arch` | `x64` \| `x86` | No | any | Machine architecture. `x86` also matches `x64` machines. |
+| `tags` | `string[]` | No | `[]` | Machine tags that must all be present. Tags are set with `tags` on a `[[machines]]` entry. |
+| `guest_plugins` | `string[]` | No | `[]` | Guest plugins to run. Only snapshots that contain all of them are used. Empty means every guest plugin in the snapshot. |
+| `timeout_secs` | `integer` | No | `300` | How long the sample runs before the guest plugins are stopped. |
+
+### Machine tags
+
+`[[machines]]` entries accept an optional `tags` list that profiles can require:
+
+```toml
+[[machines]]
+name = "win10-office"
+# ...
+tags = ["office"]
+```
+
+Changing tags updates the machine in place; it does not recreate it.
+
+## Validation
+
+The daemon validates the section at startup and refuses to start if:
+
+- `max_attempts`, `host_concurrency`, `max_concurrent_vm_boots`, or `max_running_jobs_per_task` is 0;
+- two profiles share a `name`;
+- a profile's `accepts` is not a valid regular expression.

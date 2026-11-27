@@ -1,45 +1,50 @@
 ---
 title: "Scheduler"
-description: "How the Malbox scheduler coordinates task execution and resource allocation"
+description: "How the Malbox orchestrator schedules jobs, runs host plugins and detonations, and recovers after a restart"
 ---
 
 ## Overview
 
-The Malbox scheduler is a multi-tier asynchronous scheduling system that coordinates task queuing, worker pool allocation, resource provisioning, and plugin execution lifecycle.
+The Malbox scheduler is the orchestrator inside the daemon. It plans jobs for each artifact of a task, releases them stage by stage, runs them on host plugins and machines, and records the results. For the analysis model it implements (tasks, artifacts, jobs, stages, and limits), see [Orchestration](/task-management/orchestration).
 
-Think of the scheduler as the central coordinator that orchestrates the entire task management system.
+All scheduling state lives in PostgreSQL: tasks, artifacts, the edges between them, jobs, and the result cache. The in-memory components below can be rebuilt from the database at any time.
 
 ## Architecture
 
-The scheduler implements an event-driven architecture built on Tokio's asynchronous runtime. Rather than a single event loop, it uses a spawn-based fan-out pattern with three concurrent tasks:
+The orchestrator is built on Tokio and has four kinds of components.
 
-- **Task ingestion** - a spawned task that receives new submissions from the HTTP layer via an mpsc channel, caches them in the task store, and enqueues them for processing
-- **Worker event listener** - a spawned task that receives completion and error events from workers via an mpsc channel
-- **Shutdown coordinator** - the main task awaits a `CancellationToken`, then triggers graceful shutdown of the worker pool and aborts the ingestion/event tasks
+### Coordinator
 
-On startup, the scheduler also recovers orphaned tasks from the database — tasks left in transient states from a prior daemon crash. It then loads any pending tasks back into the queue.
+The coordinator receives new submissions and control commands (cancel, rescan, priority changes) from the HTTP API, and routes them to the right task actor. On startup it:
 
-The scheduler maintains references to three subsystems: the task store, task queue, and worker pool.
+1. purges expired result-cache entries (and does so again every hour);
+2. returns jobs that were running when the daemon stopped to the queue, or fails them if they have no attempts left;
+3. starts an actor for every task that is still `pending` or `running`.
 
-### Task store
+### Task actors
 
-The task store provides persistent database storage combined with an in-memory cache for efficient retrieval of tasks loaded during the daemon's lifetime.
+Each active task has its own actor. The actor is the only component that changes the task's artifact states and task status. It:
 
-### Task queue
+- plans jobs for each new analysed artifact, using plugin [routing](/reference/configuration/plugins#routing) and the [detonation profiles](/reference/configuration/orchestration#detonation-profiles);
+- releases each artifact's jobs one stage at a time, replaying cached results when possible;
+- admits or drops the child artifacts that finished jobs produced, applying the task's limits;
+- decides which child artifacts use the detonation budget;
+- enforces task and artifact deadlines, and reloads its state from the database if nothing happens for `stall_check_secs`;
+- finalizes the task, its counts, and its verdict when no job is left.
 
-The task queue implements priority-based ordering using a [binary heap](https://doc.rust-lang.org/std/collections/struct.BinaryHeap.html). Task priority determines processing order when resources become available.
+An actor exits when its task finishes. A later rescan of that task starts a new actor.
 
-<Note>The task queue stores only task IDs. Actual task contents are retrieved from the task store.</Note>
+### Executors
 
-### Worker pool
+Two executors pick up released jobs:
 
-The worker pool manages the lifecycle of worker instances. It maintains a baseline of `min_workers` that never idle out, and spawns additional workers (up to `max_workers`) when all active workers are busy. Additional workers have an idle timeout and exit automatically when work dries up. See [Workers](/task-management/workers) for more details.
+- The **host executor** claims ready host jobs in priority order, up to `host_concurrency` at once. Each host plugin runs one job at a time, and a task with `max_running_jobs_per_task` running jobs waits for one to finish.
+- The **detonation executor** scans ready detonation jobs, acquires a matching machine for each, and runs the session. At most `max_concurrent_vm_boots` machines boot at once. A job stays queued while every matching machine is busy.
 
-### Communication
+Each finished job is ingested: reports are stored, shared data is merged, and every other output becomes a child artifact. The executor then notifies the task's actor.
 
-Components communicate through typed channels and coordination primitives:
+### Cancellation
 
-- **Task submissions** - external systems submit tasks via an [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Worker events** - workers report completion and errors through a dedicated [mpsc channel](https://docs.rs/tokio/latest/tokio/sync/mpsc/fn.channel.html)
-- **Task availability** - workers are notified of new tasks via a shared [`Notify`](https://docs.rs/tokio/latest/tokio/sync/struct.Notify.html)
-- **Shutdown coordination** - a [`CancellationToken`](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html) propagates shutdown signals from the scheduler to all workers via child tokens
+Every running job has a cancellation token. Canceling a task, an artifact, or a job cancels its queued jobs in the database and signals the tokens of its running jobs. A canceled host plugin process is killed and, if it is persistent, restarted. A canceled detonation stops its guest plugins and releases the machine.
+
+On daemon shutdown, the coordinator cancels every running job and waits up to 20 seconds for the executors. Interrupted jobs run again on the next start.

@@ -41,8 +41,8 @@
                     {
                         "group": "Task Management",
                         "pages": [
-                            "task-management/scheduling",
-                            "task-management/workers"
+                            "task-management/orchestration",
+                            "task-management/scheduling"
                         ]
                     },
                     {
@@ -88,7 +88,7 @@
                     {
                         "group": "Configuration",
                         "pages": [
-                            "reference/configuration/workers",
+                            "reference/configuration/orchestration",
                             "reference/configuration/plugins"
                         ]
                     },
@@ -118,6 +118,16 @@
             ]
         }
     },
+    "redirects": [
+        {
+            "source": "/task-management/workers",
+            "destination": "/task-management/orchestration"
+        },
+        {
+            "source": "/reference/configuration/workers",
+            "destination": "/reference/configuration/orchestration"
+        }
+    ],
     "logo": {
         "light": "/logo/light.svg",
         "dark": "/logo/dark.svg"

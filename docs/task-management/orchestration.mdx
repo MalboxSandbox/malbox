@@ -1,0 +1,302 @@
+---
+title: "Orchestration"
+description: "How Malbox turns a submission into a tree of artifacts and jobs, routes them to plugins, detonates samples, and applies limits"
+---
+
+## Overview
+
+When you submit a sample, Malbox creates a **task**. The task owns a tree of **artifacts**: the submitted sample at the root, plus every file that plugins extract, drop, unpack, dump, or output. Each analysed artifact gets **jobs**: one per host plugin that routes to it, and at most one detonation.
+
+```text
+task #7
+└── root      invoice.zip        [archive/zip]               done
+    ├── job   archive-extractor  completed
+    └── extracted  invoice.exe   [executable/windows/pe32]   done
+        ├── job   pe-analyzer    completed
+        └── job   win10-default  completed    (detonation)
+```
+
+Child artifacts are analysed the same way as the root, so an archive inside an archive inside an email is unpacked and analysed level by level, within the [limits](#limits) you configure.
+
+Jobs are stored in PostgreSQL. If the daemon restarts, jobs that were running are returned to the queue and run again, unless they have no attempts left, in which case they fail.
+
+## Artifacts
+
+An artifact is either **analysed** or **stored**:
+
+- An **analysed** artifact is registered as a sample and gets jobs.
+- A **stored** artifact is kept and downloadable, but no plugin runs on it. A stored artifact can be analysed later with [rescan or promote](#per-artifact-control).
+
+Artifacts are identified by SHA-256 within a task. If a plugin emits a file the task already has, Malbox adds an edge to the existing artifact instead of creating a new one. An artifact can therefore have several parents, and a sample that re-emits itself does not loop.
+
+### Relations
+
+Each edge from a parent to a child has a relation. A plugin chooses the relation when it [pushes an artifact](/reference/plugin-sdk/sdk), and the relation decides whether the child is analysed by default.
+
+| Relation | Meaning | Analysed by default |
+|----------|---------|---------------------|
+| `root` | The submitted sample. Reserved; plugins cannot use it. | Yes |
+| `extracted` | Extracted from a container (archive, document, installer). | Yes |
+| `dropped` | Written to disk by the sample during detonation. | Yes |
+| `unpacked` | An unpacked or decrypted payload. | Yes |
+| `memdump` | A memory dump. | No |
+| `downloaded` | Downloaded by the sample. | Yes |
+| `pcap` | A network capture. | Yes |
+| `output` | Any other plugin output, such as a log. | No |
+
+Plugin outputs that are not reports and not pushed as artifacts are stored as `output` artifacts.
+
+### Artifact states
+
+| State | Meaning |
+|-------|---------|
+| `stored` | Kept, not analysed. |
+| `dropped` | Analysis was requested, but a limit prevented it. `drop_reason` says which one. |
+| `pending` | Analysed; jobs are being planned. |
+| `running` | Has unfinished jobs. |
+| `done` | All jobs finished. |
+| `canceled` | Canceled by a user, a deadline, or a canceled parent. |
+
+Drop reasons: `too_large`, `max_depth`, `max_artifacts`, `max_total_bytes`, `max_artifacts_per_job`, `filtered`.
+
+## Jobs
+
+A **host job** runs one host plugin on one artifact. A **detonation job** boots one machine, copies the artifact into it, starts every selected guest plugin, launches the sample once, and collects what the guest plugins observed.
+
+### Stages
+
+Jobs of an artifact are released stage by stage, in this order:
+
+| Stage | Typical use |
+|-------|-------------|
+| `filter` | Cheap checks that can stop further analysis, such as known-good lookups. |
+| `extract` | Unpacking archives, documents, and installers. |
+| `static` | Static analysis. The default for host plugins. |
+| `dynamic` | Detonation. Reserved for detonation jobs. |
+| `post` | Analysis that needs dynamic results. |
+| `review` | Final scoring and summaries. |
+
+A stage starts only after every job of the earlier stages on that artifact has finished. A plugin in a later stage can therefore read the [shared data](#shared-data-between-plugins) and indicators that earlier plugins produced. A host plugin chooses its stage with [`[routing]`](/reference/configuration/plugins#routing).
+
+A plugin can call `drop_artifact()` to skip the artifact's remaining stages. The remaining jobs become `skipped`, unless the submission sets `ignore_filtering`.
+
+### Job states
+
+| State | Meaning |
+|-------|---------|
+| `blocked` | Waiting for an earlier stage. |
+| `ready` | Queued. |
+| `running` | Running now. |
+| `completed` | Finished successfully. |
+| `failed` | Failed and will not be retried. |
+| `skipped` | Not run: the artifact was dropped by a plugin, or the detonation budget was spent. |
+| `cached` | Not run: the result was copied from an earlier identical job. |
+| `canceled` | Canceled. |
+
+### Retries
+
+A failed job is classified and retried up to `max_attempts` times, with a delay of `retry_backoff_secs` multiplied by the attempt count.
+
+| Error class | Cause | Retried |
+|-------------|-------|---------|
+| `recoverable` | The plugin crashed, was not ready, or a transient error occurred. | Yes |
+| `timeout` | The plugin exceeded its timeout. The plugin process is killed. | Yes |
+| `machine_lost` | The machine failed to restore, boot, or receive the sample. A machine that fails to restore or boot is marked as failed. | Yes |
+| `nonrecoverable` | The plugin reported an error, returned an invalid report, or no machine can serve the detonation. | No |
+
+A failed job does not fail its task. A task is `failed` only when every job of the submitted sample failed.
+
+### Result cache
+
+Host job results are cached by artifact SHA-256, plugin name and version, resolved parameters, and the `deep_scan` and `ignore_filtering` submission flags. When an identical job runs again, Malbox copies the earlier report and child artifacts instead of running the plugin, and marks the job `cached`.
+
+A plugin is not cached when it sets `cacheable = false`, sets `uses_indicators = true`, or declares `monitored_keys`. A submission with `ignore_cache` bypasses the cache. Detonations are never cached.
+
+## Routing
+
+Each artifact is identified when it is stored, and gets an **artifact type**, such as `executable/windows/pe32` or `archive/zip`. Host plugins declare the types they accept with a regular expression in [`[routing]`](/reference/configuration/plugins#routing). Detonation profiles use the same types.
+
+For each analysed artifact, a host plugin gets a job when:
+
+1. it is selected (a submission's `plugins` list, or every host plugin when that list names none) and not excluded;
+2. its `accepts` matches the artifact type and its `rejects` does not;
+3. its category is not forbidden by [recursion prevention](#recursion-prevention);
+4. none of the plugins that produced the artifact are listed in its `sources_exclude`.
+
+### File types
+
+Malbox derives the type from the libmagic MIME type, the libmagic description, and the file extension. The first matching row wins.
+
+| Artifact type | Detected from |
+|---------------|---------------|
+| `empty` | Zero-byte file |
+| `executable/windows/dotnet` | .NET assembly |
+| `executable/windows/dll64`, `executable/windows/dll32` | PE32+ / PE32 DLL |
+| `executable/windows/pe64`, `executable/windows/pe32` | PE32+ / PE32 or MS-DOS executable |
+| `executable/linux/elf64`, `executable/linux/elf32` | 64-bit / 32-bit ELF |
+| `executable/macos/macho` | Mach-O |
+| `installer/windows/msi` | MSI installer |
+| `java/jar` | JAR archive or `.jar` extension |
+| `android/apk` | ZIP with `.apk` extension |
+| `document/office/word`, `document/office/excel`, `document/office/powerpoint` | OOXML or legacy Office MIME types |
+| `document/office/rtf` | RTF |
+| `document/office/onenote` | `.one` extension |
+| `document/office/ole` | Other OLE compound documents |
+| `document/pdf` | PDF |
+| `shortcut/windows` | Windows shortcut (`.lnk`) |
+| `archive/zip`, `archive/7-zip`, `archive/rar`, `archive/gzip`, `archive/bzip2`, `archive/xz`, `archive/tar`, `archive/cab`, `archive/iso` | Archive MIME types |
+| `network/pcap`, `network/pcapng` | Packet captures |
+| `code/powershell` | `.ps1`, `.psm1` |
+| `code/javascript` | `.js`, `.jse` |
+| `code/vbs` | `.vbs`, `.vbe` |
+| `code/batch` | `.bat`, `.cmd` |
+| `code/hta` | `.hta` |
+| `code/python` | Python MIME type or `.py` |
+| `code/shell` | Shell script MIME type or `.sh` |
+| `code/html` | HTML |
+| `text/json`, `text/xml` | JSON, XML |
+| `image/<subtype>` | Any `image/*` MIME type, for example `image/png` |
+| `text/plain` | Any other `text/*` MIME type |
+| `unknown` | Anything else |
+
+## Detonation
+
+An analysed artifact gets at most one detonation job, chosen in this order:
+
+1. For the submitted sample, an explicit request: the submission names a `platform`, `snapshot_id`, or `machine_id`. The job is named `submission` and uses the submission's `timeout` and `plugins`.
+2. For the submitted sample, the profile named in `params.detonation.profile`.
+3. The first [detonation profile](/reference/configuration/orchestration#detonation-profiles) whose `accepts` matches the artifact type.
+
+With `params.detonate = "always"` and nothing matching, the submitted sample still gets a detonation job, which fails as unserviceable. With `params.detonate = "never"`, nothing is detonated.
+
+The detonation job waits for a free machine that matches the platform, architecture, machine, snapshot, tags, and guest plugins it needs. It fails with a `nonrecoverable` error if no configured machine could ever match.
+
+### Sample launch
+
+The daemon, not the guest plugins, launches the sample. It waits (up to 60 seconds) until every guest plugin has finished `on_start`, then starts the sample once with a launch package chosen from the artifact type and machine platform:
+
+| Platform | Package | Command | Default for |
+|----------|---------|---------|-------------|
+| Windows | `exe` | `cmd.exe /c <file>` | `executable/windows/pe32`, `pe64`, `dotnet` |
+| Windows | `dll` | `rundll32.exe <file>,<function>` (function defaults to `DllMain`) | `executable/windows/dll32`, `dll64` |
+| Windows | `msi` | `msiexec.exe /i <file> /quiet` | `installer/windows/msi` |
+| Windows | `powershell` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <file>` | `code/powershell` |
+| Windows | `wscript` | `wscript.exe <file>` | `code/javascript`, `code/vbs` |
+| Windows | `batch` | `cmd.exe /c <file>` | `code/batch` |
+| Windows | `hta` | `mshta.exe <file>` | `code/hta` |
+| Windows | `open` | `cmd.exe /c start "" <file>` | Everything else |
+| Linux | `elf` | `sh -c "chmod +x ./<file> && ./<file>"` | `executable/linux/*` |
+| Linux | `shell` | `sh <file>` | `code/shell` |
+| Linux | `python` | `python3 <file>` | `code/python` |
+| Linux | `open` | `xdg-open <file>` | Everything else |
+
+Override the package and DLL export for the submitted sample with `params.detonation.package` and `params.detonation.dll_function`. Inside the guest, the file keeps its sanitised name, and Malbox appends the usual extension for its type (for example `.exe` or `.docx`) when the name lacks it.
+
+When the detonation timeout (`timeout_secs` of the profile, or the submission's `timeout`) passes, the daemon tells each guest plugin to stop and collects its results.
+
+### Detonation budget
+
+Each task may detonate at most `max_detonations` artifacts. The submitted sample is detonated first if it qualifies. Child artifacts that qualify wait until the task's static analysis is finished, or until `detonation_decision_window_secs` has passed. The budget then goes to the most interesting candidates:
+
+1. by type: executables and installers, then scripts, shortcuts, Java and Android, then documents, then everything else;
+2. then by highest plugin score;
+3. then by lowest depth.
+
+Candidates that do not fit are `skipped` with the message `detonation budget reached`, and the task is marked partial.
+
+### Recursion prevention
+
+A host plugin can list categories in `recursion_prevention`. Descendants of an artifact that plugin ran on will not get jobs from plugins in those categories. The category `dynamic` stands for detonation.
+
+`params.detonate_children` controls detonation of child artifacts:
+
+| Value | Behaviour |
+|-------|-----------|
+| `extracted` (default) | Children of a detonated artifact (for example, files it dropped) are not detonated again. Files extracted from an artifact that was not detonated can be detonated. A plugin can override this for one artifact with `allow_dynamic_recursion`. |
+| `none` | No child artifact is detonated. |
+| `all` | Any child artifact can be detonated. |
+
+`params.ignore_recursion_prevention` disables plugin `recursion_prevention` lists.
+
+## Shared data between plugins
+
+Each task has a shared JSON object. A plugin adds to it with `shared_put(key, value)`; arrays are merged with the existing value, and other values replace it. Later jobs read it through `shared()` on the task info. Passwords from the submission's `initial_data.passwords` are placed under the `passwords` key.
+
+A plugin that lists keys in `monitored_keys` is re-run (up to `max_reruns` times) when another plugin changes one of those keys. For example, an archive extractor that monitors `passwords` re-runs when a later plugin discovers a password.
+
+Plugins also receive the artifact's ancestry, its type and depth, and, when they set `uses_indicators`, the indicators that earlier reports found on the artifact and its ancestors. See the [SDK reference](/reference/plugin-sdk/sdk) for the accessors.
+
+## Limits
+
+The [`[orchestration]`](/reference/configuration/orchestration) section sets per-task limits: depth, number of analysed artifacts, total stored bytes, artifact size, detonations, and deadlines. A child that hits a limit is still recorded, with state `dropped` and a drop reason, and the task is marked partial.
+
+## Task completion
+
+A task finishes when no job is queued or running. Its status is one of:
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created, not started yet. |
+| `running` | Jobs are queued or running. |
+| `completed` | Finished. Individual jobs may have failed; see `error_count`. |
+| `failed` | Every job on the submitted sample failed. |
+| `canceled` | Canceled by a user. |
+
+The task also records `error_count` (failed jobs), `artifact_count` (analysed artifacts), and `partial`, which is true when an artifact was canceled or dropped, or a detonation was skipped for budget. The task verdict is the most severe classification reported on any artifact in the tree; the verdict records which artifact it came from.
+
+## Submission parameters
+
+Submissions accept an optional `params` object. From the CLI, use the [`malbox task submit`](/reference/cli/malbox#task-submit) flags; over HTTP, send it as a JSON-encoded `params` multipart field or as `params` in a JSON body. Every field is optional.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `detonate` | `auto` \| `always` \| `never` | `auto` | Whether the submitted sample is detonated. |
+| `detonate_children` | `extracted` \| `none` \| `all` | `extracted` | Which child artifacts may be detonated. See [Recursion prevention](#recursion-prevention). |
+| `max_depth`, `max_artifacts`, `max_detonations`, `max_total_bytes`, `max_artifact_time_secs` | `integer` | config value | Lower a per-task limit. Values above the configured limit are rejected. |
+| `deadline_secs` | `integer` | `task_deadline_secs` | Task deadline. Cannot exceed `task_deadline_secs`. |
+| `deep_scan` | `bool` | `false` | Passed to plugins, which may run slower, more thorough analysis. |
+| `ignore_cache` | `bool` | `false` | Do not reuse cached results. |
+| `ignore_recursion_prevention` | `bool` | `false` | Ignore plugin `recursion_prevention` lists. |
+| `ignore_filtering` | `bool` | `false` | Skip `filter`-stage plugins and ignore `drop_artifact()` requests. |
+| `ignore_size` | `bool` | `false` | Analyse artifacts above `max_file_size`. |
+| `plugin_params` | `object` | `{}` | Plugin parameter overrides, keyed by plugin then parameter name. Each parameter must be declared in the plugin's [`[parameters]`](/reference/configuration/plugins#parameters) with a matching type. |
+| `initial_data.passwords` | `string[]` | `[]` | Passwords for encrypted content, placed in shared data under `passwords`. |
+| `detonation.profile` | `string` | - | Detonation profile to use for the submitted sample. |
+| `detonation.package` | `string` | type default | [Launch package](#sample-launch) for the submitted sample. |
+| `detonation.dll_function` | `string` | `DllMain` | Export to call with the `dll` package. |
+
+Invalid values are rejected with HTTP 422 and a per-field message, for example `{"params.max_depth": ["must be at most 6"]}`.
+
+```json
+{
+  "detonate_children": "all",
+  "max_detonations": 2,
+  "deep_scan": true,
+  "plugin_params": { "host-archive-extractor": { "passwords": ["infected"] } },
+  "initial_data": { "passwords": ["s3cret"] }
+}
+```
+
+## Per-artifact control
+
+You can steer a running task one artifact at a time from the web UI (right-click an artifact in the **Artifacts** tree), the [CLI](/reference/cli/malbox#task), or the HTTP API.
+
+| Method | Endpoint | Body | Effect |
+|--------|----------|------|--------|
+| `GET` | `/v1/tasks/{id}/tree` | - | The task's artifacts, edges, and jobs. |
+| `GET` | `/v1/tasks/{id}/jobs` | - | The task's jobs. |
+| `GET` | `/v1/tasks/{id}/artifacts/{artifact_id}/content` | - | Download a stored artifact. |
+| `POST` | `/v1/tasks/{id}/cancel` | - | Cancel the whole task. |
+| `POST` | `/v1/tasks/{id}/artifacts/{artifact_id}/cancel` | `{"descendants": "cancel"}` or `"keep"` (optional, default `cancel`) | Cancel an artifact's unfinished jobs. With `cancel`, children whose parents are all canceled are canceled too. |
+| `POST` | `/v1/tasks/{id}/jobs/{job_id}/cancel` | - | Cancel one job. |
+| `PATCH` | `/v1/tasks/{id}/artifacts/{artifact_id}` | `{"priority": 1000, "subtree": true}` | Change the priority of an artifact's queued jobs, and optionally of all its descendants. |
+| `POST` | `/v1/tasks/{id}/artifacts/{artifact_id}/rescan` | `{"plugins": ["..."], "ignore_cache": true}` (both optional) | Re-run jobs on an artifact, or analyse a stored artifact. An empty `plugins` list means all. `ignore_cache` defaults to `true`. Reopens a finished task. Returns `202`. |
+| `POST` | `/v1/tasks/{id}/artifacts/{artifact_id}/promote` | Submission options (optional) | Submit a stored artifact as a new task whose parent is this task. Returns `201` with `task_id`, `root_artifact_id`, and `sample`. |
+
+Control endpoints return `404` for an unknown task, artifact, or job, and `409` when the target has already finished.
+
+`GET /v1/tasks/{id}/report` and `GET /v1/tasks/{id}/report/plugins/{plugin}` accept an optional `artifact_id` query parameter. Without it, plugin views show the submitted sample and the aggregate verdict covers the whole tree.
+
+<Note>
+The `/v1/tasks/{id}/results` endpoints were removed. Plugin outputs are now artifacts: list them with `/v1/tasks/{id}/tree` and download them with `/v1/tasks/{id}/artifacts/{artifact_id}/content`.
+</Note>

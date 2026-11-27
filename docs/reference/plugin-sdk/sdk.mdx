@@ -32,6 +32,39 @@ Host plugins also read `IOX2_LOG_LEVEL` to set the log level of the iceoryx2 IPC
 IOX2_LOG_LEVEL=Debug
 ```
 
+## Artifacts and job context
+
+Push files your plugin extracts, drops, unpacks, or dumps as child artifacts with `ResultSink::push_artifact`. See [Orchestration](/task-management/orchestration) for how child artifacts are analysed.
+
+```rust
+pub fn push_artifact(&self, name: &str, source: ArtifactSource, opts: ArtifactOpts) -> Result<()>;
+
+pub enum ArtifactSource { Bytes(Vec<u8>), File(PathBuf) }
+
+ArtifactOpts::new(ArtifactRelation::Extracted)  // analyze: relation default
+    .analyze(true)                              // override analysis
+    .allow_dynamic_recursion(true)              // allow detonation despite recursion prevention
+```
+
+`ArtifactRelation` has the variants `Extracted`, `Dropped`, `Unpacked`, `Memdump`, `Downloaded`, `Pcap`, and `Output` (`Root` is reserved and rejected). Pushes that request analysis count against the job's artifact budget; once it is spent, `push_artifact` returns `SdkError::ArtifactLimit { limit }` and sends nothing.
+
+| `Context` method | Description |
+|------------------|-------------|
+| `shared_put(key, value: serde_json::Value)` | Merge `{key: value}` into the task-wide shared data. Arrays are unioned with the existing value; other values overwrite it. |
+| `drop_artifact()` | Skip the current artifact's remaining stages. |
+
+| `TaskInfo` method | Return type | Description |
+|-------------------|-------------|-------------|
+| `job_id()` | `Option<i64>` | Orchestrator job ID. |
+| `artifact()` | `Option<ArtifactInfo>` | The artifact being analysed: `id`, `sha256`, `artifact_type`, `name`, `depth`. |
+| `deep_scan()` | `bool` | Whether the submitter asked for a deep scan. |
+| `ancestry()` | `Vec<AncestryEntry>` | Ancestors (`sha256`, `artifact_type`, `relation`), root first, excluding the current artifact. |
+| `shared()` | `serde_json::Map<String, Value>` | Task-wide shared data written by earlier plugins. |
+| `indicators()` | `Vec<Indicator>` | Indicators from earlier reports on this artifact and its ancestors. Only sent to plugins with `uses_indicators = true`. |
+| `params()` | `serde_json::Map<String, Value>` | Resolved `[parameters]`: manifest defaults overlaid with submission overrides. |
+
+Each accessor returns its default (`None`, `false`, or empty) when the daemon did not send the value.
+
 </View>
 
 <View title="C++" icon="C">
@@ -95,7 +128,7 @@ Complete API reference for the Malbox C++20 Plugin SDK. For a step-by-step walkt
     ```
 
     <ResponseField name="event" type="const Event&" required>
-      The event that occurred. Use `event.tag()` for the event type, `event.id()` for the context-dependent identifier, and convenience accessors `event.task_id()`, `event.plugin_id()`, or `event.sample_id()`. For `PluginResultAvailable` events, `event.source()` and `event.result_name()` identify the originating plugin and result.
+      The event that occurred. Use `event.tag()` for the event type, `event.id()` for the context-dependent identifier, and convenience accessors `event.task_id()`, `event.plugin_id()`, or `event.sample_id()`.
     </ResponseField>
   </Tab>
   <Tab title="Guest">
@@ -206,6 +239,22 @@ void mark_collected(const char* path) const;
 void mark_collected(const std::filesystem::path& path) const;
 ```
 
+### `shared_put()`
+
+Merges `{key: value}` into the task-wide shared data. `json_value` must be a valid JSON document. Arrays are unioned with the existing value; other values overwrite it.
+
+```cpp
+void shared_put(std::string_view key, std::string_view json_value) const;
+```
+
+### `drop_artifact()`
+
+Asks the daemon to skip the current artifact's remaining stages.
+
+```cpp
+void drop_artifact() const;
+```
+
 ## TaskInfo
 
 Non-owning view into task metadata. Obtained via `ctx.task()`. Must not outlive the `Context` that created it.
@@ -242,6 +291,8 @@ std::unordered_map<std::string, std::string> config() const;
 std::optional<std::string> config_value(const char* key) const;
 ```
 
+The daemon describes the current job through `malbox.*` config keys, such as `malbox.artifact_type`, `malbox.shared`, `malbox.ancestry`, and `malbox.params`. See [Job context](/plugin-guides/creating-a-cpp-plugin#job-context) for the full list.
+
 ## ResultSink
 
 Non-owning handle for pushing results via the `Context`. Obtained via `ctx.results()`.
@@ -253,6 +304,18 @@ Non-owning handle for pushing results via the `Context`. Obtained via `ctx.resul
 | `push_bytes(name, span)` | Push a raw-bytes result |
 | `push_file(name, path)` | Push a file-reference result |
 | `flush(span<PluginResult>)` | Push a batch of results |
+| `push_artifact(name, span, ArtifactOpts = {})` | Push a child artifact from bytes |
+| `push_artifact_file(name, path, ArtifactOpts = {})` | Push a child artifact from a file |
+
+```cpp
+enum class ArtifactRelation : int32_t { Extracted = 1, Dropped, Unpacked, Memdump, Downloaded, Pcap, Output };
+
+struct ArtifactOpts {
+    ArtifactRelation relation = ArtifactRelation::Extracted;
+    int analyze = -1;                      // -1 = relation default, 0 = false, 1 = true
+    bool allow_dynamic_recursion = false;
+};
+```
 
 ## PluginResult
 
@@ -282,7 +345,7 @@ enum class EventTag : int32_t {
     // Task events (id = task_id)
     TaskCreated, TaskStarting, TaskCompleted, TaskFailed, TaskCanceled,
     // Plugin events (id = plugin_id)
-    PluginStarted, PluginStopped, PluginResultAvailable,
+    PluginStarted, PluginStopped,
     // Sample events (id = sample_id)
     SampleStarted, SampleStopped, SampleResultProduced,
     // Daemon events (id unused)
@@ -299,8 +362,6 @@ enum class EventTag : int32_t {
 | `task_id()` | `int32_t` | Alias for `id()` (task events) |
 | `plugin_id()` | `int32_t` | Alias for `id()` (plugin events) |
 | `sample_id()` | `int32_t` | Alias for `id()` (sample events) |
-| `source()` | `const std::string&` | Source plugin (`PluginResultAvailable` only) |
-| `result_name()` | `const std::string&` | Result name (`PluginResultAvailable` only) |
 
 ### Factory methods
 
@@ -312,7 +373,6 @@ Event::task_failed(int32_t task_id)
 Event::task_canceled(int32_t task_id)
 Event::plugin_started(int32_t plugin_id)
 Event::plugin_stopped(int32_t plugin_id)
-Event::plugin_result_available(std::string source, std::string result_name)
 Event::sample_started(int32_t sample_id)
 Event::sample_stopped(int32_t sample_id)
 Event::sample_result_produced(int32_t sample_id)
@@ -553,6 +613,14 @@ struct AutoCollectConfig {
     std::vector<std::string>     include;
     std::vector<std::string>     exclude;
     std::uint64_t                max_file_size = 0;
+    std::vector<AutoCollectRule> rules;            // artifacts only
+};
+
+struct AutoCollectRule {
+    std::vector<std::string>     include;
+    std::vector<std::string>     exclude;
+    ArtifactRelation             relation = ArtifactRelation::Extracted;
+    int                          analyze = -1;     // -1 = relation default, 0 = false, 1 = true
 };
 ```
 
@@ -609,13 +677,11 @@ MALBOX_LOG_ERROR("message");
 
 ## Error handling
 
+The C API returns `-1` for every error and conveys the cause in the message, so `ErrorKind` currently has a single value.
+
 ```cpp
 enum class ErrorKind : int32_t {
-    Unknown        = -1,
-    InvalidContext = -2,
-    ChannelClosed  = -3,
-    Io             = -4,
-    Transport      = -5,
+    Unknown = -1,
 };
 
 class Error : public std::runtime_error {
@@ -705,7 +771,7 @@ def on_event(self, event: Event) -> None
 ```
 
 <ResponseField name="event" type="Event" required>
-  The system event. Access `event.kind` for the type, `event.id` for the entity ID. For `PluginResultAvailable` events, `event.source` and `event.result_name` identify the originating plugin and result.
+  The system event. Access `event.kind` for the type and `event.id` for the entity ID.
 </ResponseField>
 
 ## Context
@@ -720,6 +786,8 @@ Used to communicate with the runtime during task execution. Only valid during ha
 | `emit_event(event)` | Emit a system event |
 | `warn(message)` | Log a warning attached to the task report |
 | `mark_collected(path)` | Prevent auto-collection of a file |
+| `shared_put(key, value)` | Merge `{key: value}` (any JSON-serializable value) into the task-wide shared data |
+| `drop_artifact()` | Skip the current artifact's remaining stages |
 
 ## TaskInfo
 
@@ -732,6 +800,13 @@ Obtained via `ctx.task()`. Only valid during the handler scope.
 | `id` | `int` | Unique task identifier |
 | `sample_path` | `Path` | Absolute path to the sample on disk |
 | `config` | `dict[str, str]` | Task configuration key-value pairs |
+| `job_id` | `int \| None` | Orchestrator job ID |
+| `artifact` | `dict \| None` | The artifact being analysed: `id`, `sha256`, `artifact_type`, `name`, `depth` |
+| `deep_scan` | `bool` | Whether the submitter asked for a deep scan |
+| `ancestry` | `list[dict]` | Ancestors (`sha256`, `artifact_type`, `relation`), root first |
+| `shared` | `dict` | Task-wide shared data written by earlier plugins |
+| `params` | `dict` | Resolved `[parameters]` |
+| `indicators` | `list[dict]` | Earlier indicators (only with `uses_indicators = true`) |
 
 ### Methods
 
@@ -751,6 +826,7 @@ Obtained via `ctx.results()`.
 | `push_bytes(name, data: bytes)` | Push raw bytes |
 | `push_file(name, path)` | Push a file reference |
 | `push_all(results: list)` | Push a batch of results |
+| `push_artifact(name, data=None, path=None, relation="extracted", analyze=None, allow_dynamic_recursion=False)` | Push a child artifact. Pass exactly one of `data` or `path`, or `ValueError` is raised. Raises `ArtifactLimitError` (a `RuntimeError`) once the job's artifact budget is spent. |
 
 ## PluginResult
 
@@ -772,8 +848,6 @@ malbox.PluginResult.file(name: str, path: str | Path) -> PluginResult
 |----------|------|-------------|
 | `kind` | `str` | Event type (e.g. `"TaskCompleted"`, `"DaemonShutdown"`) |
 | `id` | `int \| None` | Associated entity ID (task_id, plugin_id, or sample_id) |
-| `source` | `str \| None` | Source plugin name (`PluginResultAvailable` only) |
-| `result_name` | `str \| None` | Result name (`PluginResultAvailable` only) |
 
 ### Constructors
 
@@ -785,7 +859,6 @@ malbox.Event.task_failed(task_id: int) -> Event
 malbox.Event.task_canceled(task_id: int) -> Event
 malbox.Event.plugin_started(plugin_id: int) -> Event
 malbox.Event.plugin_stopped(plugin_id: int) -> Event
-malbox.Event.plugin_result_available(source: str, result_name: str) -> Event
 malbox.Event.sample_started(sample_id: int) -> Event
 malbox.Event.sample_stopped(sample_id: int) -> Event
 malbox.Event.sample_result_produced(sample_id: int) -> Event

@@ -17,6 +17,18 @@ Every plugin output is a `PluginResult` with a name and one of three formats.
 
 The result `name` must match a key declared in `[results.<name>]` in your `plugin.toml`. See the [plugin configuration reference](/reference/configuration/plugins#resultsname) for manifest options like `user_visible`, `display_name`, and `render`.
 
+### How the daemon stores results
+
+| Result | Stored as |
+|--------|-----------|
+| Name `report` (JSON) | The plugin's report for the artifact it analysed. An invalid report fails the job. |
+| Name `malbox.shared` (JSON object) | Merged into the task's shared data. Sent by `shared_put`. |
+| Name `malbox.drop` | Skips the artifact's remaining stages. Sent by `drop_artifact`. |
+| Pushed with `push_artifact` | A child artifact with the relation you chose. See [Orchestration](/task-management/orchestration#artifacts). |
+| Anything else | A stored `output` child artifact, downloadable from the task's artifact tree. |
+
+The names `malbox.shared` and `malbox.drop` are reserved for these purposes.
+
 ## Reports
 
 A report is a structured JSON result pushed with the reserved name `report`. It provides a semantic layer for machine-queryable metadata and a presentation layer for frontend rendering.

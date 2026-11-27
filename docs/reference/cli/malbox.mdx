@@ -39,20 +39,33 @@ malbox task submit <file> [options]
 | Argument / Flag | Type | Required | Default | Description |
 |-----------------|------|----------|---------|-------------|
 | `file` | `string` | Yes | - | Path to the file to analyze |
-| `--timeout` | `integer` | No | `300` | Analysis timeout in seconds |
+| `--timeout` | `integer` | No | `300` | Detonation timeout in seconds, used when the submission names a platform, snapshot, or machine |
 | `--priority` | `integer` | No | `1` | Task priority (higher = more urgent) |
 | `--tags` | `string[]` | No | - | Tags for the task (accepts multiple values) |
 | `--owner` | `string` | No | - | Task owner |
-| `--platform` | `linux` \| `windows` | No | - | Guest platform |
-| `--snapshot-id` | `uuid` | No | - | Machine snapshot to analyze on |
-| `--plugins` | `string[]` | No | - | Plugins to run (accepts multiple values) |
+| `--platform` | `linux` \| `windows` | No | - | Detonate on a machine of this platform |
+| `--snapshot-id` | `uuid` | No | - | Detonate on this machine snapshot |
+| `--machine-id` | `integer` | No | - | Detonate on this machine |
+| `--plugins` | `string[]` | No | all | Plugins to run (accepts multiple values) |
+| `--exclude-plugin` | `string` | No | - | Plugin to skip (repeatable) |
 | `--target-filename` | `string` | No | file name | Sample file name inside the guest |
+| `--no-detonate` | - | No | `false` | Never detonate; host analysis only |
+| `--detonate-children` | `extracted` \| `none` \| `all` | No | `extracted` | Which child artifacts may be detonated |
+| `--max-detonations` | `integer` | No | config value | Maximum detonations for this task (cannot exceed `max_detonations` in the daemon config) |
+| `--deep-scan` | - | No | `false` | Ask plugins for a deeper, slower scan |
+| `--ignore-cache` | - | No | `false` | Do not reuse cached host plugin results |
+| `--password` | `string` | No | - | Password to try on encrypted content (repeatable) |
+| `--param` | `plugin.key=value` | No | - | Plugin parameter override (repeatable). The value is parsed as JSON, or used as a plain string if it is not valid JSON. |
 
-A task runs on a machine only when you pass both `--platform` and `--snapshot-id`. Otherwise, only host plugins run.
+If you pass `--platform`, `--snapshot-id`, or `--machine-id`, the sample is detonated on a matching machine. Otherwise, it is detonated only if a [detonation profile](/reference/configuration/orchestration#detonation-profiles) matches its type. Host plugins run on the sample and on every analyzed child artifact. See [Orchestration](/task-management/orchestration) for how artifacts and jobs work, and [Submission parameters](/task-management/orchestration#submission-parameters) for what the flags set.
+
+```bash
+malbox task submit archive.zip --password infected --param host-archive-extractor.passwords='["x"]'
+```
 
 ### task list
 
-List all tasks.
+List all tasks with their status, artifact count, and error count. Partially analysed tasks are marked `(partial)`.
 
 ```bash
 malbox task list
@@ -60,7 +73,7 @@ malbox task list
 
 ### task get
 
-Get details and results of a specific task.
+Get details of a task and a table of its artifacts.
 
 ```bash
 malbox task get [id] [options]
@@ -69,7 +82,36 @@ malbox task get [id] [options]
 | Argument / Flag | Type | Required | Default | Description |
 |-----------------|------|----------|---------|-------------|
 | `id` | `integer` | No | - | Task ID. If omitted, an interactive fuzzy-select menu is shown. |
-| `--result` | `integer` | No | - | Fetch a specific result by its ID. JSON results are pretty-printed to a terminal; binary results are written raw when piped. |
+| `--artifact` | `integer` | No | - | Print the content of an artifact by its ID. JSON artifacts are pretty-printed to a terminal and written raw when piped; binary artifacts are written raw when piped and refused on a terminal. |
+
+```bash
+malbox task get 7 --artifact 12 > output.bin
+```
+
+### task tree
+
+Show a task's artifact tree with the jobs of each artifact.
+
+```bash
+malbox task tree <id>
+```
+
+Each artifact is printed once, under the parent that produced it first, as `relation name [type] state`, followed by its verdict and drop reason when present. Its jobs are listed below it as `- analyzer state`, with the error message when there is one.
+
+```text
+root sample.zip [archive/zip] done
+  - host-archive-extractor completed
+  extracted test-sample.sh [code/shell] done
+    - linux-dev completed
+```
+
+### task cancel
+
+Cancel a task and all of its unfinished jobs.
+
+```bash
+malbox task cancel <id>
+```
 
 ## machine
 

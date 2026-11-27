@@ -19,13 +19,12 @@ Events fired during the task lifecycle. The `id` field carries the `task_id`.
 
 ## Plugin events
 
-Events related to plugin process lifecycle and output. The `id` field carries the `plugin_id` (except for `PluginResultAvailable`, which carries `source` and `result_name` instead). The daemon publishes these events on per-plugin event channels that other plugins can subscribe to.
+Events related to plugin process lifecycle. The `id` field carries the `plugin_id`. Each host plugin publishes these events on its own per-plugin event channel.
 
 | Event | Description |
 |-------|-------------|
 | PluginStarted | A plugin process has started and is ready |
 | PluginStopped | A plugin process has stopped |
-| PluginResultAvailable | A plugin produced an analysis result. The `source` field identifies the originating plugin and `result_name` identifies the result. Handle via `on_event` |
 
 ## Sample events
 

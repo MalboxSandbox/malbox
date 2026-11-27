@@ -120,6 +120,55 @@ ctx.results().push(PluginResult::file("name", "/path/to/file"))?;
 
 Each result name should match an entry in your `plugin.toml` under `[results.*]`.
 
+On host plugins, `PluginResult::file` reads the file and sends its content inline. Files larger than 256 MiB are rejected.
+
+## Pushing artifacts
+
+When your plugin extracts, unpacks, or decodes a file, push it as an artifact. The daemon stores it as a child of the current artifact and, if analysis is requested, routes it to every plugin that accepts its type. See [Orchestration](/task-management/orchestration) for how child artifacts are analysed.
+
+```rust
+// ArtifactOpts, ArtifactRelation, ArtifactSource and SdkError are in malbox::prelude
+
+let opts = ArtifactOpts::new(ArtifactRelation::Extracted);
+match ctx.results().push_artifact("payload.exe", ArtifactSource::Bytes(buf), opts) {
+    Ok(()) => {}
+    Err(SdkError::ArtifactLimit { .. }) => { /* budget spent: stop pushing */ }
+    Err(e) => return Err(e),
+}
+
+// From a file on disk, kept but not analysed
+ctx.results().push_artifact(
+    "strings.txt",
+    ArtifactSource::File(path),
+    ArtifactOpts::new(ArtifactRelation::Output).analyze(false),
+)?;
+```
+
+The [relation](/task-management/orchestration#relations) decides whether the artifact is analysed by default; override it with `.analyze(bool)`. Each job may request analysis of a limited number of artifacts; once the budget is spent, `push_artifact` returns `SdkError::ArtifactLimit` and sends nothing.
+
+## Job context
+
+Each job tells your plugin which artifact it is analysing and what earlier plugins found. Read it from `ctx.task()`:
+
+```rust
+let task = ctx.task();
+if let Some(artifact) = task.artifact() {
+    info!("analysing {} ({}) at depth {}", artifact.name, artifact.artifact_type, artifact.depth);
+}
+let passwords = task.shared().get("passwords").cloned();
+let params = task.params();          // [parameters] defaults plus submission overrides
+let deep = task.deep_scan();
+```
+
+Share data with later plugins in the same task, or stop the artifact's later stages:
+
+```rust
+ctx.shared_put("passwords", serde_json::json!(["infected"]))?;   // add serde_json to Cargo.toml
+ctx.drop_artifact()?;                // e.g. a known-good file
+```
+
+See the [SDK reference](/reference/plugin-sdk/sdk) for every accessor.
+
 ## Reports
 
 <ReportsGuide />
@@ -157,15 +206,9 @@ fn process(&self, ctx: &Context) -> Result<()> {
 }
 ```
 
-## Subscribing to events
+## Handling events
 
-Declare subscriptions in the `[events]` section of your `plugin.toml`, then use `#[malbox::on_event(...)]` in your handler impl to react to specific event variants:
-
-```toml
-# plugin.toml
-[events]
-subscribe = ["string-extractor", "network-analyzer"]
-```
+Use `#[malbox::on_event(...)]` in your handler impl to react to specific event variants. No manifest configuration is needed:
 
 ```rust
 #[malbox::handlers]
@@ -173,12 +216,6 @@ impl MyPlugin {
     #[malbox::on_event(TaskCompleted)]
     fn on_task_done(&self) -> Result<()> {
         info!("A task completed");
-        Ok(())
-    }
-
-    #[malbox::on_event(PluginResultAvailable)]
-    fn on_upstream_result(&self) -> Result<()> {
-        info!("An upstream plugin produced a result");
         Ok(())
     }
 }
@@ -352,6 +389,12 @@ impl MyPlugin {
 ```
 
 Return `LaunchResult::Launched` if your plugin handled the launch, or `LaunchResult::UseDefault` to fall back to the SDK's built-in launcher.
+
+<Note>
+`execute_sample` only runs when the plugin owns the launch. In detonations scheduled by the daemon, the daemon launches the sample itself once every guest plugin's `on_start` has returned, so `execute_sample` is not called. Set up your monitoring in `on_start`. See [Sample launch](/task-management/orchestration#sample-launch).
+</Note>
+
+To make files your plugin writes during a detonation analysable child artifacts (for example, dropped files), push them with `ctx.results().push_artifact(...)`, or add `[[runtime.auto_collect.artifacts.rules]]` to `plugin.toml` (see the [plugin configuration reference](/reference/configuration/plugins)).
 
 ## Pushing results
 
