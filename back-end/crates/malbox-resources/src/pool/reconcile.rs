@@ -32,7 +32,7 @@ impl MachinePool {
 
         let db_machines = machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         tracing::Span::current().record("machine_count", db_machines.len());
 
@@ -309,7 +309,7 @@ impl MachinePool {
 
         let db_machines = machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         let declared_by_name: std::collections::HashMap<&str, &MachineConfig> =
             declared.iter().map(|m| (m.name.as_str(), m)).collect();
@@ -350,6 +350,15 @@ impl MachinePool {
                         None => continue,
                     };
                     if self.specs_match(config, db_machine) {
+                        // Tags never trigger a recreate; sync them in place.
+                        let db_tags = db_machine.tags.as_deref().unwrap_or_default();
+                        if db_tags != config.tags.as_slice()
+                            && let Err(e) =
+                                machinery::update_machine_tags(&self.db, machine_id, &config.tags)
+                                    .await
+                        {
+                            warn!(machine_id, name = %config.name, error = %e, "Failed to update machine tags");
+                        }
                         if db_machine.status == MachineStatusDb::Failed {
                             info!(machine_id, name = %config.name, "Retrying failed machine");
                             self.retry_failed_machine(machine_id, db_machine, config)
@@ -416,6 +425,7 @@ impl MachinePool {
             config.memory as i32,
             config.disk_size as i64,
             Some(&config_hash),
+            &config.tags,
         )
         .await
         {

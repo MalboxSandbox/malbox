@@ -4,9 +4,10 @@
 //! `malbox_plugin_transport::messages::events` so they can cross the C ABI
 //! boundary.
 
-use std::ffi::c_char;
-
 /// Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
+///
+/// Value 7 is retired (formerly the result-chaining event); the remaining
+/// values keep their numbers.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MalboxEventTag {
@@ -19,7 +20,6 @@ pub enum MalboxEventTag {
     // Plugin events
     PluginStarted = 5,
     PluginStopped = 6,
-    PluginResultAvailable = 7,
     // Sample events
     SampleStarted = 8,
     SampleStopped = 9,
@@ -36,17 +36,11 @@ pub enum MalboxEventTag {
 /// - Plugin events: `id` is the `plugin_id`.
 /// - Sample events: `id` is the `sample_id`.
 /// - Daemon events: `id` is unused (set to `0`).
-///
-/// For `PluginResultAvailable` events, `source` and `result_name` point to
-/// null-terminated strings identifying which plugin produced the result and
-/// the result's name. Both are null for all other event types.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MalboxEvent {
     pub tag: MalboxEventTag,
     pub id: i32,
-    pub source: *const c_char,
-    pub result_name: *const c_char,
 }
 
 #[cfg(test)]
@@ -62,7 +56,6 @@ mod tests {
         assert_eq!(MalboxEventTag::TaskCanceled as i32, 4);
         assert_eq!(MalboxEventTag::PluginStarted as i32, 5);
         assert_eq!(MalboxEventTag::PluginStopped as i32, 6);
-        assert_eq!(MalboxEventTag::PluginResultAvailable as i32, 7);
         assert_eq!(MalboxEventTag::SampleStarted as i32, 8);
         assert_eq!(MalboxEventTag::SampleStopped as i32, 9);
         assert_eq!(MalboxEventTag::SampleResultProduced as i32, 10);
@@ -72,9 +65,7 @@ mod tests {
 
     #[test]
     fn event_struct_size() {
-        // tag (i32) + id (i32) + source (ptr) + result_name (ptr)
-        let ptr_size = std::mem::size_of::<*const c_char>();
-        let expected = 8 + ptr_size * 2;
-        assert_eq!(std::mem::size_of::<MalboxEvent>(), expected);
+        // tag (i32) + id (i32)
+        assert_eq!(std::mem::size_of::<MalboxEvent>(), 8);
     }
 }

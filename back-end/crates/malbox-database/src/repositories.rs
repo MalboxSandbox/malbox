@@ -1,11 +1,13 @@
+pub mod artifacts;
 pub mod custom_transforms;
 pub mod images;
+pub mod jobs;
 pub mod machinery;
 pub mod plugin_reports;
 pub mod provision_runs;
 pub mod recipes;
+pub mod result_cache;
 pub mod sample_verdicts;
 pub mod samples;
 pub mod snapshots;
-pub mod task_results;
 pub mod tasks;

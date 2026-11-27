@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include "../../generated/malbox_plugin.h"
@@ -20,6 +21,19 @@ void malbox_context_drop(MalboxContext* ctx);
 }
 
 namespace malbox {
+
+/// How a pushed artifact relates to the artifact being analysed.
+/// Values match the C ABI (`relation` 1-7); root is reserved for submissions.
+enum class ArtifactRelation : int32_t { Extracted = 1, Dropped, Unpacked, Memdump, Downloaded, Pcap, Output };
+
+/// Options for ResultSink::push_artifact / push_artifact_file.
+///
+/// `analyze`: -1 = relation default, 0 = keep stored only, 1 = request analysis.
+struct ArtifactOpts {
+    ArtifactRelation relation = ArtifactRelation::Extracted;
+    int analyze = -1;
+    bool allow_dynamic_recursion = false;
+};
 
 // Forward declarations
 class TaskInfo;
@@ -93,6 +107,19 @@ public:
     /// Mark a file path as already collected so auto-collection skips it.
     void mark_collected(const std::filesystem::path& path) const {
         mark_collected(path.c_str());
+    }
+
+    /// Merge `{key: json_value}` into the task-wide shared data.
+    /// `json_value` must be a valid JSON document.
+    void shared_put(std::string_view key, std::string_view json_value) const {
+        const std::string k{key};
+        const std::string v{json_value};
+        detail::check_rc(malbox_context_shared_put(ptr_, k.c_str(), v.c_str()));
+    }
+
+    /// Skip this artifact's later analysis stages.
+    void drop_artifact() const {
+        detail::check_rc(malbox_context_drop_artifact(ptr_));
     }
 
     /// Get the raw opaque pointer (for advanced use).
@@ -208,6 +235,25 @@ public:
         uintptr_t lens[] = {std::strlen(path) + 1};
         int32_t formats[] = {3};
         detail::check_rc(malbox_context_flush_results(ptr_, names, datas, lens, formats, 1));
+    }
+
+    /// Push a child artifact from in-memory bytes.
+    void push_artifact(std::string_view name, std::span<const uint8_t> data, ArtifactOpts opts = {}) const {
+        const std::string n{name};
+        detail::check_rc(malbox_context_push_artifact(
+            ptr_, n.c_str(), data.data(), data.size(), 1,
+            static_cast<int32_t>(opts.relation), opts.analyze,
+            opts.allow_dynamic_recursion ? 1 : 0));
+    }
+
+    /// Push a child artifact from a file on disk.
+    void push_artifact_file(std::string_view name, const std::filesystem::path& path, ArtifactOpts opts = {}) const {
+        const std::string n{name};
+        const std::string p = path.string();
+        detail::check_rc(malbox_context_push_artifact(
+            ptr_, n.c_str(), reinterpret_cast<const uint8_t*>(p.data()), p.size(), 2,
+            static_cast<int32_t>(opts.relation), opts.analyze,
+            opts.allow_dynamic_recursion ? 1 : 0));
     }
 
     /// Flush a batch of PluginResult objects to the daemon.

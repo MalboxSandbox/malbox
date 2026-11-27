@@ -1,9 +1,6 @@
 create type task_state as enum (
     'pending',
-    'initializing',
-    'preparing_resources',
     'running',
-    'stopping',
     'completed',
     'failed',
     'canceled'
@@ -35,16 +32,6 @@ create type provision_run_status as enum (
     'failed'
 );
 
-create type result_format as enum (
-    'json',
-    'bytes'
-);
-
-create type task_result_role as enum (
-    'report',
-    'artifact'
-);
-
 create type recipe_scope as enum (
     'personal',
     'shared'
@@ -54,4 +41,30 @@ create type transform_kind as enum (
     'yaml',
     'js',
     'wasm'
+);
+
+-- Ordered by severity so max(classification) = worst-wins.
+create type classification as enum ('clean', 'unknown', 'suspicious', 'malicious');
+create type confidence as enum ('low', 'medium', 'high');
+
+create type artifact_relation as enum (
+    'root', 'extracted', 'dropped', 'unpacked', 'memdump', 'downloaded', 'pcap', 'output'
+);
+
+create type artifact_state as enum (
+    'stored', 'dropped', 'pending', 'running', 'done', 'canceled'
+);
+
+create type analysis_stage as enum (
+    'filter', 'extract', 'static', 'dynamic', 'post', 'review'
+);
+
+create type job_kind as enum ('host', 'detonation');
+
+create type job_state as enum (
+    'blocked', 'ready', 'running', 'completed', 'failed', 'skipped', 'cached', 'canceled'
+);
+
+create type job_error_class as enum (
+    'recoverable', 'nonrecoverable', 'timeout', 'machine_lost'
 );

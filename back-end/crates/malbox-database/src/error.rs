@@ -17,7 +17,23 @@ pub enum DatabaseError {
     #[error("{0}")]
     ProvisionRun(#[from] ProvisionRunError),
     #[error("{0}")]
-    TaskResult(#[from] TaskResultError),
+    Artifact(#[from] ArtifactError),
+    #[error("{0}")]
+    Job(#[from] JobError),
+    #[error("{0}")]
+    ResultCache(#[from] ResultCacheError),
+    #[error(
+        "database schema was created by an incompatible malbox version (migration {version} \
+         differs); drop and recreate the \"malbox\" database"
+    )]
+    IncompatibleSchema { version: i64 },
+    #[error(
+        "database schema is newer than this malbox binary (migration {version} is unknown); \
+         upgrade malbox"
+    )]
+    NewerSchema { version: i64 },
+    #[error("Database migration failed: {0}")]
+    Migrate(#[source] sqlx::migrate::MigrateError),
     #[error("{0}")]
     PluginReport(#[from] PluginReportError),
     #[error("{0}")]
@@ -178,22 +194,43 @@ pub enum ProvisionRunError {
     },
 }
 
-#[derive(Error, Debug)]
-pub enum TaskResultError {
-    #[error("Failed to insert result for task {task_id} ({message}): {source}")]
-    InsertFailed {
-        task_id: i32,
-        message: String,
-        #[source]
-        source: sqlx::Error,
-    },
-    #[error("Failed to fetch results for task {task_id}: {source}")]
-    FetchFailed {
-        task_id: i32,
-        #[source]
-        source: sqlx::Error,
-    },
+/// CRUD errors for the orchestration tables. `target` names the rows the
+/// operation addressed, e.g. `job 42` or `artifacts of task 7`.
+macro_rules! crud_error {
+    ($name:ident) => {
+        #[derive(Error, Debug)]
+        pub enum $name {
+            #[error("Failed to insert {target}: {source}")]
+            InsertFailed {
+                target: String,
+                #[source]
+                source: sqlx::Error,
+            },
+            #[error("Failed to fetch {target}: {source}")]
+            FetchFailed {
+                target: String,
+                #[source]
+                source: sqlx::Error,
+            },
+            #[error("Failed to update {target}: {source}")]
+            UpdateFailed {
+                target: String,
+                #[source]
+                source: sqlx::Error,
+            },
+            #[error("Failed to delete {target}: {source}")]
+            DeleteFailed {
+                target: String,
+                #[source]
+                source: sqlx::Error,
+            },
+        }
+    };
 }
+
+crud_error!(ArtifactError);
+crud_error!(JobError);
+crud_error!(ResultCacheError);
 
 #[derive(Error, Debug)]
 pub enum PluginReportError {
@@ -213,6 +250,19 @@ pub enum PluginReportError {
     #[error("Failed to fetch plugin reports for sample {sample_id}: {source}")]
     FetchForSampleFailed {
         sample_id: i64,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to fetch plugin reports for artifact {artifact_id}: {source}")]
+    FetchForArtifactFailed {
+        artifact_id: i64,
+        #[source]
+        source: sqlx::Error,
+    },
+    #[error("Failed to copy plugin report of job {from_job_id} to task {to_task_id}: {source}")]
+    CopyFailed {
+        from_job_id: i64,
+        to_task_id: i32,
         #[source]
         source: sqlx::Error,
     },

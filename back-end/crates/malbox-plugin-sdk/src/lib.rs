@@ -40,6 +40,7 @@
 //! }
 //! ```
 
+pub mod artifact;
 pub mod context;
 pub mod error;
 pub mod health;
@@ -61,7 +62,8 @@ pub mod testkit;
 
 /// Everything a plugin needs in scope. Start with `use malbox::prelude::*;`.
 pub mod prelude {
-    pub use crate::context::{Context, ResultSink, TaskInfo};
+    pub use crate::artifact::{ArtifactOpts, ArtifactRelation, ArtifactSource};
+    pub use crate::context::{AncestryEntry, ArtifactInfo, Context, ResultSink, TaskInfo};
     pub use crate::error::{Result, SdkError};
     pub use crate::health::HealthStatus;
     pub use crate::meta::{ExecutionContext, PluginMeta, PluginState};
@@ -81,7 +83,8 @@ pub mod prelude {
 
 pub use malbox_plugin_macros::*;
 
-pub use context::{Context, ResultSink, TaskInfo};
+pub use artifact::{ArtifactOpts, ArtifactRelation, ArtifactSource};
+pub use context::{AncestryEntry, ArtifactInfo, Context, ResultSink, TaskInfo};
 pub use error::{Result, SdkError};
 pub use health::HealthStatus;
 pub use meta::{ExecutionContext, PluginMeta, PluginState};

@@ -69,6 +69,15 @@ impl GuestPluginService for TestHandler {
         }))
     }
 
+    async fn stop_task(
+        &self,
+        _request: Request<proto::StopTaskRequest>,
+    ) -> Result<Response<proto::StopTaskResponse>, Status> {
+        Ok(Response::new(proto::StopTaskResponse {
+            acknowledged: false,
+        }))
+    }
+
     async fn execute_task(
         &self,
         request: Request<proto::TaskRequest>,
@@ -95,6 +104,7 @@ impl GuestPluginService for TestHandler {
                 result_name: "big".to_string(),
                 format: proto::ResultFormat::Bytes.into(),
                 size_bytes: (5 * 1024 * 1024) as u64,
+                artifact: None,
             };
 
             tokio::spawn(async move {
@@ -106,6 +116,7 @@ impl GuestPluginService for TestHandler {
                         format: proto::ResultFormat::Unspecified.into(),
                         is_final: false,
                         kind: proto::ResultKind::ResultRef.into(),
+                        artifact: None,
                     }))
                     .await;
 
@@ -117,6 +128,7 @@ impl GuestPluginService for TestHandler {
                         format: proto::ResultFormat::Unspecified.into(),
                         is_final: true,
                         kind: proto::ResultKind::Result.into(),
+                        artifact: None,
                     }))
                     .await;
             });
@@ -130,6 +142,7 @@ impl GuestPluginService for TestHandler {
                         format: proto::ResultFormat::Json.into(),
                         is_final: false,
                         kind: proto::ResultKind::Result.into(),
+                        artifact: None,
                     }))
                     .await;
 
@@ -141,6 +154,7 @@ impl GuestPluginService for TestHandler {
                         format: proto::ResultFormat::Bytes.into(),
                         is_final: true,
                         kind: proto::ResultKind::Result.into(),
+                        artifact: None,
                     }))
                     .await;
                 // tx is dropped here, closing the stream

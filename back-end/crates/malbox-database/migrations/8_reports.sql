@@ -8,13 +8,14 @@
 -- default question -- "what do we know about this file?" -- is a single
 -- row lookup.
 
--- Ordered by severity so max(classification) = worst-wins.
-create type classification as enum ('clean', 'unknown', 'suspicious', 'malicious');
-create type confidence as enum ('low', 'medium', 'high');
+-- The classification and confidence enums live in 2_types.sql.
 
 create table plugin_reports (
     id              serial primary key,
     task_id         integer not null references tasks(id) on delete cascade,
+    artifact_id     bigint not null references task_artifacts(id) on delete cascade,
+    job_id          bigint references jobs(id) on delete set null,
+    report_path     text not null,
     plugin_name     text not null,
     display_name    text,
     plugin_version  text not null default '',
@@ -29,10 +30,11 @@ create table plugin_reports (
     artifact_count  integer not null default 0,
     created_on      timestamptz not null default now(),
 
-    unique (task_id, plugin_name)
+    unique (artifact_id, plugin_name)
 );
 
 create index idx_plugin_reports_task_id on plugin_reports(task_id);
+create index idx_plugin_reports_artifact on plugin_reports(artifact_id);
 
 create table sample_verdicts (
     sample_id       bigint primary key references samples(id) on delete cascade,

@@ -112,7 +112,7 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
 
     // Step 2: on_task -- needs a result channel so push works.
     // Mirrors the real guest runtime, which wires a ResultSender for on_task.
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let ctx_task = Context::test_new_full(
         config.task_id,
         sample_path,

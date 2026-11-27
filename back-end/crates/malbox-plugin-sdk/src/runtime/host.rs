@@ -4,8 +4,6 @@
 //!
 //! - **Task dispatch** - request/response channel from the daemon.
 //! - **Daemon events** - pub/sub for lifecycle and system signals.
-//! - **Result chaining** - subscribes to other plugins' result channels
-//!   so a plugin can react to upstream outputs.
 //! - **WaitSet wakeup** - efficient notification-driven wakeup (no polling).
 //!
 //! Gated behind the `host` feature flag.
@@ -16,16 +14,15 @@ use crate::meta::PluginMeta;
 use crate::plugin::HostPlugin;
 
 use malbox_plugin_transport::ipc::headers::{
-    EventKind, FLAG_IS_FINAL, ResponseKind, ResultHeader, TaskResponseHeader,
+    EventKind, FLAG_IS_FINAL, ResponseKind, TaskResponseHeader,
 };
 use malbox_plugin_transport::ipc::{
     ActiveTaskRequest, DaemonEventSubscriber, EventHeader, PluginEventPublisher,
-    PluginWakeupListener, ResultPublisher, ResultSubscriber, TaskServer,
+    PluginWakeupListener, TaskServer, encode_artifact_meta,
 };
 use malbox_plugin_transport::ipc::{
     CallbackProgression, IpcService, Node, NodeBuilder, WaitSetBuilder,
 };
-use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
 
 use std::collections::HashMap;
@@ -37,7 +34,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, instrument};
 
 const POLL_INTERVAL_MS: u64 = 500;
-const RESULT_CHANNEL_CAPACITY: usize = 256;
 
 /// Task request payload serialized with postcard over IPC.
 #[derive(Serialize, Deserialize)]
@@ -72,11 +68,6 @@ pub struct HostRuntime<P> {
     daemon_event_sub: DaemonEventSubscriber,
     plugin_event_pub: PluginEventPublisher,
 
-    // Results (chaining) - publisher used when result forwarding is wired up
-    #[allow(dead_code)]
-    result_pub: ResultPublisher,
-    result_subscriptions: Vec<(String, ResultSubscriber)>,
-
     // WaitSet wakeup
     wakeup_listener: PluginWakeupListener,
 
@@ -86,10 +77,7 @@ pub struct HostRuntime<P> {
 
 impl<P: HostPlugin> HostRuntime<P> {
     /// Create a new host plugin runtime.
-    ///
-    /// `subscribed_plugins` is the list of plugin IDs this plugin subscribes to
-    /// for event/result chaining (declared via macro).
-    pub fn new(plugin: P, meta: PluginMeta, subscribed_plugins: &[&str]) -> Result<Self> {
+    pub fn new(plugin: P, meta: PluginMeta) -> Result<Self> {
         // Honor IOX2_LOG_LEVEL (default Info) before any iceoryx2 port exists;
         // iceoryx2 pre-filters at this level before its logs reach `tracing`.
         malbox_plugin_transport::ipc::set_log_level_from_env_or_default();
@@ -113,22 +101,8 @@ impl<P: HostPlugin> HostRuntime<P> {
         let plugin_event_pub = PluginEventPublisher::new(&node, &plugin_id)
             .map_err(|e| SdkError::Init(format!("Failed to create plugin event publisher: {e}")))?;
 
-        let result_pub = ResultPublisher::new(&node, &plugin_id)
-            .map_err(|e| SdkError::Init(format!("Failed to create result publisher: {e}")))?;
-
         let wakeup_listener = PluginWakeupListener::new(&node, &plugin_id)
             .map_err(|e| SdkError::Init(format!("Failed to create wakeup listener: {e}")))?;
-
-        // Subscribe to other plugins' result channels for chaining
-        let mut result_subscriptions = Vec::new();
-        for &sub_plugin_id in subscribed_plugins {
-            let sub = ResultSubscriber::new(&node, sub_plugin_id).map_err(|e| {
-                SdkError::Init(format!(
-                    "Failed to subscribe to plugin '{sub_plugin_id}' results: {e}"
-                ))
-            })?;
-            result_subscriptions.push((sub_plugin_id.to_string(), sub));
-        }
 
         info!(plugin = %meta.name(), "Host runtime initialized");
 
@@ -140,8 +114,6 @@ impl<P: HostPlugin> HostRuntime<P> {
             task_server,
             daemon_event_sub,
             plugin_event_pub,
-            result_pub,
-            result_subscriptions,
             wakeup_listener,
             shutdown: AtomicBool::new(false),
         })
@@ -192,7 +164,6 @@ impl<P: HostPlugin> HostRuntime<P> {
             // Always check all channels on any wakeup
             self.drain_tasks();
             self.drain_daemon_events();
-            self.drain_result_subscriptions();
 
             if self.shutdown.load(Ordering::Relaxed) {
                 return CallbackProgression::Stop;
@@ -248,31 +219,6 @@ impl<P: HostPlugin> HostRuntime<P> {
         }
     }
 
-    fn drain_result_subscriptions(&self) {
-        for (source_id, subscriber) in &self.result_subscriptions {
-            while let Ok(Some(result)) = subscriber.try_recv() {
-                let result_name = extract_result_name(&result.header, &result.payload);
-
-                // Deliver as a lightweight PluginResultAvailable event.
-                // The actual data is accessible through the result subscriber
-                // at the macro-generated handler level (lazy access).
-                let event = Event::PluginResultAvailable {
-                    source: source_id.clone(),
-                    result_name,
-                };
-
-                if let Err(e) = self.plugin.on_event(event) {
-                    error!(
-                        plugin = %self.meta.name(),
-                        source = %source_id,
-                        error = %e,
-                        "on_event (result available) error"
-                    );
-                }
-            }
-        }
-    }
-
     fn handle_task(&self, active_request: ActiveTaskRequest) {
         let header = active_request.header();
         let task_id = header.task_id;
@@ -298,7 +244,7 @@ impl<P: HostPlugin> HostRuntime<P> {
 
         let config: HashMap<String, String> = request.config.into_iter().collect();
 
-        let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(RESULT_CHANNEL_CAPACITY);
+        let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let emitter: Arc<dyn TransportEmitter + Send + Sync> = Arc::new(());
         let task_ctx = Context::new(
@@ -389,6 +335,28 @@ fn forward_result_to_ipc(active_request: &ActiveTaskRequest, msg: &TaskResultMes
         }
     };
 
+    if let Some(meta) = msg.artifact {
+        let meta_payload = match encode_artifact_meta(&meta) {
+            Ok(p) => p,
+            Err(e) => {
+                error!(task_id = msg.task_id, error = %e, "failed to encode artifact metadata");
+                return;
+            }
+        };
+        let meta_header = TaskResponseHeader {
+            task_id: msg.task_id,
+            kind: ResponseKind::ArtifactMeta as u8,
+            format: IpcResultFormat::Bytes as u8,
+            flags: 0,
+            name_len: 0,
+            ..Default::default()
+        };
+        if let Err(e) = active_request.send_response(&meta_header, &meta_payload) {
+            debug!(task_id = msg.task_id, error = %e, "failed to forward artifact metadata via IPC");
+            return;
+        }
+    }
+
     let name_bytes = msg.result_name.as_bytes();
     let name_len = name_bytes.len().min(255) as u8;
 
@@ -406,14 +374,5 @@ fn forward_result_to_ipc(active_request: &ActiveTaskRequest, msg: &TaskResultMes
 
     if let Err(e) = active_request.send_response(&header, &payload) {
         debug!(task_id = msg.task_id, error = %e, "failed to forward result via IPC");
-    }
-}
-
-fn extract_result_name(header: &ResultHeader, payload: &[u8]) -> String {
-    let name_len = header.name_len as usize;
-    if name_len > 0 && payload.len() >= name_len {
-        String::from_utf8_lossy(&payload[..name_len]).to_string()
-    } else {
-        String::new()
     }
 }

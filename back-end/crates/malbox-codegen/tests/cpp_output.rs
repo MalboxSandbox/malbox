@@ -18,6 +18,11 @@ log_filter = "debug"
 [runtime.paths]
 sample_dir = "/opt/malbox/samples"
 artifact_dir = "/opt/malbox/artifacts"
+
+[[runtime.auto_collect.artifacts.rules]]
+include = ["drops/**"]
+exclude = ["drops/*.tmp"]
+relation = "dropped"
 "#;
     let tmp = tempfile::tempdir().unwrap();
     let manifest_path = tmp.path().join("plugin.toml");
@@ -54,6 +59,12 @@ artifact_dir = "/opt/malbox/artifacts"
     );
     assert!(
         header.contains(r#".log_filter             = "debug""#),
+        "got: {header}"
+    );
+    assert!(
+        header.contains(
+            r#".rules         = {{.include = {"drops/**"}, .exclude = {"drops/*.tmp"}, .relation = ::malbox::ArtifactRelation::Dropped, .analyze = 1}}"#
+        ),
         "got: {header}"
     );
 }

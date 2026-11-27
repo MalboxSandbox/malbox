@@ -15,7 +15,8 @@ pub mod vtable;
 
 pub use enums::{MalboxExecutionContext, MalboxPluginState};
 pub use structs::{
-    MalboxAutoCollectConfig, MalboxGuestRuntimeConfig, MalboxHealthStatus, MalboxPluginMeta,
+    MalboxAutoCollectConfig, MalboxAutoCollectRule, MalboxGuestRuntimeConfig, MalboxHealthStatus,
+    MalboxPluginMeta,
 };
 pub use vtable::{
     MALBOX_ABI_VERSION, MalboxContext, MalboxGuestPluginVtable, MalboxPluginVtable,

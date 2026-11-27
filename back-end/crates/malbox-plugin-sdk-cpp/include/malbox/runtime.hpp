@@ -17,12 +17,23 @@
 
 namespace malbox {
 
+/// Auto-collect rule: matching files are pushed as artifacts with `relation`.
+///
+/// `analyze`: -1 = relation default, 0 = false, 1 = true.
+struct AutoCollectRule {
+    std::vector<std::string>     include;
+    std::vector<std::string>     exclude;
+    ArtifactRelation             relation = ArtifactRelation::Extracted;
+    int                          analyze = -1;
+};
+
 /// Auto-collection settings for a single directory.
 struct AutoCollectConfig {
     bool                         enabled = false;
     std::vector<std::string>     include;
     std::vector<std::string>     exclude;
     std::uint64_t                max_file_size = 0;
+    std::vector<AutoCollectRule> rules;
 };
 
 /// Runtime configuration baked into the plugin at build time.
@@ -294,6 +305,36 @@ inline void run_guest_plugin(
     auto [log_inc_ptrs, log_inc_count] = make_c_ptrs(config.auto_collect_external_logs.include);
     auto [log_exc_ptrs, log_exc_count] = make_c_ptrs(config.auto_collect_external_logs.exclude);
 
+    // Per-rule pattern pointer storage; must outlive the FFI call.
+    struct RuleStorage {
+        std::vector<std::vector<const char*>> includes;
+        std::vector<std::vector<const char*>> excludes;
+        std::vector<MalboxAutoCollectRule>    rules;
+    };
+    auto make_c_rules = [&make_c_ptrs](const std::vector<AutoCollectRule>& rules) {
+        RuleStorage st;
+        st.includes.reserve(rules.size());
+        st.excludes.reserve(rules.size());
+        st.rules.reserve(rules.size());
+        for (const auto& r : rules) {
+            st.includes.push_back(make_c_ptrs(r.include).first);
+            st.excludes.push_back(make_c_ptrs(r.exclude).first);
+        }
+        for (std::size_t i = 0; i < rules.size(); ++i) {
+            MalboxAutoCollectRule c{};
+            c.include       = st.includes[i].empty() ? nullptr : st.includes[i].data();
+            c.include_count = st.includes[i].size();
+            c.exclude       = st.excludes[i].empty() ? nullptr : st.excludes[i].data();
+            c.exclude_count = st.excludes[i].size();
+            c.relation      = static_cast<int32_t>(rules[i].relation);
+            c.analyze       = rules[i].analyze;
+            st.rules.push_back(c);
+        }
+        return st;
+    };
+    RuleStorage art_rules = make_c_rules(config.auto_collect_artifacts.rules);
+    RuleStorage log_rules = make_c_rules(config.auto_collect_external_logs.rules);
+
     MalboxAutoCollectConfig c_art{};
     c_art.enabled       = config.auto_collect_artifacts.enabled;
     c_art.include       = art_inc_ptrs.empty() ? nullptr : art_inc_ptrs.data();
@@ -301,6 +342,8 @@ inline void run_guest_plugin(
     c_art.exclude       = art_exc_ptrs.empty() ? nullptr : art_exc_ptrs.data();
     c_art.exclude_count = art_exc_count;
     c_art.max_file_size = config.auto_collect_artifacts.max_file_size;
+    c_art.rules         = art_rules.rules.empty() ? nullptr : art_rules.rules.data();
+    c_art.rule_count    = art_rules.rules.size();
 
     MalboxAutoCollectConfig c_log{};
     c_log.enabled       = config.auto_collect_external_logs.enabled;
@@ -309,6 +352,8 @@ inline void run_guest_plugin(
     c_log.exclude       = log_exc_ptrs.empty() ? nullptr : log_exc_ptrs.data();
     c_log.exclude_count = log_exc_count;
     c_log.max_file_size = config.auto_collect_external_logs.max_file_size;
+    c_log.rules         = log_rules.rules.empty() ? nullptr : log_rules.rules.data();
+    c_log.rule_count    = log_rules.rules.size();
 
     MalboxGuestRuntimeConfig c_config{};
     c_config.port                       = config.port;

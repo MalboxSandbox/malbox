@@ -44,23 +44,9 @@ def test_event_all_variants():
     assert malbox.Event.sample_result_produced(9).kind == "SampleResultProduced"
 
 
-def test_event_plugin_result_available():
-    event = malbox.Event.plugin_result_available("yara-scanner", "matches")
-    assert event.kind == "PluginResultAvailable"
-    assert event.source == "yara-scanner"
-    assert event.result_name == "matches"
-    assert event.id is None
-
-
 def test_event_sample_id():
     event = malbox.Event.sample_started(42)
     assert event.id == 42
-
-
-def test_event_source_none_for_non_result_events():
-    event = malbox.Event.task_created(1)
-    assert event.source is None
-    assert event.result_name is None
 
 
 def test_plugin_result_json():
@@ -208,3 +194,16 @@ def test_tree_node():
     child = malbox.TreeNode("child")
     parent = malbox.TreeNode("parent", children=[child])
     assert parent.label == "parent"
+
+
+def test_push_artifact_requires_one_source():
+    import pytest
+
+    with pytest.raises(ValueError, match="exactly one of data or path is required"):
+        malbox._validate_artifact_args(None, None, "extracted")
+    with pytest.raises(ValueError, match="exactly one of data or path is required"):
+        malbox._validate_artifact_args(b"x", "/tmp/x", "extracted")
+    with pytest.raises(ValueError, match="unknown artifact relation: root"):
+        malbox._validate_artifact_args(b"x", None, "root")
+    malbox._validate_artifact_args(b"x", None, "dropped")
+    assert issubclass(malbox.ArtifactLimitError, RuntimeError)

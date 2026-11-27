@@ -12,9 +12,7 @@ pub mod repositories;
 /// here - the installer and dev tooling own that - so a missing database
 /// fails with instructions. Errors are returned rather than panicking so
 /// daemon startup can fail with an actionable message.
-pub async fn init_database(
-    config: &DatabaseConfig,
-) -> Result<sqlx::Pool<sqlx::Postgres>, sqlx::Error> {
+pub async fn init_database(config: &DatabaseConfig) -> error::Result<sqlx::Pool<sqlx::Postgres>> {
     // Configs from before the [database] section was split into discrete
     // fields put a full connection URL here; fail with directions instead
     // of trying to resolve the URL as a hostname.
@@ -26,7 +24,8 @@ pub async fn init_database(
                 config.host
             )
             .into(),
-        ));
+        )
+        .into());
     }
 
     let db = PgPoolOptions::new()
@@ -50,9 +49,34 @@ pub async fn init_database(
             }
         })?;
 
-    sqlx::migrate!().run(&db).await?;
+    run_migrations(&db).await?;
 
     Ok(db)
+}
+
+/// Connect to `url` and apply the embedded migrations. Used by tests that
+/// create their own throwaway databases.
+pub async fn connect_and_migrate(url: &str) -> error::Result<PgPool> {
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(url)
+        .await?;
+    run_migrations(&pool).await?;
+    Ok(pool)
+}
+
+/// Apply the embedded migrations. A database migrated by an incompatible
+/// (pre-rewrite) release maps to [`error::DatabaseError::IncompatibleSchema`];
+/// one migrated by a newer release to [`error::DatabaseError::NewerSchema`].
+async fn run_migrations(pool: &PgPool) -> error::Result<()> {
+    use sqlx::migrate::MigrateError;
+    sqlx::migrate!().run(pool).await.map_err(|e| match e {
+        MigrateError::VersionMismatch(version) => {
+            error::DatabaseError::IncompatibleSchema { version }
+        }
+        MigrateError::VersionMissing(version) => error::DatabaseError::NewerSchema { version },
+        other => error::DatabaseError::Migrate(other),
+    })
 }
 
 /// Build connection options from the discrete config fields.

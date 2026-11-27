@@ -20,6 +20,15 @@ pub enum ManagerError {
     #[error("Execution failed for plugin '{0}': {1}")]
     ExecutionFailed(PluginId, String),
 
+    #[error("plugin '{0}' timed out")]
+    Timeout(PluginId),
+
+    #[error("plugin '{0}' crashed during task")]
+    Crashed(PluginId),
+
+    #[error("plugin '{0}' reported an error: {1}")]
+    Reported(PluginId, String),
+
     #[error("Plugin '{0}' is busy executing another task")]
     PluginBusy(PluginId),
 

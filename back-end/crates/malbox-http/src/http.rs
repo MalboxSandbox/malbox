@@ -1,14 +1,13 @@
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use malbox_config::Config as MalboxConfig;
-use malbox_database::{PgPool, repositories::tasks::Task};
+use malbox_database::PgPool;
 use malbox_plugin_internal::registry::PluginRegistry;
 use malbox_resources::MachinePool;
-use malbox_scheduler::TaskCancellationRegistry;
+use malbox_scheduler::OrchestratorHandle;
 use malbox_utils::SampleStore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
@@ -32,32 +31,28 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 struct AppState {
     config: MalboxConfig,
     pool: PgPool,
-    task_tx: mpsc::Sender<Task>,
+    orchestrator: OrchestratorHandle,
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
     plugin_registry: Arc<PluginRegistry>,
-    cancel_registry: Arc<TaskCancellationRegistry>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn serve(
     conf: MalboxConfig,
     db: PgPool,
-    task_tx: mpsc::Sender<Task>,
+    orchestrator: OrchestratorHandle,
     sample_store: Arc<SampleStore>,
     machine_pool: Arc<MachinePool>,
     plugin_registry: Arc<PluginRegistry>,
-    cancel_registry: Arc<TaskCancellationRegistry>,
     shutdown_token: CancellationToken,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shared_state = AppState {
         config: conf,
         pool: db,
-        task_tx,
+        orchestrator,
         sample_store,
         machine_pool,
         plugin_registry,
-        cancel_registry,
     };
 
     let app = api_router();
@@ -118,7 +113,7 @@ fn api_router() -> Router<AppState> {
         .merge(tasks::create::router())
         .merge(tasks::get::router())
         .merge(tasks::report::router())
-        .merge(tasks::results::router())
+        .merge(tasks::artifacts::router())
         .merge(samples::router())
         .merge(images::router())
         .merge(machines::router())

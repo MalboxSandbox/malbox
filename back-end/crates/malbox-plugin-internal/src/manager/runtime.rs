@@ -1,13 +1,17 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
-use tracing::debug;
+use tokio::sync::{Mutex, oneshot};
+use tracing::{debug, info};
 
 use crate::manager::error::{ManagerError, Result};
 use crate::manager::handle::{OutputFormat, PluginOutput};
 use crate::manager::ipc_reactor::IpcReactorHandle;
 use crate::registry::types::{PluginEntry, PluginId};
 use crate::transport::daemon::GrpcClient;
+use crate::transport::grpc::conversions::artifact_meta_from_proto;
+use crate::transport::grpc::proto;
 
 /// Polymorphic operations shared by both host and guest runtimes.
 ///
@@ -16,6 +20,7 @@ use crate::transport::daemon::GrpcClient;
 /// documents the contract.
 #[allow(async_fn_in_trait)]
 pub trait PluginExecution: Send {
+    #[allow(clippy::too_many_arguments)]
     async fn execute_task(
         &mut self,
         plugin_id: &PluginId,
@@ -23,6 +28,8 @@ pub trait PluginExecution: Send {
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
+        timeout: Duration,
+        ready: Option<oneshot::Sender<()>>,
     ) -> Result<Vec<PluginOutput>>;
 
     async fn check_health(&mut self) -> bool;
@@ -36,7 +43,11 @@ pub struct HostRuntime {
 
 /// Guest plugin runtime: gRPC client connection.
 pub struct GuestRuntime {
+    /// Client used for the task stream, health checks and result pulls.
     pub grpc_client: GrpcClient,
+    /// Second connection to the same guest, used for control RPCs
+    /// (`StopTask`) while `grpc_client` is held by a running task stream.
+    pub control_client: Arc<Mutex<GrpcClient>>,
 }
 
 /// Type-discriminated runtime state for a plugin instance.
@@ -49,27 +60,17 @@ impl PluginExecution for HostRuntime {
     async fn execute_task(
         &mut self,
         plugin_id: &PluginId,
-        entry: &PluginEntry,
+        _entry: &PluginEntry,
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
+        timeout: Duration,
+        _ready: Option<oneshot::Sender<()>>,
     ) -> Result<Vec<PluginOutput>> {
         debug!(plugin = %plugin_id, task_id, "executing task on host plugin via IPC reactor");
 
-        let timeout_secs = entry
-            .runtime_config
-            .as_ref()
-            .map(|c| c.analysis_timeout)
-            .unwrap_or(300);
-
         self.ipc
-            .execute_task(
-                plugin_id,
-                task_id,
-                sample_path.to_string(),
-                config,
-                Duration::from_secs(timeout_secs),
-            )
+            .execute_task(plugin_id, task_id, sample_path.to_string(), config, timeout)
             .await
     }
 
@@ -78,25 +79,23 @@ impl PluginExecution for HostRuntime {
     }
 }
 
-impl PluginExecution for GuestRuntime {
-    async fn execute_task(
-        &mut self,
+fn output_format(format: i32) -> OutputFormat {
+    match proto::ResultFormat::try_from(format) {
+        Ok(proto::ResultFormat::Json) => OutputFormat::Json,
+        _ => OutputFormat::Bytes,
+    }
+}
+
+impl GuestRuntime {
+    /// Consume the task stream until the final marker, collecting inline
+    /// outputs and result refs to pull afterwards.
+    async fn collect_stream(
         plugin_id: &PluginId,
-        _entry: &PluginEntry,
-        task_id: i32,
-        sample_path: &str,
-        config: HashMap<String, String>,
-    ) -> Result<Vec<PluginOutput>> {
-        use crate::transport::grpc::proto::{self, ResultFormat as ProtoFormat, ResultKind};
+        stream: &mut tonic::Streaming<proto::TaskResult>,
+        mut ready: Option<oneshot::Sender<()>>,
+    ) -> Result<(Vec<PluginOutput>, Vec<proto::ResultRef>)> {
+        use crate::transport::grpc::proto::ResultKind;
         use prost::Message;
-
-        debug!(plugin = %plugin_id, task_id, "executing task on guest plugin via gRPC");
-
-        let mut stream = self
-            .grpc_client
-            .execute_task(task_id, sample_path.to_string(), config)
-            .await
-            .map_err(|e| ManagerError::ExecutionFailed(plugin_id.clone(), e.to_string()))?;
 
         let mut inline_outputs: Vec<PluginOutput> = Vec::new();
         let mut pending_refs: Vec<proto::ResultRef> = Vec::new();
@@ -113,9 +112,14 @@ impl PluginExecution for GuestRuntime {
                         }
                         ResultKind::Ready => {
                             debug!(plugin = %plugin_id, task_id = result.task_id, "plugin signaled ready");
+                            if let Some(tx) = ready.take() {
+                                let _ = tx.send(());
+                            }
+                        }
+                        ResultKind::Event => {
+                            debug!(plugin = %plugin_id, task_id = result.task_id, "dropping event message from guest stream");
                         }
                         ResultKind::Result => {
-                            use tracing::info;
                             info!(
                                 plugin = %plugin_id,
                                 task_id = result.task_id,
@@ -125,16 +129,15 @@ impl PluginExecution for GuestRuntime {
                                 "received inline task result from guest plugin"
                             );
 
-                            let format = match ProtoFormat::try_from(result.format) {
-                                Ok(ProtoFormat::Json) => OutputFormat::Json,
-                                _ => OutputFormat::Bytes,
-                            };
-
                             if !result.result_name.is_empty() {
                                 inline_outputs.push(PluginOutput {
+                                    format: output_format(result.format),
+                                    artifact: result
+                                        .artifact
+                                        .as_ref()
+                                        .and_then(artifact_meta_from_proto),
                                     result_name: result.result_name,
                                     data: result.data,
-                                    format,
                                 });
                             }
                         }
@@ -146,7 +149,6 @@ impl PluginExecution for GuestRuntime {
                                         format!("failed to decode ResultRef: {e}"),
                                     )
                                 })?;
-                            use tracing::info;
                             info!(
                                 plugin = %plugin_id,
                                 task_id = result.task_id,
@@ -160,12 +162,12 @@ impl PluginExecution for GuestRuntime {
                     }
 
                     if is_final {
-                        break;
+                        return Ok((inline_outputs, pending_refs));
                     }
                 }
                 Ok(None) => {
-                    debug!(plugin = %plugin_id, "guest plugin task stream ended");
-                    break;
+                    debug!(plugin = %plugin_id, "guest plugin task stream ended without final marker");
+                    return Err(ManagerError::Crashed(plugin_id.clone()));
                 }
                 Err(status) => {
                     return Err(ManagerError::ExecutionFailed(
@@ -175,8 +177,34 @@ impl PluginExecution for GuestRuntime {
                 }
             }
         }
+    }
+}
 
-        let mut outputs = inline_outputs;
+impl PluginExecution for GuestRuntime {
+    async fn execute_task(
+        &mut self,
+        plugin_id: &PluginId,
+        _entry: &PluginEntry,
+        task_id: i32,
+        sample_path: &str,
+        config: HashMap<String, String>,
+        timeout: Duration,
+        ready: Option<oneshot::Sender<()>>,
+    ) -> Result<Vec<PluginOutput>> {
+        debug!(plugin = %plugin_id, task_id, "executing task on guest plugin via gRPC");
+
+        let collected = tokio::time::timeout(timeout, async {
+            let mut stream = self
+                .grpc_client
+                .execute_task(task_id, sample_path.to_string(), config)
+                .await
+                .map_err(|e| ManagerError::ExecutionFailed(plugin_id.clone(), e.to_string()))?;
+            Self::collect_stream(plugin_id, &mut stream, ready).await
+        })
+        .await
+        .map_err(|_| ManagerError::Timeout(plugin_id.clone()))?;
+
+        let (mut outputs, pending_refs) = collected?;
         for ref_msg in pending_refs {
             let pulled = pull_result_chunks(&mut self.grpc_client, plugin_id, &ref_msg).await?;
             outputs.push(pulled);
@@ -195,6 +223,7 @@ impl PluginExecution for GuestRuntime {
 }
 
 impl PluginRuntime {
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_task(
         &mut self,
         plugin_id: &PluginId,
@@ -202,15 +231,33 @@ impl PluginRuntime {
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
+        timeout: Duration,
+        ready: Option<oneshot::Sender<()>>,
     ) -> Result<Vec<PluginOutput>> {
         match self {
             Self::Host(h) => {
-                h.execute_task(plugin_id, entry, task_id, sample_path, config)
-                    .await
+                h.execute_task(
+                    plugin_id,
+                    entry,
+                    task_id,
+                    sample_path,
+                    config,
+                    timeout,
+                    ready,
+                )
+                .await
             }
             Self::Guest(g) => {
-                g.execute_task(plugin_id, entry, task_id, sample_path, config)
-                    .await
+                g.execute_task(
+                    plugin_id,
+                    entry,
+                    task_id,
+                    sample_path,
+                    config,
+                    timeout,
+                    ready,
+                )
+                .await
             }
         }
     }
@@ -226,11 +273,8 @@ impl PluginRuntime {
 async fn pull_result_chunks(
     client: &mut GrpcClient,
     plugin_id: &PluginId,
-    ref_msg: &crate::transport::grpc::proto::ResultRef,
+    ref_msg: &proto::ResultRef,
 ) -> Result<PluginOutput> {
-    use crate::transport::grpc::proto::ResultFormat as ProtoFormat;
-    use tracing::info;
-
     let mut stream = client
         .pull_result(ref_msg.handle.clone())
         .await
@@ -266,11 +310,6 @@ async fn pull_result_chunks(
         }
     }
 
-    let format = match ProtoFormat::try_from(ref_msg.format) {
-        Ok(ProtoFormat::Json) => OutputFormat::Json,
-        _ => OutputFormat::Bytes,
-    };
-
     info!(
         plugin = %plugin_id,
         result_name = %ref_msg.result_name,
@@ -281,6 +320,7 @@ async fn pull_result_chunks(
     Ok(PluginOutput {
         result_name: ref_msg.result_name.clone(),
         data: buf,
-        format,
+        format: output_format(ref_msg.format),
+        artifact: ref_msg.artifact.as_ref().and_then(artifact_meta_from_proto),
     })
 }

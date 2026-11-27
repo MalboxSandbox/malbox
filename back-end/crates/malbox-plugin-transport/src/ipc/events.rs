@@ -5,7 +5,7 @@
 //! Pattern: publish_subscribe::<[u8]>() with user_header::<EventHeader>()
 //!
 //! Events are ultra-lightweight signals. The payload is typically empty or
-//! contains a minimal postcard-encoded struct (e.g., file path for ResultAvailable).
+//! contains a minimal postcard-encoded struct.
 //! Safe overflow is enabled - oldest events are dropped if subscribers are slow.
 
 use crate::error::{Result, TransportError};
@@ -32,10 +32,6 @@ impl TryFrom<&EventHeader> for Event {
             Ok(EventKind::TaskCanceled) => Ok(Event::TaskCanceled { task_id: id }),
             Ok(EventKind::PluginStarted) => Ok(Event::PluginStarted { plugin_id: id }),
             Ok(EventKind::PluginStopped) => Ok(Event::PluginStopped { plugin_id: id }),
-            Ok(EventKind::PluginResultAvailable) => Ok(Event::PluginResultAvailable {
-                source: String::new(),
-                result_name: String::new(),
-            }),
             Ok(EventKind::SampleStarted) => Ok(Event::SampleStarted { sample_id: id }),
             Ok(EventKind::SampleStopped) => Ok(Event::SampleStopped { sample_id: id }),
             Ok(EventKind::SampleResultProduced) => {
@@ -58,7 +54,6 @@ impl From<&Event> for EventHeader {
             Event::TaskCanceled { task_id } => (EventKind::TaskCanceled as u16, *task_id),
             Event::PluginStarted { plugin_id } => (EventKind::PluginStarted as u16, *plugin_id),
             Event::PluginStopped { plugin_id } => (EventKind::PluginStopped as u16, *plugin_id),
-            Event::PluginResultAvailable { .. } => (EventKind::PluginResultAvailable as u16, 0),
             Event::SampleStarted { sample_id } => (EventKind::SampleStarted as u16, *sample_id),
             Event::SampleStopped { sample_id } => (EventKind::SampleStopped as u16, *sample_id),
             Event::SampleResultProduced { sample_id } => {
@@ -268,19 +263,7 @@ impl DaemonEventPublisher {
 
 impl TransportEmitter for DaemonEventPublisher {
     fn emit(&self, event: Event) -> Result<()> {
-        let header = EventHeader::from(&event);
-        if let Event::PluginResultAvailable {
-            ref source,
-            ref result_name,
-        } = event
-        {
-            let mut payload = source.as_bytes().to_vec();
-            payload.push(0);
-            payload.extend_from_slice(result_name.as_bytes());
-            self.emit_with_header(&header, &payload)
-        } else {
-            self.emit_signal(&header)
-        }
+        self.emit_signal(&EventHeader::from(&event))
     }
 }
 
@@ -348,26 +331,9 @@ pub struct ReceivedEvent {
 }
 
 impl ReceivedEvent {
-    /// Convert to an [`Event`], decoding payload data for events that carry it.
-    ///
-    /// Unlike `Event::try_from(&header)`, this also extracts string fields
-    /// (e.g. `PluginResultAvailable.source`/`result_name`) from the payload.
+    /// Convert to an [`Event`].
     pub fn to_event(&self) -> std::result::Result<Event, u16> {
-        let mut event = Event::try_from(&self.header)?;
-        if let Event::PluginResultAvailable {
-            ref mut source,
-            ref mut result_name,
-        } = event
-            && !self.payload.is_empty()
-        {
-            if let Some(sep) = self.payload.iter().position(|&b| b == 0) {
-                *source = String::from_utf8_lossy(&self.payload[..sep]).into_owned();
-                *result_name = String::from_utf8_lossy(&self.payload[sep + 1..]).into_owned();
-            } else {
-                *source = String::from_utf8_lossy(&self.payload).into_owned();
-            }
-        }
-        Ok(event)
+        Event::try_from(&self.header)
     }
 }
 
@@ -384,7 +350,7 @@ mod tests {
         let subscriber = PluginEventSubscriber::new(&node, "test-ev").expect("sub");
 
         let header = EventHeader {
-            event_type: EventKind::PluginResultAvailable as u16,
+            event_type: EventKind::PluginStarted as u16,
             source_plugin_id: 5,
             associated_id: 42,
             _reserved: [0; 6],
@@ -393,10 +359,7 @@ mod tests {
         publisher.emit_signal(&header).expect("emit");
 
         let ev = subscriber.try_recv().expect("recv").expect("event");
-        assert_eq!(
-            ev.header.event_type,
-            EventKind::PluginResultAvailable as u16
-        );
+        assert_eq!(ev.header.event_type, EventKind::PluginStarted as u16);
         assert_eq!(ev.header.source_plugin_id, 5);
         assert_eq!(ev.header.associated_id, 42);
         assert!(ev.payload.is_empty());
@@ -411,7 +374,7 @@ mod tests {
         let subscriber = PluginEventSubscriber::new(&node, "test-ev-pl").expect("sub");
 
         let header = EventHeader {
-            event_type: EventKind::PluginResultAvailable as u16,
+            event_type: EventKind::SampleResultProduced as u16,
             source_plugin_id: 1,
             associated_id: 7,
             _reserved: [0; 6],

@@ -19,52 +19,38 @@ impl MachinePool {
     pub(crate) async fn revert_machine(&self, machine_id: i32) -> Result<()> {
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .map_err(|e| ResourceError::Database(e.into()))?
             .ok_or(ResourceError::MachineNotFound {
                 id: machine_id.to_string(),
             })?;
 
         // Try snapshot-based revert first
-        if let (Some(snapshot_cap), Some(provider_id)) =
-            (self.provider.snapshot(), db_machine.provider_id.as_deref())
-        {
+        if let Some(provider_id) = db_machine.provider_id.as_deref() {
             let active_snap = snapshots::fetch_active_snapshot(&self.db, machine_id)
                 .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?;
+                .map_err(|e| ResourceError::Database(e.into()))?;
 
-            if let Some(snap) = active_snap {
-                let allocate = self.provider.allocate();
-                let provider_vms = allocate
-                    .list()
-                    .await
-                    .map_err(|e| ResourceError::Provider(e.to_string()))?;
+            if let Some(snap) = active_snap
+                && self
+                    .restore_provider_snapshot(machine_id, provider_id, &snap.provider_snapshot_id)
+                    .await?
+            {
+                machinery::update_machine_status(
+                    &self.db,
+                    machine_id,
+                    MachineStatusDb::Ready,
+                    None,
+                )
+                .await
+                .map_err(|e| ResourceError::Database(e.into()))?;
 
-                if let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == provider_id) {
-                    snapshot_cap
-                        .restore_snapshot(runtime_vm, &SnapshotId(snap.provider_snapshot_id))
-                        .await
-                        .map_err(|e| ResourceError::SnapshotRestoreFailed {
-                            id: machine_id,
-                            reason: e.to_string(),
-                        })?;
-
-                    machinery::update_machine_status(
-                        &self.db,
-                        machine_id,
-                        MachineStatusDb::Ready,
-                        None,
-                    )
-                    .await
-                    .map_err(|e| ResourceError::Database(e.to_string()))?;
-
-                    self.machine_available.notify_waiters();
-                    info!(
-                        machine_id,
-                        snapshot = snap.name,
-                        "Machine reverted via snapshot"
-                    );
-                    return Ok(());
-                }
+                self.machine_available.notify_waiters();
+                info!(
+                    machine_id,
+                    snapshot = snap.name,
+                    "Machine reverted via snapshot"
+                );
+                return Ok(());
             }
         }
 
@@ -86,7 +72,7 @@ impl MachinePool {
             .ok_or_else(|| ResourceError::Internal("Machine has no image_id".to_string()))?;
         let image_path = images::fetch_image_by_id(&self.db, image_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .map_err(|e| ResourceError::Database(e.into()))?
             .ok_or_else(|| {
                 ResourceError::Internal(format!("Image with id {} not found", image_id))
             })?
@@ -94,9 +80,41 @@ impl MachinePool {
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         self.setup_machine(machine_id, &image_path).await
+    }
+
+    /// Restore a provider-side snapshot onto the machine's VM.
+    ///
+    /// Returns `false` when the provider has no snapshot capability or the VM
+    /// is not known to the provider; nothing is restored in that case.
+    pub(crate) async fn restore_provider_snapshot(
+        &self,
+        machine_id: i32,
+        provider_id: &str,
+        provider_snapshot_id: &str,
+    ) -> Result<bool> {
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            return Ok(false);
+        };
+        let provider_vms = self
+            .provider
+            .allocate()
+            .list()
+            .await
+            .map_err(|e| ResourceError::Provider(e.to_string()))?;
+        let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == provider_id) else {
+            return Ok(false);
+        };
+        snapshot_cap
+            .restore_snapshot(runtime_vm, &SnapshotId(provider_snapshot_id.to_string()))
+            .await
+            .map_err(|e| ResourceError::SnapshotRestoreFailed {
+                id: machine_id,
+                reason: e.to_string(),
+            })?;
+        Ok(true)
     }
 }
 

@@ -5,6 +5,7 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use malbox_database::PgPool;
+use malbox_database::repositories::artifacts::fetch_root_artifact_ids;
 use malbox_database::repositories::machinery::MachinePlatform;
 use malbox_database::repositories::samples::fetch_samples_by_ids;
 use malbox_database::repositories::tasks::{
@@ -59,10 +60,7 @@ fn parse_statuses(csv: &str) -> Vec<TaskState> {
     csv.split(',')
         .filter_map(|s| match s.trim() {
             "pending" => Some(TaskState::Pending),
-            "initializing" => Some(TaskState::Initializing),
-            "preparing_resources" => Some(TaskState::PreparingResources),
             "running" => Some(TaskState::Running),
-            "stopping" => Some(TaskState::Stopping),
             "completed" => Some(TaskState::Completed),
             "failed" => Some(TaskState::Failed),
             "canceled" => Some(TaskState::Canceled),
@@ -91,7 +89,7 @@ fn decode_cursor(encoded: &str) -> Option<Cursor> {
 fn encode_cursor(task: &Task) -> String {
     let cursor = Cursor {
         ts: task.created_on,
-        id: task.id.unwrap_or_default(),
+        id: task.id,
     };
     let json = serde_json::to_vec(&cursor).unwrap_or_default();
     URL_SAFE_NO_PAD.encode(&json)
@@ -126,8 +124,12 @@ fn build_filter(params: &ListParams) -> TaskFilter {
     }
 }
 
-/// Attach each task's sample via a single batched query (no N+1).
+/// Attach each task's sample and root artifact id via batched queries (no N+1).
 async fn attach_samples(pool: &PgPool, tasks: Vec<Task>) -> Vec<TaskDto> {
+    let task_ids: Vec<i32> = tasks.iter().map(|t| t.id).collect();
+    let roots = fetch_root_artifact_ids(pool, &task_ids)
+        .await
+        .unwrap_or_default();
     let ids: Vec<i64> = tasks.iter().filter_map(|t| t.sample_id).collect();
     let mut by_id: HashMap<i64, SampleDto> = HashMap::new();
     if !ids.is_empty()
@@ -141,7 +143,9 @@ async fn attach_samples(pool: &PgPool, tasks: Vec<Task>) -> Vec<TaskDto> {
         .into_iter()
         .map(|t| {
             let sample_id = t.sample_id;
+            let task_id = t.id;
             let mut dto = TaskDto::from(t);
+            dto.root_artifact_id = roots.get(&task_id).copied();
             if let Some(sid) = sample_id {
                 dto.sample = by_id.get(&sid).cloned();
             }

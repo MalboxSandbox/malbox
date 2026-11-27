@@ -5,7 +5,7 @@ use malbox_machinery::provider::{create_provider, list_providers};
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::manager::ipc_reactor::IpcReactor;
 use malbox_resources::{MachinePool, resolve_transport};
-use malbox_scheduler::init_scheduler;
+use malbox_scheduler::OrchestratorCore;
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -38,6 +38,10 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
 
         malbox_config::validate_machine_configs(&config.machines)
             .map_err(|e| DaemonError::Configuration(format!("Invalid machine config: {}", e)))?;
+
+        malbox_config::validate_orchestration(&config.orchestration).map_err(|e| {
+            DaemonError::Configuration(format!("Invalid orchestration config: {}", e))
+        })?;
     }
 
     let db = {
@@ -226,27 +230,30 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
         }
     }
 
-    // Initialize sample and result stores for file uploads and worker access
+    // Initialize sample and result stores for uploads and job outputs
     let sample_store = Arc::new(SampleStore::new(&config.paths.data_dir));
     let result_store = Arc::new(ResultStore::new(&config.paths.data_dir));
 
-    // Initialize scheduler and keep channels alive
-    let (task_tx, cancel_registry) = {
-        let _span = info_span!("init.scheduler").entered();
-        init_scheduler(
-            db.clone(),
-            Arc::clone(&machine_pool),
+    let (orchestrator, orchestrator_join) = {
+        let _span = info_span!("init.orchestrator").entered();
+        let core = OrchestratorCore {
+            db: db.clone(),
+            sample_store: Arc::clone(&sample_store),
+            result_store: Arc::clone(&result_store),
+            settings: Arc::new(config.orchestration.clone()),
+            data_dir: config.paths.data_dir.clone(),
+            identify: malbox_utils::identify::identify,
+            events: Arc::new(plugin_manager.emitter().clone()),
+        };
+        malbox_scheduler::start(
+            core,
             Arc::clone(&plugin_manager),
-            config.general.max_workers,
-            config.general.min_workers,
-            config.general.idle_timeout_ms,
+            Arc::clone(&machine_pool),
             transport,
-            Arc::clone(&sample_store),
-            Arc::clone(&result_store),
             shutdown_token.child_token(),
         )
         .await
-        .map_err(|e| DaemonError::Internal(e.to_string()))?
+        .map_err(|e| DaemonError::Internal(format!("Failed to start orchestrator: {}", e)))?
     };
 
     // Start HTTP server (this blocks until shutdown — no init span here;
@@ -254,11 +261,10 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
     http::serve(
         config.clone(),
         db.clone(),
-        task_tx,
+        orchestrator,
         sample_store,
         machine_pool,
         registry,
-        cancel_registry,
         shutdown_token.child_token(),
     )
     .await
@@ -268,6 +274,9 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
     info!("HTTP server stopped, beginning teardown...");
 
     let teardown = async {
+        if orchestrator_join.await.is_err() {
+            warn!("Orchestrator task panicked during shutdown");
+        }
         plugin_manager.shutdown().await;
         db.close().await;
         info!("Daemon shut down");

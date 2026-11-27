@@ -1,7 +1,7 @@
 use crate::error::{MachineError, Result};
 use malbox_config::types::Platform as MachinePlatformConfig;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{AssertSqlSafe, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -118,11 +118,12 @@ pub async fn insert_machine(
     memory_mb: i32,
     disk_size_mb: i64,
     provider_config_hash: Option<&str>,
+    tags: &[String],
 ) -> Result<Machine> {
     sqlx::query_as::<_, Machine>(
         r#"
-        INSERT INTO "machines" (name, label, platform, arch, image_id, image_name, cpus, memory_mb, disk_size_mb, provider_config_hash, status)
-        VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'creating')
+        INSERT INTO "machines" (name, label, platform, arch, image_id, image_name, cpus, memory_mb, disk_size_mb, provider_config_hash, tags, status)
+        VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'creating')
         RETURNING *
         "#,
     )
@@ -135,6 +136,7 @@ pub async fn insert_machine(
     .bind(memory_mb)
     .bind(disk_size_mb)
     .bind(provider_config_hash)
+    .bind(tags)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -147,41 +149,134 @@ pub async fn insert_machine(
     })
 }
 
-/// Atomically acquire a 'ready' machine for a task.
-/// Uses FOR UPDATE SKIP LOCKED to avoid contention.
-/// Sets status to 'assigned' and records the task_id.
-pub async fn acquire_machine(
-    pool: &PgPool,
-    platform: MachinePlatform,
-    task_id: i32,
-) -> Result<Option<Machine>> {
-    sqlx::query_as::<_, Machine>(
-        r#"
-        UPDATE "machines"
-        SET status = 'assigned',
-            current_task_id = $1,
-            updated_at = NOW()
-        WHERE id = (
-            SELECT id FROM "machines"
-            WHERE status = 'ready'
-              AND platform = $2
-            ORDER BY updated_at ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-        )
-        RETURNING *
-        "#,
-    )
-    .bind(task_id)
-    .bind(platform)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        MachineError::UpdateFailed {
-            message: "failed to acquire machine".to_string(),
+/// Replace a machine's tags.
+pub async fn update_machine_tags(pool: &PgPool, machine_id: i32, tags: &[String]) -> Result<()> {
+    sqlx::query(r#"UPDATE "machines" SET tags = $2, updated_at = NOW() WHERE id = $1"#)
+        .bind(machine_id)
+        .bind(tags)
+        .execute(pool)
+        .await
+        .map_err(|e| MachineError::UpdateFailed {
+            message: "failed to update machine tags".to_string(),
             source: e,
-        }
-        .into()
+        })?;
+    Ok(())
+}
+
+/// Constraints a detonation places on the machine and snapshot it runs on.
+#[derive(Debug, Clone, Default)]
+pub struct MachineFilter {
+    pub platform: Option<MachinePlatform>,
+    /// `x86` also matches `x64` machines.
+    pub arch: Option<MachineArch>,
+    pub machine_id: Option<i32>,
+    pub snapshot_id: Option<Uuid>,
+    pub snapshot_name: Option<String>,
+    /// All must be present on the machine.
+    pub tags: Vec<String>,
+    /// All must be installed in the snapshot.
+    pub required_guest_plugins: Vec<String>,
+}
+
+/// Result of [`acquire_machine_for`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcquireRow {
+    /// The machine is now `assigned` to the task.
+    Acquired { machine_id: i32, snapshot_id: Uuid },
+    /// A matching machine exists but none is `ready` right now.
+    Busy,
+    /// No machine could ever satisfy the filter.
+    Unserviceable,
+}
+
+/// Candidate predicate shared by the acquire and existence queries. When no
+/// snapshot is named, only the machine's active snapshot qualifies.
+const ACQUIRE_PREDICATE: &str = r#"
+        ($1::machine_platform is null or m.platform = $1)
+        and ($2::machine_arch is null or m.arch = $2 or ($2 = 'x86' and m.arch = 'x64'))
+        and ($3::int is null or m.id = $3)
+        and ($4::uuid is null or s.id = $4)
+        and ($5::text is null or s.name = $5)
+        and ($4::uuid is not null or $5::text is not null or s.is_active)
+        and coalesce(m.tags, '{}') @> $6::varchar[]
+        and coalesce(s.guest_plugins, '[]'::jsonb) @> to_jsonb($7::text[])
+"#;
+
+/// Atomically assign a `ready` machine matching `f` to `task_id`.
+///
+/// Prefers exact-arch matches, then the least recently used machine. When
+/// nothing is ready, reports whether a usable match exists at all (`Busy`)
+/// or not (`Unserviceable`); `failed` machines only come back at startup
+/// reconcile, so they don't count.
+pub async fn acquire_machine_for(
+    pool: &PgPool,
+    f: &MachineFilter,
+    task_id: i32,
+) -> Result<AcquireRow> {
+    let update_err = |e: sqlx::Error| MachineError::UpdateFailed {
+        message: "failed to acquire machine".to_string(),
+        source: e,
+    };
+    let mut tx = pool.begin().await.map_err(update_err)?;
+
+    let select = format!(
+        "select m.id as machine_id, s.id as snapshot_id from machines m \
+         join machine_snapshots s on s.machine_id = m.id \
+         where m.status = 'ready' and {ACQUIRE_PREDICATE} \
+         order by (m.arch is not distinct from coalesce($2, m.arch)) desc, m.updated_at asc \
+         limit 1 for update of m skip locked"
+    );
+    let row: Option<(i32, Uuid)> = sqlx::query_as(AssertSqlSafe(select))
+        .bind(f.platform.clone())
+        .bind(f.arch.clone())
+        .bind(f.machine_id)
+        .bind(f.snapshot_id)
+        .bind(f.snapshot_name.as_deref())
+        .bind(&f.tags)
+        .bind(&f.required_guest_plugins)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(update_err)?;
+
+    if let Some((machine_id, snapshot_id)) = row {
+        sqlx::query(
+            "update machines set status = 'assigned', current_task_id = $1, updated_at = now() \
+             where id = $2",
+        )
+        .bind(task_id)
+        .bind(machine_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(update_err)?;
+        tx.commit().await.map_err(update_err)?;
+        return Ok(AcquireRow::Acquired {
+            machine_id,
+            snapshot_id,
+        });
+    }
+    tx.rollback().await.map_err(update_err)?;
+
+    let exists_sql = format!(
+        "select exists(select 1 from machines m \
+         join machine_snapshots s on s.machine_id = m.id \
+         where m.status <> 'failed' and {ACQUIRE_PREDICATE})"
+    );
+    let exists: bool = sqlx::query_scalar(AssertSqlSafe(exists_sql))
+        .bind(f.platform.clone())
+        .bind(f.arch.clone())
+        .bind(f.machine_id)
+        .bind(f.snapshot_id)
+        .bind(f.snapshot_name.as_deref())
+        .bind(&f.tags)
+        .bind(&f.required_guest_plugins)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| MachineError::FetchFailed { source: e })?;
+
+    Ok(if exists {
+        AcquireRow::Busy
+    } else {
+        AcquireRow::Unserviceable
     })
 }
 

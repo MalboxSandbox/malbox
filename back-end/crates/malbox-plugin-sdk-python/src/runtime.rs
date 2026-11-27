@@ -32,7 +32,7 @@ pub fn run(
     // runs the blocking event loop. PythonPlugin's trait methods re-attach
     // when dispatching back into Python handler code.
     py.detach(|| {
-        let runtime = HostRuntime::new(python_plugin, meta, &[]).map_err(|e| {
+        let runtime = HostRuntime::new(python_plugin, meta).map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to initialize runtime: {e}"))
         })?;
 

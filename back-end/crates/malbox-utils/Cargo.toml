@@ -18,6 +18,7 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tempfile = { workspace = true }
+magic = { workspace = true }
 
 # image_store
 malbox-database = { path = "../malbox-database" }

@@ -24,6 +24,8 @@ pub struct MachineConfig {
     pub disk_size: u64,
     #[serde(default)]
     pub provider_config: Option<toml::Value>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Validate a list of machine configs.

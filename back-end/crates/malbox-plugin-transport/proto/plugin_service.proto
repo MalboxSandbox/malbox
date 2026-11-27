@@ -23,6 +23,9 @@ service GuestPluginService {
 
   // Large result transfer — daemon pulls stashed results by opaque handle
   rpc PullResult(PullResultRequest) returns (stream ResultChunk);
+
+  // Ask a running task to stop observing early (detonation cancel / timeout).
+  rpc StopTask(StopTaskRequest) returns (StopTaskResponse);
 }
 
 // --- Lifecycle messages ---
@@ -68,6 +71,32 @@ message TaskResult {
   ResultFormat format = 4;
   bool is_final = 5;
   ResultKind kind = 6;
+  ArtifactMeta artifact = 7;
+}
+
+enum ArtifactRelation {
+  ARTIFACT_RELATION_UNSPECIFIED = 0;
+  ARTIFACT_RELATION_EXTRACTED = 1;
+  ARTIFACT_RELATION_DROPPED = 2;
+  ARTIFACT_RELATION_UNPACKED = 3;
+  ARTIFACT_RELATION_MEMDUMP = 4;
+  ARTIFACT_RELATION_DOWNLOADED = 5;
+  ARTIFACT_RELATION_PCAP = 6;
+  ARTIFACT_RELATION_OUTPUT = 7;
+}
+
+message ArtifactMeta {
+  ArtifactRelation relation = 1;
+  bool analyze = 2;
+  bool allow_dynamic_recursion = 3;
+}
+
+message StopTaskRequest {
+  int32 task_id = 1;
+}
+
+message StopTaskResponse {
+  bool acknowledged = 1;
 }
 
 enum ResultFormat {
@@ -81,6 +110,7 @@ enum ResultKind {
   RESULT_KIND_PROGRESS = 1;
   RESULT_KIND_READY = 2;
   RESULT_KIND_RESULT_REF = 3;
+  RESULT_KIND_EVENT = 4;
 }
 
 // Large-result reference: carried in TaskResult.data when kind=RESULT_KIND_RESULT_REF.
@@ -89,6 +119,7 @@ message ResultRef {
   string result_name = 2;
   ResultFormat format = 3;
   uint64 size_bytes = 4;
+  ArtifactMeta artifact = 5;
 }
 
 message PullResultRequest {

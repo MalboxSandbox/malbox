@@ -37,7 +37,7 @@ pub enum ResourceError {
     #[error("Guest access not configured but required by task")]
     GuestAccessNotConfigured,
     #[error("Database error: {0}")]
-    Database(String),
+    Database(#[source] malbox_database::error::DatabaseError),
     #[error("No machine available for platform {platform}")]
     NoMachineAvailable { platform: String },
     #[error("Machine {id} is currently assigned to a task")]

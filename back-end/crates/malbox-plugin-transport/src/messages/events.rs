@@ -23,10 +23,6 @@ pub enum Event {
     PluginStarted { plugin_id: i32 },
     /// A plugin has stopped.
     PluginStopped { plugin_id: i32 },
-    /// A plugin has produced a result. This is a lightweight signal only -
-    /// actual result data is accessed lazily via the result pub/sub channel
-    /// through the macro-generated handler's event wrapper.
-    PluginResultAvailable { source: String, result_name: String },
 
     /// A sample has started.
     SampleStarted { sample_id: i32 },

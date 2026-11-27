@@ -1,6 +1,6 @@
 use malbox_plugin_manifest::{
-    ManifestError, PathsConfig, PluginManifest, PluginStateConfig, PluginTypeConfig,
-    ResolvedRuntimeConfig, RuntimeConfig, StashConfig, parse_manifest, validate_manifest,
+    ManifestError, ParameterKind, PathsConfig, PluginManifest, PluginStateConfig, PluginTypeConfig,
+    ResolvedRuntimeConfig, RuntimeConfig, Stage, StashConfig, parse_manifest, validate_manifest,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -84,26 +84,6 @@ render = "json"
     let report = &manifest.results["report"];
     assert_eq!(report.user_visible, Some(true));
     assert_eq!(report.display_name.as_deref(), Some("PE Analysis"));
-}
-
-#[test]
-fn parse_manifest_with_events() {
-    let toml_str = r#"
-[plugin]
-name = "aggregator"
-version = "1.0.0"
-type = "host"
-
-[runtime]
-state = "persistent"
-execution = "parallel"
-
-[events]
-subscribe = ["TaskCompleted", "ResultProduced"]
-"#;
-    let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
-    let events = manifest.events.unwrap();
-    assert_eq!(events.subscribe, vec!["TaskCompleted", "ResultProduced"]);
 }
 
 #[test]
@@ -329,4 +309,151 @@ fn resolve_external_log_dir_default() {
     let r = ResolvedRuntimeConfig::from_raw(&raw);
     #[cfg(unix)]
     assert_eq!(r.external_log_dir, PathBuf::from("/tmp/malbox/ext-logs"));
+}
+
+const HOST_HEAD: &str = r#"
+[plugin]
+name = "p"
+version = "1.0.0"
+type = "host"
+
+[runtime]
+state = "ephemeral"
+execution = "parallel"
+"#;
+
+fn parse_str(extra: &str, head: &str) -> Result<PluginManifest, ManifestError> {
+    let m: PluginManifest = toml::from_str(&format!("{head}{extra}"))?;
+    validate_manifest(&m)?;
+    Ok(m)
+}
+
+fn assert_invalid(r: Result<PluginManifest, ManifestError>, needle: &str) {
+    match r {
+        Err(ManifestError::Invalid(msg)) => assert!(msg.contains(needle), "{msg}"),
+        other => panic!("expected Invalid({needle}), got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_routing_and_parameters() {
+    let m = parse_str(
+        r#"
+[routing]
+stage = "extract"
+category = "unpack"
+accepts = "archive/.*"
+rejects = "archive/iso"
+sources_exclude = ["other"]
+timeout = 60
+cacheable = false
+recursion_prevention = ["dynamic"]
+uses_indicators = true
+monitored_keys = ["passwords"]
+
+[parameters.passwords]
+type = "list"
+default = ["a"]
+description = "pw"
+
+[parameters.deep]
+type = "bool"
+default = false
+"#,
+        HOST_HEAD,
+    )
+    .unwrap();
+    let r = &m.routing;
+    assert_eq!(r.stage, Stage::Extract);
+    assert_eq!(r.category(), "unpack");
+    assert_eq!(r.accepts, "archive/.*");
+    assert_eq!(r.rejects, "archive/iso");
+    assert_eq!(r.sources_exclude, vec!["other"]);
+    assert_eq!(r.timeout, Some(60));
+    assert!(!r.cacheable);
+    assert_eq!(r.recursion_prevention, vec!["dynamic"]);
+    assert!(r.uses_indicators);
+    assert_eq!(r.monitored_keys, vec!["passwords"]);
+    assert_eq!(m.parameters.len(), 2);
+    assert_eq!(m.parameters["passwords"].kind, ParameterKind::List);
+    assert_eq!(m.parameters["passwords"].description.as_deref(), Some("pw"));
+    assert_eq!(m.parameters["deep"].kind, ParameterKind::Bool);
+    assert_eq!(m.parameters["deep"].default, toml::Value::Boolean(false));
+}
+
+#[test]
+fn rejects_dynamic_stage() {
+    assert_invalid(
+        parse_str("[routing]\nstage = \"dynamic\"\n", HOST_HEAD),
+        "reserved for detonation",
+    );
+}
+
+#[test]
+fn rejects_routing_on_guest() {
+    let head = HOST_HEAD.replace("type = \"host\"", "type = \"guest\"");
+    assert_invalid(
+        parse_str("[routing]\naccepts = \"archive/zip\"\n", &head),
+        "only valid for host plugins",
+    );
+}
+
+#[test]
+fn rejects_bad_accepts_regex() {
+    assert_invalid(
+        parse_str("[routing]\naccepts = \"(\"\n", HOST_HEAD),
+        "routing.accepts",
+    );
+}
+
+#[test]
+fn rejects_parameter_type_mismatch() {
+    assert_invalid(
+        parse_str(
+            "[parameters.n]\ntype = \"int\"\ndefault = \"x\"\n",
+            HOST_HEAD,
+        ),
+        "parameter n: default does not match type",
+    );
+}
+
+#[test]
+fn parses_auto_collect_rules() {
+    let rt = runtime_with_rules("artifacts");
+    let resolved = ResolvedRuntimeConfig::from_raw(&rt);
+    resolved.validate(PluginTypeConfig::Guest).unwrap();
+    let rules = &resolved.auto_collect_artifacts.rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].include, vec!["drops/**"]);
+    assert_eq!(
+        rules[0].relation,
+        malbox_plugin_transport::artifact::ArtifactRelation::Dropped
+    );
+    assert!(rules[0].analyze);
+}
+
+#[test]
+fn rejects_rules_on_external_logs() {
+    let rt = runtime_with_rules("external_logs");
+    let err = ResolvedRuntimeConfig::from_raw(&rt)
+        .validate(PluginTypeConfig::Guest)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("rules are only supported for auto_collect.artifacts")
+    );
+}
+
+fn runtime_with_rules(section: &str) -> RuntimeConfig {
+    toml::from_str(&format!(
+        r#"
+state = "ephemeral"
+execution = "exclusive"
+
+[[auto_collect.{section}.rules]]
+include = ["drops/**"]
+relation = "dropped"
+"#
+    ))
+    .unwrap()
 }

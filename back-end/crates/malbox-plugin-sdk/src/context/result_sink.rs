@@ -3,17 +3,24 @@
 //! [`ResultSink`] is the plugin-facing API for sending results back to
 //! the daemon. Small results travel inline on the control stream; large
 //! ones are stashed to disk and replaced with a reference the daemon pulls
-//! separately (guest plugins only).
+//! separately (guest plugins only). Without a stash (host plugins), file
+//! results are read and sent inline, up to [`HOST_FILE_RESULT_MAX_BYTES`].
 
+use crate::artifact::{ArtifactMeta, ArtifactOpts, ArtifactRelation, ArtifactSource};
 use crate::error::{Result, SdkError};
 use crate::result::PluginResult;
+use malbox_plugin_transport::job_config;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 use super::message::{ResultFormat, ResultKind, TaskResultMessage};
-use super::{ContextInner, lock_or_err};
+use super::{ContextInner, ResultSender, lock_or_err};
 
 #[cfg(feature = "guest")]
 use crate::stash::StashFormat;
+
+/// Largest file result sent inline when no stash is available.
+pub const HOST_FILE_RESULT_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Handle for pushing results back to the daemon during task execution.
 ///
@@ -32,11 +39,6 @@ impl ResultSink<'_> {
     /// stash and replaced with a reference marker that the daemon pulls
     /// via the `PullResult` RPC (guest plugins only).
     ///
-    /// # Panics
-    ///
-    /// Uses `blocking_send` internally. Must be called from a blocking
-    /// context (e.g. `spawn_blocking`), **not** from within an async task.
-    ///
     /// # Errors
     ///
     /// - Returns `SdkError::InvalidContext` if called outside an `on_task` handler
@@ -46,19 +48,72 @@ impl ResultSink<'_> {
     /// - Returns `SdkError::Io` if the result is a `File` variant and the file
     ///   cannot be read.
     pub fn push(&self, result: PluginResult) -> Result<()> {
-        let tx = {
-            let guard = lock_or_err(&self.inner.result_tx)?;
-            guard
-                .as_ref()
-                .ok_or(SdkError::InvalidContext("push called outside active task"))?
-                .clone()
+        let tx = self.sender()?;
+        self.send(&tx, result, None)
+    }
+
+    /// Push a file the plugin extracted, dropped, unpacked, dumped or
+    /// produced as an artifact of the current one.
+    ///
+    /// Analysed artifacts (`opts` resolves to `analyze = true`) count
+    /// against the job's `malbox.max_artifacts` budget; once it is spent
+    /// this returns [`SdkError::ArtifactLimit`] without sending anything.
+    /// A push that fails does not consume budget.
+    ///
+    /// # Errors
+    ///
+    /// - Returns `SdkError::ArtifactLimit` if the artifact would be analysed
+    ///   and the job's artifact budget is spent.
+    /// - Returns `SdkError::InvalidContext` if `opts.relation` is the reserved
+    ///   `Root` relation, or if called outside an `on_task` handler.
+    /// - Returns `SdkError::Io` if `source` is a file that cannot be read.
+    /// - Returns `SdkError::Channel` if the result channel is closed.
+    pub fn push_artifact(
+        &self,
+        name: &str,
+        source: ArtifactSource,
+        opts: ArtifactOpts,
+    ) -> Result<()> {
+        if opts.relation == ArtifactRelation::Root {
+            return Err(SdkError::InvalidContext(
+                "artifact relation root is reserved",
+            ));
+        }
+        let meta = opts.resolve();
+        let tx = self.sender()?;
+        if meta.analyze {
+            self.reserve_artifact_slot()?;
+        }
+        let result = match source {
+            ArtifactSource::Bytes(data) => PluginResult::Bytes {
+                name: name.into(),
+                data,
+            },
+            ArtifactSource::File(path) => PluginResult::File {
+                name: name.into(),
+                path,
+            },
         };
+        let sent = self.send(&tx, result, Some(meta));
+        if meta.analyze && sent.is_err() {
+            self.inner.analysed_pushes.fetch_sub(1, Ordering::SeqCst);
+        }
+        sent
+    }
 
-        let msg = self.classify_and_build(result)?;
-
-        tx.blocking_send(msg)
-            .map_err(|e| SdkError::Channel(format!("push: {e}")))?;
-        Ok(())
+    /// Count one analysed artifact against the budget, failing once it is spent.
+    fn reserve_artifact_slot(&self) -> Result<()> {
+        let limit = self.max_artifacts();
+        self.inner
+            .analysed_pushes
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| match limit {
+                Some(limit) if count >= limit => None,
+                _ => Some(count + 1),
+            })
+            .map(drop)
+            .map_err(|_| SdkError::ArtifactLimit {
+                limit: limit.unwrap_or_default(),
+            })
     }
 
     /// Push a JSON result (raw bytes that are already JSON-encoded).
@@ -95,33 +150,90 @@ impl ResultSink<'_> {
         Ok(())
     }
 
+    fn sender(&self) -> Result<ResultSender> {
+        let guard = lock_or_err(&self.inner.result_tx)?;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or(SdkError::InvalidContext("push called outside active task"))
+    }
+
+    fn send(
+        &self,
+        tx: &ResultSender,
+        result: PluginResult,
+        artifact: Option<ArtifactMeta>,
+    ) -> Result<()> {
+        let mut msg = self.classify_and_build(result)?;
+        msg.artifact = artifact;
+        tx.send(msg)
+            .map_err(|e| SdkError::Channel(format!("push: {e}")))
+    }
+
+    fn max_artifacts(&self) -> Option<u64> {
+        self.inner
+            .config
+            .get(job_config::MAX_ARTIFACTS)
+            .and_then(|v| v.parse::<u64>().ok())
+    }
+
+    fn inline_message(
+        &self,
+        name: String,
+        data: Vec<u8>,
+        format: ResultFormat,
+    ) -> TaskResultMessage {
+        TaskResultMessage {
+            task_id: self.inner.task_id,
+            result_name: name,
+            data,
+            format,
+            is_final: false,
+            kind: ResultKind::Result,
+            stash_handle: String::new(),
+            stash_format: ResultFormat::Unspecified,
+            stash_size: 0,
+            artifact: None,
+        }
+    }
+
+    fn claim(&self, path: &Path) {
+        if let Ok(canonical) = std::fs::canonicalize(path)
+            && let Ok(mut guard) = self.inner.claimed_paths.lock()
+        {
+            guard.insert(canonical);
+        }
+    }
+
+    /// Read a file result into memory for inline transport (no stash).
+    fn inline_file(
+        &self,
+        name: String,
+        path: &Path,
+        format: ResultFormat,
+    ) -> Result<TaskResultMessage> {
+        let data = read_file_inline(path)?;
+        self.claim(path);
+        Ok(self.inline_message(name, data, format))
+    }
+
     #[cfg(feature = "guest")]
     fn classify_and_build(&self, result: PluginResult) -> Result<TaskResultMessage> {
-        let threshold = self
-            .inner
-            .stash
-            .as_ref()
-            .map(|s| s.config().threshold_bytes)
-            .unwrap_or(usize::MAX);
+        let Some(stash) = self.inner.stash.as_ref() else {
+            return match classify_result(result)? {
+                Classified::Inline { name, data, format } => {
+                    Ok(self.inline_message(name, data, format))
+                }
+                Classified::File { name, path, format } => self.inline_file(name, &path, format),
+            };
+        };
+        let threshold = stash.config().threshold_bytes;
 
         match classify_result(result)? {
             Classified::Inline { name, data, format } if data.len() < threshold => {
-                Ok(TaskResultMessage {
-                    task_id: self.inner.task_id,
-                    result_name: name,
-                    data,
-                    format,
-                    is_final: false,
-                    kind: ResultKind::Result,
-                    stash_handle: String::new(),
-                    stash_format: ResultFormat::Unspecified,
-                    stash_size: 0,
-                })
+                Ok(self.inline_message(name, data, format))
             }
             Classified::Inline { name, data, format } => {
-                let stash = self.inner.stash.as_ref().ok_or(SdkError::InvalidContext(
-                    "push: no stash configured for large payloads",
-                ))?;
                 let stash_format = result_format_to_stash(format);
                 let size_bytes = data.len() as u64;
                 let handle =
@@ -135,14 +247,7 @@ impl ResultSink<'_> {
                 ))
             }
             Classified::File { name, path, format } => {
-                let stash = self.inner.stash.as_ref().ok_or(SdkError::InvalidContext(
-                    "push: no stash configured for file results",
-                ))?;
-                if let Ok(canonical) = std::fs::canonicalize(&path)
-                    && let Ok(mut guard) = self.inner.claimed_paths.lock()
-                {
-                    guard.insert(canonical);
-                }
+                self.claim(&path);
                 let stash_format = result_format_to_stash(format);
                 let handle =
                     stash.insert_file(self.inner.task_id, name.clone(), stash_format, path)?;
@@ -160,28 +265,27 @@ impl ResultSink<'_> {
 
     #[cfg(not(feature = "guest"))]
     fn classify_and_build(&self, result: PluginResult) -> Result<TaskResultMessage> {
-        let classified = classify_result(result)?;
-        match classified {
-            Classified::Inline { name, data, format } => Ok(TaskResultMessage {
-                task_id: self.inner.task_id,
-                result_name: name,
-                data,
-                format,
-                is_final: false,
-                kind: ResultKind::Result,
-                stash_handle: String::new(),
-                stash_format: ResultFormat::Unspecified,
-                stash_size: 0,
-            }),
-            Classified::File { .. } => Err(SdkError::InvalidContext(
-                "push: file results require guest feature (stash not available)",
-            )),
+        match classify_result(result)? {
+            Classified::Inline { name, data, format } => {
+                Ok(self.inline_message(name, data, format))
+            }
+            Classified::File { name, path, format } => self.inline_file(name, &path, format),
         }
     }
 }
 
+/// Read a file for inline transport, enforcing [`HOST_FILE_RESULT_MAX_BYTES`].
+pub(crate) fn read_file_inline(path: &Path) -> Result<Vec<u8>> {
+    let len = std::fs::metadata(path)?.len();
+    if len > HOST_FILE_RESULT_MAX_BYTES {
+        return Err(SdkError::InvalidContext(
+            "file result exceeds 256 MiB host limit",
+        ));
+    }
+    Ok(std::fs::read(path)?)
+}
+
 /// Result of classifying a `PluginResult` for transport.
-#[allow(dead_code)]
 pub(crate) enum Classified {
     Inline {
         name: String,
@@ -228,13 +332,13 @@ fn result_format_to_stash(format: ResultFormat) -> StashFormat {
 fn build_ref_message(
     task_id: i32,
     handle: String,
-    _result_name: String,
+    result_name: String,
     format: ResultFormat,
     size_bytes: u64,
 ) -> TaskResultMessage {
     TaskResultMessage {
         task_id,
-        result_name: String::new(),
+        result_name,
         data: Vec::new(),
         format: ResultFormat::Unspecified,
         is_final: false,
@@ -242,6 +346,7 @@ fn build_ref_message(
         stash_handle: handle,
         stash_format: format,
         stash_size: size_bytes,
+        artifact: None,
     }
 }
 
@@ -277,7 +382,7 @@ mod tests {
 
     #[test]
     fn push_inside_active_task_sends_to_channel() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             42,
             PathBuf::new(),
@@ -316,7 +421,7 @@ mod tests {
             .unwrap(),
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             7,
             PathBuf::new(),
@@ -333,10 +438,7 @@ mod tests {
         let msg = rx.try_recv().unwrap();
         assert_eq!(msg.task_id, 7);
         assert_eq!(msg.kind, ResultKind::ResultRef);
-        assert!(
-            msg.result_name.is_empty(),
-            "result_name lives in stash metadata, not the ref message"
-        );
+        assert_eq!(msg.result_name, "big");
         assert!(!msg.stash_handle.is_empty());
         assert_eq!(msg.stash_size, 64);
     }
@@ -358,7 +460,7 @@ mod tests {
             .unwrap(),
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             8,
             PathBuf::new(),
@@ -398,7 +500,7 @@ mod tests {
             .unwrap(),
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             9,
             PathBuf::new(),
@@ -419,7 +521,7 @@ mod tests {
 
     #[test]
     fn close_result_channel_makes_push_fail() {
-        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             0,
             PathBuf::new(),
@@ -447,7 +549,7 @@ mod tests {
 
     #[test]
     fn result_sink_convenience_methods() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             1,
             PathBuf::new(),
@@ -468,5 +570,121 @@ mod tests {
         let msg2 = rx.try_recv().unwrap();
         assert_eq!(msg2.result_name, "b");
         assert_eq!(msg2.format, ResultFormat::Bytes);
+    }
+
+    fn artifact_ctx(
+        config: HashMap<String, String>,
+    ) -> (
+        Context,
+        tokio::sync::mpsc::UnboundedReceiver<TaskResultMessage>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let ctx = Context::new(
+            3,
+            PathBuf::new(),
+            config,
+            noop_emitter(),
+            Some(tx),
+            #[cfg(feature = "guest")]
+            None,
+        );
+        (ctx, rx)
+    }
+
+    #[test]
+    fn push_artifact_sends_meta() {
+        let (ctx, mut rx) = artifact_ctx(HashMap::new());
+        ctx.results()
+            .push_artifact(
+                "x.exe",
+                ArtifactSource::Bytes(vec![1, 2]),
+                ArtifactOpts::new(ArtifactRelation::Dropped),
+            )
+            .unwrap();
+        let msg = rx.try_recv().unwrap();
+        assert_eq!(msg.result_name, "x.exe");
+        assert_eq!(msg.data, vec![1, 2]);
+        assert_eq!(
+            msg.artifact,
+            Some(ArtifactMeta {
+                relation: ArtifactRelation::Dropped,
+                analyze: true,
+                allow_dynamic_recursion: false,
+            })
+        );
+    }
+
+    #[test]
+    fn push_artifact_rejects_root() {
+        let (ctx, mut rx) = artifact_ctx(HashMap::new());
+        let err = ctx
+            .results()
+            .push_artifact(
+                "r",
+                ArtifactSource::Bytes(vec![1]),
+                ArtifactOpts::new(ArtifactRelation::Root),
+            )
+            .unwrap_err();
+        assert!(matches!(err, SdkError::InvalidContext(_)));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn push_artifact_enforces_limit() {
+        let config = HashMap::from([(job_config::MAX_ARTIFACTS.to_string(), "1".to_string())]);
+        let (ctx, mut rx) = artifact_ctx(config);
+        let opts = ArtifactOpts::new(ArtifactRelation::Extracted);
+        ctx.results()
+            .push_artifact("a", ArtifactSource::Bytes(vec![1]), opts)
+            .unwrap();
+        let err = ctx
+            .results()
+            .push_artifact("b", ArtifactSource::Bytes(vec![2]), opts)
+            .unwrap_err();
+        assert!(matches!(err, SdkError::ArtifactLimit { limit: 1 }));
+        // Stored (non-analysed) artifacts do not count against the limit.
+        ctx.results()
+            .push_artifact(
+                "c",
+                ArtifactSource::Bytes(vec![3]),
+                ArtifactOpts::new(ArtifactRelation::Output),
+            )
+            .unwrap();
+        assert_eq!(rx.try_recv().unwrap().result_name, "a");
+        assert_eq!(rx.try_recv().unwrap().result_name, "c");
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_push_artifact_does_not_consume_budget() {
+        let config = HashMap::from([(job_config::MAX_ARTIFACTS.to_string(), "1".to_string())]);
+        let (ctx, mut rx) = artifact_ctx(config);
+        let opts = ArtifactOpts::new(ArtifactRelation::Extracted);
+        let err = ctx
+            .results()
+            .push_artifact(
+                "missing",
+                ArtifactSource::File(PathBuf::from("/nonexistent/malbox-artifact")),
+                opts,
+            )
+            .unwrap_err();
+        assert!(matches!(err, SdkError::Io(_)));
+        ctx.results()
+            .push_artifact("a", ArtifactSource::Bytes(vec![1]), opts)
+            .unwrap();
+        assert_eq!(rx.try_recv().unwrap().result_name, "a");
+    }
+
+    #[test]
+    fn file_result_without_stash_is_sent_inline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("f.bin");
+        std::fs::write(&path, b"hello").unwrap();
+        let (ctx, mut rx) = artifact_ctx(HashMap::new());
+        ctx.results().push_file("f", &path).unwrap();
+        let msg = rx.try_recv().unwrap();
+        assert_eq!(msg.kind, ResultKind::Result);
+        assert_eq!(msg.result_name, "f");
+        assert_eq!(msg.data, b"hello");
     }
 }

@@ -57,6 +57,16 @@ impl GrpcClient {
         Ok(response.into_inner())
     }
 
+    /// Ask the guest plugin to stop observing the given task early.
+    pub async fn stop_task(&mut self, task_id: i32) -> Result<proto::StopTaskResponse> {
+        let response = self
+            .inner
+            .stop_task(proto::StopTaskRequest { task_id })
+            .await
+            .map_err(TransportError::GrpcStatus)?;
+        Ok(response.into_inner())
+    }
+
     /// Perform a health check against the guest plugin.
     pub async fn health_check(&mut self) -> Result<proto::HealthCheckResponse> {
         let response = self

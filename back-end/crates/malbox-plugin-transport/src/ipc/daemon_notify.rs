@@ -31,9 +31,6 @@ pub enum DaemonNotifyKind {
     TaskResponse = 0,
     /// A plugin event emission (e.g. PluginStarted, TaskCompleted).
     PluginEvent = 1,
-    /// A result published on the plugin's result channel (chaining).
-    /// Defined for protocol completeness; nothing fires it yet.
-    ResultPublished = 2,
 }
 
 impl DaemonNotifyKind {
@@ -45,7 +42,6 @@ impl DaemonNotifyKind {
         match id.as_value() {
             0 => Some(Self::TaskResponse),
             1 => Some(Self::PluginEvent),
-            2 => Some(Self::ResultPublished),
             _ => None,
         }
     }

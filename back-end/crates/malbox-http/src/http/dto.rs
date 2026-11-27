@@ -5,6 +5,7 @@
 //! serialize the same `ReportBody` (flattened) under different subject keys.
 
 use malbox_database::PgPool;
+use malbox_database::repositories::artifacts::fetch_root_artifact_ids;
 use malbox_database::repositories::samples::{SampleEntity, fetch_sample_by_id};
 use malbox_database::repositories::tasks::Task;
 use malbox_plugin_sdk::report::{Indicator, Ttp};
@@ -62,15 +63,34 @@ pub struct TaskDto {
     pub created_on: String,
     pub started_on: Option<String>,
     pub completed_on: Option<String>,
+    pub params: serde_json::Value,
+    pub excluded_plugins: Vec<String>,
+    pub max_depth: i32,
+    pub max_artifacts: i32,
+    pub max_detonations: i32,
+    pub error_count: i32,
+    pub artifact_count: i32,
+    pub partial: bool,
+    pub parent_task_id: Option<i32>,
+    pub verdict: Option<VerdictDto>,
+    pub root_artifact_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sample: Option<SampleDto>,
+}
+
+/// The task's tree verdict (worst classification over every plugin report).
+#[derive(Serialize)]
+pub struct VerdictDto {
+    pub classification: String,
+    pub score: Option<i16>,
+    pub artifact_id: Option<i64>,
 }
 
 impl From<Task> for TaskDto {
     fn from(t: Task) -> Self {
         TaskDto {
-            id: t.id.unwrap_or_default(),
-            status: crate::http::report_service::task_status_str(&t.status),
+            id: t.id,
+            status: t.status.as_str().to_string(),
             target: t.target,
             platform: t
                 .platform
@@ -85,6 +105,21 @@ impl From<Task> for TaskDto {
             created_on: t.created_on.to_string(),
             started_on: t.started_on.map(|d| d.to_string()),
             completed_on: t.completed_on.map(|d| d.to_string()),
+            params: t.params,
+            excluded_plugins: t.excluded_plugins,
+            max_depth: t.max_depth,
+            max_artifacts: t.max_artifacts,
+            max_detonations: t.max_detonations,
+            error_count: t.error_count,
+            artifact_count: t.artifact_count,
+            partial: t.partial,
+            parent_task_id: t.parent_task_id,
+            verdict: t.verdict_classification.map(|c| VerdictDto {
+                classification: c.label().to_string(),
+                score: t.verdict_score,
+                artifact_id: t.verdict_artifact_id,
+            }),
+            root_artifact_id: None,
             sample: None,
         }
     }
@@ -150,14 +185,18 @@ pub struct SinglePluginReportResponse {
     pub artifacts: Vec<ArtifactLink>,
 }
 
-/// Build a TaskDto for a single task, attaching its sample (one extra query).
+/// Build a TaskDto for a single task, attaching its sample and root artifact.
 pub async fn attach_one_task(pool: &PgPool, task: Task) -> TaskDto {
     let sample_id = task.sample_id;
+    let task_id = task.id;
     let mut dto = TaskDto::from(task);
     if let Some(sid) = sample_id
         && let Ok(Some(s)) = fetch_sample_by_id(pool, sid).await
     {
         dto.sample = Some(SampleDto::from(s));
+    }
+    if let Ok(roots) = fetch_root_artifact_ids(pool, &[task_id]).await {
+        dto.root_artifact_id = roots.get(&task_id).copied();
     }
     dto
 }

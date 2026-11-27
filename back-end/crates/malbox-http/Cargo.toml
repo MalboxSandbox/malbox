@@ -18,10 +18,9 @@ malbox-tracing = { path = "../malbox-tracing" }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["io"] }
 serde = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-magic.workspace = true
 uuid.workspace = true
 axum = { version = "0.8.9", features = ["multipart"] }
 axum-macros = "0.5.1"

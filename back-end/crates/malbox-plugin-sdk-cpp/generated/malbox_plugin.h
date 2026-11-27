@@ -19,10 +19,13 @@
  * this value whenever the vtable layout or calling convention changes in a
  * backward-incompatible way.
  */
-#define MALBOX_ABI_VERSION 7
+#define MALBOX_ABI_VERSION 8
 
 /**
  * Discriminant for `MalboxEvent`, matching the flat `Event` enum variants.
+ *
+ * Value 7 is retired (formerly the result-chaining event); the remaining
+ * values keep their numbers.
  */
 enum MalboxEventTag
 #if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
@@ -36,7 +39,6 @@ enum MalboxEventTag
     MALBOX_EVENT_TAG_TASK_CANCELED = 4,
     MALBOX_EVENT_TAG_PLUGIN_STARTED = 5,
     MALBOX_EVENT_TAG_PLUGIN_STOPPED = 6,
-    MALBOX_EVENT_TAG_PLUGIN_RESULT_AVAILABLE = 7,
     MALBOX_EVENT_TAG_SAMPLE_STARTED = 8,
     MALBOX_EVENT_TAG_SAMPLE_STOPPED = 9,
     MALBOX_EVENT_TAG_SAMPLE_RESULT_PRODUCED = 10,
@@ -140,16 +142,10 @@ typedef struct MalboxResultBuilder MalboxResultBuilder;
  * - Plugin events: `id` is the `plugin_id`.
  * - Sample events: `id` is the `sample_id`.
  * - Daemon events: `id` is unused (set to `0`).
- *
- * For `PluginResultAvailable` events, `source` and `result_name` point to
- * null-terminated strings identifying which plugin produced the result and
- * the result's name. Both are null for all other event types.
  */
 typedef struct MalboxEvent {
     MalboxEventTag tag;
     int32_t id;
-    const char *source;
-    const char *result_name;
 } MalboxEvent;
 
 /**
@@ -277,6 +273,22 @@ typedef struct MalboxGuestPluginVtable {
 } MalboxGuestPluginVtable;
 
 /**
+ * One auto-collect rule: files matching `include` (and not `exclude`) are
+ * pushed as artifacts with the given relation.
+ *
+ * `relation` is 1-7 (see `ArtifactRelation`); `analyze` is -1 (relation
+ * default), 0 (false) or 1 (true).
+ */
+typedef struct MalboxAutoCollectRule {
+    const char *const *include;
+    uintptr_t include_count;
+    const char *const *exclude;
+    uintptr_t exclude_count;
+    int32_t relation;
+    int32_t analyze;
+} MalboxAutoCollectRule;
+
+/**
  * Auto-collection configuration for a single directory.
  */
 typedef struct MalboxAutoCollectConfig {
@@ -286,6 +298,8 @@ typedef struct MalboxAutoCollectConfig {
     const char *const *exclude;
     uintptr_t exclude_count;
     uint64_t max_file_size;
+    const struct MalboxAutoCollectRule *rules;
+    uintptr_t rule_count;
 } MalboxAutoCollectConfig;
 
 /**
@@ -467,6 +481,55 @@ int32_t malbox_context_flush_results(const struct MalboxContext *ctx,
                                      const uintptr_t *data_lens,
                                      const int32_t *formats,
                                      uintptr_t count);
+
+/**
+ * Push a child artifact to the daemon.
+ *
+ * - `source_kind`: 1 = bytes (`data`/`data_len`), 2 = file path (UTF-8 path
+ *   of `data_len` bytes in `data`, not NUL-terminated).
+ * - `relation`: 1-7 (extracted, dropped, unpacked, memdump, downloaded,
+ *   pcap, output); root (0) is reserved.
+ * - `analyze`: -1 = relation default, 0 = false, 1 = true.
+ * - `allow_dynamic_recursion`: non-zero allows child detonation.
+ *
+ * Returns `0` on success, `-1` on failure (last error is set).
+ *
+ * # Safety
+ * - `ctx` must be valid; `name` must be a NUL-terminated C string.
+ * - `data` must point to `data_len` readable bytes (may be null when `data_len == 0`).
+ */
+int32_t malbox_context_push_artifact(const struct MalboxContext *ctx,
+                                     const char *name,
+                                     const uint8_t *data,
+                                     uintptr_t data_len,
+                                     int32_t source_kind,
+                                     int32_t relation,
+                                     int32_t analyze,
+                                     int32_t allow_dynamic_recursion);
+
+/**
+ * Merge `{key: json_value}` into the task-wide shared data.
+ *
+ * `json_value` must be a valid JSON document.
+ *
+ * Returns `0` on success, `-1` on failure (last error is set).
+ *
+ * # Safety
+ * `ctx` must be valid; `key` and `json_value` must be NUL-terminated C strings.
+ */
+int32_t malbox_context_shared_put(const struct MalboxContext *ctx,
+                                  const char *key,
+                                  const char *json_value);
+
+/**
+ * Ask the daemon to skip this artifact's later analysis stages.
+ *
+ * Returns `0` on success, `-1` on failure (last error is set).
+ *
+ * # Safety
+ * `ctx` must be a valid context pointer.
+ */
+int32_t malbox_context_drop_artifact(const struct MalboxContext *ctx);
 
 /**
  * Emit a log entry at the given numeric level (0=Trace .. 4=Error).

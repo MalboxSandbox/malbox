@@ -1,6 +1,7 @@
 use crate::error::ManifestError;
 use crate::manifest::{ExecutionContextConfig, PluginStateConfig, PluginTypeConfig};
 
+use malbox_plugin_transport::artifact::ArtifactRelation;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -58,6 +59,21 @@ pub struct AutoCollectSectionConfig {
     pub exclude: Option<Vec<String>>,
     #[serde(default)]
     pub max_file_size: Option<u64>,
+    #[serde(default)]
+    pub rules: Vec<AutoCollectRuleConfig>,
+}
+
+/// Per-file auto-collect rule: matching files are pushed as artifacts with
+/// the given relation instead of plain outputs.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutoCollectRuleConfig {
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    pub relation: String,
+    #[serde(default)]
+    pub analyze: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -94,6 +110,17 @@ pub struct ResolvedAutoCollectSection {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub max_file_size: u64,
+    pub rules: Vec<ResolvedAutoCollectRule>,
+    /// Rule problems found during resolution, reported by `validate`.
+    rule_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedAutoCollectRule {
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+    pub relation: ArtifactRelation,
+    pub analyze: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +232,25 @@ impl ResolvedRuntimeConfig {
                 "runtime.analysis_timeout must be >= 1".into(),
             ));
         }
+        let ext = &self.auto_collect_external_logs;
+        if !ext.rules.is_empty() || !ext.rule_errors.is_empty() {
+            return Err(ManifestError::Invalid(
+                "rules are only supported for auto_collect.artifacts".into(),
+            ));
+        }
+        let art = &self.auto_collect_artifacts;
+        if let Some(e) = art.rule_errors.first() {
+            return Err(ManifestError::Invalid(e.clone()));
+        }
+        for rule in &art.rules {
+            for g in rule.include.iter().chain(&rule.exclude) {
+                globset::Glob::new(g).map_err(|e| {
+                    ManifestError::Invalid(format!(
+                        "auto_collect.artifacts.rules glob '{g}' is invalid: {e}"
+                    ))
+                })?;
+            }
+        }
         tracing_subscriber::EnvFilter::try_new(&self.log_filter).map_err(|e| {
             ManifestError::Invalid(format!(
                 "runtime.log_filter is not a valid EnvFilter ({e}): {}",
@@ -221,7 +267,22 @@ fn resolve_auto_collect_section(
     raw: &AutoCollectSectionConfig,
     default_enabled: bool,
 ) -> ResolvedAutoCollectSection {
+    let mut rules = Vec::new();
+    let mut rule_errors = Vec::new();
+    for rule in &raw.rules {
+        match relation_from_label(&rule.relation) {
+            Some(relation) => rules.push(ResolvedAutoCollectRule {
+                include: rule.include.clone(),
+                exclude: rule.exclude.clone(),
+                relation,
+                analyze: rule.analyze.unwrap_or(relation.default_analyze()),
+            }),
+            None => rule_errors.push(format!("unknown artifact relation {}", rule.relation)),
+        }
+    }
     ResolvedAutoCollectSection {
+        rules,
+        rule_errors,
         enabled: raw.enabled.unwrap_or(default_enabled),
         include: raw.include.clone().unwrap_or_else(|| vec!["**/*".into()]),
         exclude: raw.exclude.clone().unwrap_or_default(),
@@ -229,6 +290,14 @@ fn resolve_auto_collect_section(
             .max_file_size
             .unwrap_or(DEFAULT_AUTO_COLLECT_MAX_FILE_SIZE),
     }
+}
+
+/// Resolve a DB relation label; `root` is reserved and never matches.
+fn relation_from_label(label: &str) -> Option<ArtifactRelation> {
+    label
+        .parse::<ArtifactRelation>()
+        .ok()
+        .filter(|r| *r != ArtifactRelation::Root)
 }
 
 #[cfg(unix)]

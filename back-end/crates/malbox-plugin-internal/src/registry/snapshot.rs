@@ -108,7 +108,8 @@ mod tests {
                 },
                 scope: None,
                 results: HashMap::new(),
-                events: None,
+                routing: Default::default(),
+                parameters: Default::default(),
                 runtime: RuntimeConfig {
                     state: PluginStateConfig::Ephemeral,
                     execution,

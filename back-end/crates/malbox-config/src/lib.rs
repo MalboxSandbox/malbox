@@ -9,6 +9,7 @@ pub mod guest_access;
 pub mod images;
 pub mod machinery;
 pub mod machines;
+pub mod orchestration;
 pub mod plugins;
 pub mod providers;
 pub mod provisioning;
@@ -22,6 +23,10 @@ pub use guest_access::{GuestAccessConfig, TransportKind};
 pub use images::ImagesConfig;
 pub use machinery::MachineryConfig;
 pub use machines::{Arch, MachineConfig, validate_machine_configs};
+pub use orchestration::{
+    DetonationProfileConfig, OrchestrationConfig, SUBMISSION_PROFILE, UNMATCHED_PROFILE,
+    validate_orchestration,
+};
 pub use plugins::{PluginsConfig, RegistryConfig};
 pub use providers::ProvidersConfig;
 pub use provisioning::ProvisionStep;

@@ -19,7 +19,6 @@ impl PyEvent {
             Event::TaskCanceled { .. } => "TaskCanceled",
             Event::PluginStarted { .. } => "PluginStarted",
             Event::PluginStopped { .. } => "PluginStopped",
-            Event::PluginResultAvailable { .. } => "PluginResultAvailable",
             Event::SampleStarted { .. } => "SampleStarted",
             Event::SampleStopped { .. } => "SampleStopped",
             Event::SampleResultProduced { .. } => "SampleResultProduced",
@@ -39,27 +38,10 @@ impl PyEvent {
             Event::PluginStarted { plugin_id } | Event::PluginStopped { plugin_id } => {
                 Some(*plugin_id)
             }
-            Event::PluginResultAvailable { .. } => None,
             Event::SampleStarted { sample_id }
             | Event::SampleStopped { sample_id }
             | Event::SampleResultProduced { sample_id } => Some(*sample_id),
             Event::DaemonShutdown | Event::ConfigReloaded => None,
-        }
-    }
-
-    #[getter]
-    fn source(&self) -> Option<&str> {
-        match &self.inner {
-            Event::PluginResultAvailable { source, .. } => Some(source.as_str()),
-            _ => None,
-        }
-    }
-
-    #[getter]
-    fn result_name(&self) -> Option<&str> {
-        match &self.inner {
-            Event::PluginResultAvailable { result_name, .. } => Some(result_name.as_str()),
-            _ => None,
         }
     }
 
@@ -123,16 +105,6 @@ impl PyEvent {
     fn config_reloaded() -> Self {
         Self {
             inner: Event::ConfigReloaded,
-        }
-    }
-
-    #[staticmethod]
-    fn plugin_result_available(source: String, result_name: String) -> Self {
-        Self {
-            inner: Event::PluginResultAvailable {
-                source,
-                result_name,
-            },
         }
     }
 

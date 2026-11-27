@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn task_only_plugin_override_works() {
         let plugin = TaskOnlyPlugin;
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::new(
             1,
             std::path::PathBuf::new(),

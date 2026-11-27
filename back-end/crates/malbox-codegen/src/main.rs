@@ -1,5 +1,6 @@
 use clap::{Parser, ValueEnum};
-use malbox_plugin_manifest::{ResolvedRuntimeConfig, parse_manifest};
+use malbox_plugin_manifest::{ResolvedAutoCollectRule, ResolvedRuntimeConfig, parse_manifest};
+use malbox_plugin_transport::artifact::ArtifactRelation;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -57,6 +58,8 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
     let ac_art_exclude = format_cpp_vector(&r.auto_collect_artifacts.exclude);
     let ac_ext_include = format_cpp_vector(&r.auto_collect_external_logs.include);
     let ac_ext_exclude = format_cpp_vector(&r.auto_collect_external_logs.exclude);
+    let ac_art_rules = format_cpp_rules(&r.auto_collect_artifacts.rules);
+    let ac_ext_rules = format_cpp_rules(&r.auto_collect_external_logs.rules);
 
     format!(
         "// AUTO-GENERATED from plugin.toml by malbox-codegen - do not edit by hand.\n\
@@ -83,12 +86,14 @@ fn emit_cpp(r: &ResolvedRuntimeConfig) -> String {
          \x20       .include       = {ac_art_include},\n\
          \x20       .exclude       = {ac_art_exclude},\n\
          \x20       .max_file_size = {ac_art_max},\n\
+         \x20       .rules         = {ac_art_rules},\n\
          \x20   }},\n\
          \x20   .auto_collect_external_logs = {{\n\
          \x20       .enabled       = {ac_ext_enabled},\n\
          \x20       .include       = {ac_ext_include},\n\
          \x20       .exclude       = {ac_ext_exclude},\n\
          \x20       .max_file_size = {ac_ext_max},\n\
+         \x20       .rules         = {ac_ext_rules},\n\
          \x20   }},\n\
          }};\n\
          }} // namespace malbox::generated\n",
@@ -115,4 +120,32 @@ fn format_cpp_vector(patterns: &[String]) -> String {
     }
     let items: Vec<String> = patterns.iter().map(|p| format!("{p:?}")).collect();
     format!("{{{}}}", items.join(", "))
+}
+
+fn format_cpp_rules(rules: &[ResolvedAutoCollectRule]) -> String {
+    if rules.is_empty() {
+        return "{}".to_string();
+    }
+    let items: Vec<String> = rules
+        .iter()
+        .map(|rule| {
+            format!(
+                "{{.include = {}, .exclude = {}, .relation = ::malbox::ArtifactRelation::{}, .analyze = {}}}",
+                format_cpp_vector(&rule.include),
+                format_cpp_vector(&rule.exclude),
+                cpp_relation_name(rule.relation),
+                i32::from(rule.analyze),
+            )
+        })
+        .collect();
+    format!("{{{}}}", items.join(", "))
+}
+
+/// C++ enumerator name: the capitalised database label (`extracted` -> `Extracted`).
+fn cpp_relation_name(relation: ArtifactRelation) -> String {
+    let label = relation.as_str();
+    let mut chars = label.chars();
+    chars.next().map_or_else(String::new, |first| {
+        format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+    })
 }

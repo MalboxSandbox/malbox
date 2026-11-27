@@ -1,22 +1,22 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::get,
 };
 use malbox_database::repositories::{
-    plugin_reports::fetch_plugin_reports_for_task,
-    task_results::{ResultRole, fetch_task_results},
+    artifacts::{TaskArtifact, fetch_artifact, fetch_root_artifact},
+    plugin_reports::{fetch_plugin_reports_for_artifact, fetch_plugin_reports_for_task},
     tasks::fetch_task,
 };
+use serde::Deserialize;
 use std::collections::BTreeSet;
 
 use super::super::AppState;
 use crate::http::dto::{
-    PluginReportView, ReportBody, SinglePluginReportResponse, TaskReportResponse, attach_one_task,
+    ReportBody, SinglePluginReportResponse, TaskReportResponse, attach_one_task,
 };
 use crate::http::report_service::{
-    aggregate_plugin_reports, build_artifact_links, build_plugin_report_envelope,
-    flat_artifact_links, is_terminal, load_full_report, synthesize_report,
+    aggregate_plugin_reports, plugin_views_for_artifact, single_plugin_view,
 };
 use crate::http::{Result, error::Error};
 
@@ -29,64 +29,67 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+#[derive(Deserialize)]
+struct ArtifactQuery {
+    artifact_id: Option<i64>,
+}
+
+/// The requested artifact of `task_id`, or its root when none is given.
+async fn resolve_artifact(
+    state: &AppState,
+    task_id: i32,
+    artifact_id: Option<i64>,
+) -> Result<Option<TaskArtifact>> {
+    let artifact = match artifact_id {
+        Some(id) => {
+            let a = fetch_artifact(&state.pool, id)
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?
+                .ok_or(Error::NotFound)?;
+            if a.task_id != task_id {
+                return Err(Error::NotFound);
+            }
+            Some(a)
+        }
+        None => fetch_root_artifact(&state.pool, task_id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?,
+    };
+    Ok(artifact)
+}
+
 async fn get_task_report(
     State(state): State<AppState>,
     Path(task_id): Path<i32>,
+    Query(q): Query<ArtifactQuery>,
 ) -> Result<Json<TaskReportResponse>> {
     let task = fetch_task(&state.pool, task_id)
         .await
         .map_err(|e| Error::Internal(e.to_string()))?
         .ok_or(Error::NotFound)?;
 
-    let reports = fetch_plugin_reports_for_task(&state.pool, task_id)
-        .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
-    let results = fetch_task_results(&state.pool, task_id)
-        .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
+    let artifact = resolve_artifact(&state, task_id, q.artifact_id).await?;
+    let plugins = match &artifact {
+        Some(a) => plugin_views_for_artifact(&state.pool, task_id, a.id)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?,
+        None => Vec::new(),
+    };
 
-    let artifacts_by_plugin = build_artifact_links(task_id, &results);
-    let declared = task.plugins.clone();
-    let status = task.status.clone();
-
-    // Build per-plugin views (borrowed pass) before `aggregate_plugin_reports`
-    // consumes `reports`.
-    let mut plugins: Vec<PluginReportView> = reports
-        .iter()
-        .map(|r| {
-            let arts = artifacts_by_plugin
-                .get(&r.plugin_name)
-                .cloned()
-                .unwrap_or_default();
-            PluginReportView {
-                plugin_name: r.plugin_name.clone(),
-                report: Some(build_plugin_report_envelope(r)),
-                synthesized: false,
-                failed: false,
-                artifacts: arts,
-                source_task_id: None,
-            }
-        })
-        .collect();
-
-    if is_terminal(&status) {
-        let reported: BTreeSet<&str> = reports.iter().map(|r| r.plugin_name.as_str()).collect();
-        for name in &declared {
-            if !reported.contains(name.as_str()) {
-                let arts = artifacts_by_plugin.get(name).cloned().unwrap_or_default();
-                plugins.push(PluginReportView {
-                    plugin_name: name.clone(),
-                    report: None,
-                    synthesized: false,
-                    failed: true,
-                    artifacts: arts,
-                    source_task_id: None,
-                });
-            }
-        }
+    // With an artifact: that artifact only. Without: the whole tree.
+    let reports = match (q.artifact_id, &artifact) {
+        (Some(_), Some(a)) => fetch_plugin_reports_for_artifact(&state.pool, a.id).await,
+        _ => fetch_plugin_reports_for_task(&state.pool, task_id).await,
     }
+    .map_err(|e| Error::Internal(e.to_string()))?;
 
-    let aggregate = aggregate_plugin_reports(reports, declared.len() as u32);
+    let plugin_names: BTreeSet<&str> = plugins
+        .iter()
+        .map(|v| v.plugin_name.as_str())
+        .chain(reports.iter().map(|r| r.plugin_name.as_str()))
+        .collect();
+    let plugin_count = plugin_names.len() as u32;
+    let aggregate = aggregate_plugin_reports(reports, plugin_count);
     let task_dto = attach_one_task(&state.pool, task).await;
 
     Ok(Json(TaskReportResponse {
@@ -98,60 +101,33 @@ async fn get_task_report(
 async fn get_plugin_report(
     State(state): State<AppState>,
     Path((task_id, plugin_name)): Path<(i32, String)>,
+    Query(q): Query<ArtifactQuery>,
 ) -> Result<Json<SinglePluginReportResponse>> {
-    let task = fetch_task(&state.pool, task_id)
+    fetch_task(&state.pool, task_id)
         .await
         .map_err(|e| Error::Internal(e.to_string()))?
         .ok_or(Error::NotFound)?;
+    let artifact = resolve_artifact(&state, task_id, q.artifact_id)
+        .await?
+        .ok_or(Error::NotFound)?;
 
-    let results = fetch_task_results(&state.pool, task_id)
-        .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
-
-    let plugin_rows: Vec<_> = results
-        .into_iter()
-        .filter(|r| r.plugin_name == plugin_name)
-        .collect();
-
-    if plugin_rows.is_empty() {
-        if is_terminal(&task.status) && task.plugins.contains(&plugin_name) {
-            return Ok(Json(SinglePluginReportResponse {
-                plugin_name,
-                task_id,
-                report: None,
-                synthesized: false,
-                failed: true,
-                artifacts: vec![],
-            }));
-        }
-        return Err(Error::NotFound);
-    }
-
-    let report_row = plugin_rows
-        .iter()
-        .find(|r| matches!(r.role, ResultRole::Report));
-    let artifact_rows: Vec<_> = plugin_rows
-        .iter()
-        .filter(|r| !matches!(r.role, ResultRole::Report))
-        .cloned()
-        .collect();
-
-    let (report, synthesized) = match report_row {
-        Some(row) => match load_full_report(&state.config, row).await {
-            Some(r) => (Some(r), false),
-            None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
-        },
-        None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
-    };
-    let report_value = report.map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null));
-    let artifacts = flat_artifact_links(task_id, &plugin_rows);
+    let view = single_plugin_view(
+        &state.pool,
+        &state.config.paths.data_dir,
+        task_id,
+        artifact.id,
+        &plugin_name,
+    )
+    .await
+    .map_err(|e| Error::Internal(e.to_string()))?
+    .ok_or(Error::NotFound)?;
 
     Ok(Json(SinglePluginReportResponse {
         plugin_name,
         task_id,
-        report: report_value,
-        synthesized,
-        failed: false,
-        artifacts,
+        report: view.report,
+        synthesized: view.synthesized,
+        failed: view.failed,
+        artifacts: view.artifacts,
     }))
 }

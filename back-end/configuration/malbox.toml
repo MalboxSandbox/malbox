@@ -28,12 +28,6 @@ environment = "development"
 # log_level = "info"
 # Enable debug mode
 # debug = false
-# Maximum number of worker tasks (default: 4)
-# max_workers = 4
-# Minimum always-alive workers (default: 1)
-# min_workers = 1
-# Idle timeout for non-baseline workers, in milliseconds (default: 60000)
-# idle_timeout_ms = 60000
 
 # -----------------------------------------------------------------------------
 # HTTP Server
@@ -140,34 +134,6 @@ uri = "qemu:///system"
 # store_path = "/var/lib/malbox/images"
 
 # -----------------------------------------------------------------------------
-# Provisioning
-# -----------------------------------------------------------------------------
-# Global provisioning pipeline. Each step runs a provisioner against every
-# machine after allocation. Steps with a `snapshot` key create a provider
-# snapshot recorded in the database.
-
-# [[provisioning.steps]]
-# type = "ansible"
-# snapshot = "base"
-# [provisioning.steps.config]
-# playbook = "playbooks/windows/base.yml"
-
-# [[provisioning.steps]]
-# type = "ansible"
-# snapshot = "configured"
-# [provisioning.steps.config]
-# playbook = "playbooks/windows/windows.yml"
-
-# [[provisioning.steps]]
-# type = "ansible"
-# snapshot = "with-guest-plugin"
-# [provisioning.steps.config]
-# playbook = "playbooks/windows/deploy-guest-plugin.yml"
-# [provisioning.steps.config.extra_vars]
-# guest_plugin_binary = "/path/to/plugin.exe"
-# guest_plugin_toml = "/path/to/plugin.toml"
-
-# -----------------------------------------------------------------------------
 # Guest Access
 # -----------------------------------------------------------------------------
 # Configures how the daemon communicates with guest VMs for file transfer
@@ -189,21 +155,36 @@ uri = "qemu:///system"
 # watch = true
 
 # -----------------------------------------------------------------------------
-# Analysis
+# Orchestration
 # -----------------------------------------------------------------------------
+# Limits and policies for recursive analysis. Every key is optional; the
+# values below are the defaults.
 
-[analysis]
-timeout = 300
-max_vms = 5
-default_profile = "default"
+# [orchestration]
+# max_depth = 6
+# max_artifacts = 500                  # analysed artifacts per task
+# max_artifacts_per_job = 1000         # artifacts (any kind) one job may emit
+# max_detonations = 3
+# max_total_bytes = 2147483648
+# max_file_size = 104857600            # larger artifacts are kept but not analysed
+# task_deadline_secs = 7200
+# max_artifact_time_secs = 1800
+# stall_check_secs = 600
+# max_attempts = 3
+# retry_backoff_secs = 10              # multiplied by the attempt number
+# max_reruns = 2                       # monitored-key re-runs per job
+# host_concurrency = 4                 # concurrently running host jobs
+# max_running_jobs_per_task = 8
+# max_concurrent_vm_boots = 2
+# detonation_decision_window_secs = 60
+# cache_ttl_secs = 604800
+# empty_result_cache_ttl_secs = 86400
 
-[analysis.windows]
-default_profile = "win10_default"
-# Per-platform overrides (optional)
-# timeout = 300
-# max_vms = 3
-
-[analysis.linux]
-default_profile = "ubuntu_default"
-# timeout = 300
-# max_vms = 2
+# [[orchestration.detonation_profiles]]
+# name = "win10-default"
+# accepts = "executable/windows/.*|installer/windows/msi|document/office/.*|document/pdf|code/(javascript|vbs|powershell|batch|hta)|shortcut/windows"
+# platform = "windows"
+# snapshot = "with-plugins"
+# tags = []
+# guest_plugins = []                   # empty = every guest plugin in the snapshot
+# timeout_secs = 300

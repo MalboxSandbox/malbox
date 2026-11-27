@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 #include "../../generated/malbox_plugin.h"
 
 namespace malbox {
@@ -17,7 +16,6 @@ enum class EventTag : int32_t {
     // Plugin events
     PluginStarted        = MALBOX_EVENT_TAG_PLUGIN_STARTED,
     PluginStopped        = MALBOX_EVENT_TAG_PLUGIN_STOPPED,
-    PluginResultAvailable = MALBOX_EVENT_TAG_PLUGIN_RESULT_AVAILABLE,
     // Sample events
     SampleStarted        = MALBOX_EVENT_TAG_SAMPLE_STARTED,
     SampleStopped        = MALBOX_EVENT_TAG_SAMPLE_STOPPED,
@@ -35,21 +33,16 @@ enum class EventTag : int32_t {
 /// - Sample events: id is the sample_id.
 /// - Daemon events: id is unused (0).
 ///
-/// For PluginResultAvailable events, source() and result_name() identify
-/// which plugin produced the result and its name.
-///
 /// Mirrors the Rust `Event` enum and the C `MalboxEvent` struct.
 class Event {
 public:
-    /// Construct from tag and id (string fields default to empty).
+    /// Construct from tag and id.
     Event(EventTag tag, int32_t id = 0) noexcept
         : tag_(tag), id_(id) {}
 
     /// Construct from C MalboxEvent.
     Event(MalboxEvent c) noexcept
-        : tag_(static_cast<EventTag>(c.tag)), id_(c.id),
-          source_(c.source ? c.source : ""),
-          result_name_(c.result_name ? c.result_name : "") {}
+        : tag_(static_cast<EventTag>(c.tag)), id_(c.id) {}
 
     // -- Accessors --
 
@@ -62,11 +55,6 @@ public:
     [[nodiscard]] int32_t plugin_id() const noexcept { return id_; }
     /// Get sample_id (valid for Sample* events).
     [[nodiscard]] int32_t sample_id() const noexcept { return id_; }
-
-    /// Source plugin name (non-empty only for PluginResultAvailable).
-    [[nodiscard]] const std::string& source() const noexcept { return source_; }
-    /// Result name (non-empty only for PluginResultAvailable).
-    [[nodiscard]] const std::string& result_name() const noexcept { return result_name_; }
 
     // -- Factory methods --
 
@@ -91,13 +79,6 @@ public:
     [[nodiscard]] static Event plugin_stopped(int32_t plugin_id) noexcept {
         return {EventTag::PluginStopped, plugin_id};
     }
-    [[nodiscard]] static Event plugin_result_available(
-        std::string source, std::string result_name) {
-        Event e{EventTag::PluginResultAvailable, 0};
-        e.source_ = std::move(source);
-        e.result_name_ = std::move(result_name);
-        return e;
-    }
     [[nodiscard]] static Event sample_started(int32_t sample_id) noexcept {
         return {EventTag::SampleStarted, sample_id};
     }
@@ -117,18 +98,13 @@ public:
     // -- Conversion to C type --
 
     [[nodiscard]] MalboxEvent to_c() const noexcept {
-        return MalboxEvent{
-            static_cast<MalboxEventTag>(tag_),
-            id_,
-            source_.empty() ? nullptr : source_.c_str(),
-            result_name_.empty() ? nullptr : result_name_.c_str()};
+        return MalboxEvent{static_cast<MalboxEventTag>(tag_), id_};
     }
 
     // -- Comparison --
 
     [[nodiscard]] bool operator==(const Event& other) const noexcept {
-        return tag_ == other.tag_ && id_ == other.id_
-            && source_ == other.source_ && result_name_ == other.result_name_;
+        return tag_ == other.tag_ && id_ == other.id_;
     }
     [[nodiscard]] bool operator!=(const Event& other) const noexcept {
         return !(*this == other);
@@ -137,8 +113,6 @@ public:
 private:
     EventTag    tag_;
     int32_t     id_;
-    std::string source_;
-    std::string result_name_;
 };
 
 static_assert(sizeof(EventTag) == sizeof(MalboxEventTag), "EventTag size mismatch");

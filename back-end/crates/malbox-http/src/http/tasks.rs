@@ -1,21 +1,22 @@
+pub mod artifacts;
 pub mod cancel;
 pub mod create;
 pub mod get;
 pub mod report;
-pub mod results;
 
-use malbox_config::Config as MalboxConfig;
-use malbox_database::repositories::task_results::TaskResult;
-use std::path::{Path, PathBuf};
+use malbox_scheduler::ControlError;
 
-/// Resolve the absolute on-disk path for a `task_results` row. Relative
-/// `file_path`s are joined to `config.paths.data_dir` — which is where the
-/// `ResultStore` (see `malbox-utils/src/storage/results.rs`) writes outputs.
-pub(super) fn resolve_result_path(config: &MalboxConfig, row: &TaskResult) -> PathBuf {
-    let stored = Path::new(&row.file_path);
-    if stored.is_absolute() {
-        stored.to_path_buf()
-    } else {
-        config.paths.data_dir.join(stored)
+use crate::http::error::Error;
+
+/// Map an orchestrator control error onto the HTTP error surface.
+pub(super) fn control_error(e: ControlError) -> Error {
+    match e {
+        ControlError::TaskNotFound | ControlError::ArtifactNotFound | ControlError::JobNotFound => {
+            Error::NotFound
+        }
+        ControlError::Conflict(msg) => Error::Conflict(msg),
+        e @ (ControlError::Internal(_) | ControlError::Unavailable(_)) => {
+            Error::Internal(e.to_string())
+        }
     }
 }

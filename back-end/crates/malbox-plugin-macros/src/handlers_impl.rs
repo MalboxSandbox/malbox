@@ -6,7 +6,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{self, ImplItem, ItemImpl, LitStr, Token};
+use syn::{self, ImplItem, ItemImpl};
 
 /// Handler methods discovered while scanning an `impl` block.
 struct FoundHandlers {
@@ -41,42 +41,18 @@ struct FoundEventHandler {
     returns_result: bool,
 }
 
-/// Parsed arguments from `#[on_event(VariantName, from = [...])]`.
+/// Parsed arguments from `#[on_event(VariantName)]`.
 struct EventAttrArgs {
     variant: syn::Ident,
-    // Parsed but not yet wired — requires transport-layer source metadata.
-    #[allow(dead_code)]
-    from_filter: Vec<String>,
 }
 
 impl syn::parse::Parse for EventAttrArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let variant: syn::Ident = input.parse()?;
-
-        let mut from_filter = Vec::new();
-
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-            let ident: syn::Ident = input.parse()?;
-            if ident != "from" {
-                return Err(syn::Error::new(ident.span(), "expected 'from'"));
-            }
-            input.parse::<Token![=]>()?;
-            let content;
-            syn::bracketed!(content in input);
-            while !content.is_empty() {
-                let lit: LitStr = content.parse()?;
-                from_filter.push(lit.value());
-                if !content.is_empty() {
-                    content.parse::<Token![,]>()?;
-                }
-            }
+        if !input.is_empty() {
+            return Err(syn::Error::new(input.span(), "unexpected argument"));
         }
-
-        Ok(EventAttrArgs {
-            variant,
-            from_filter,
-        })
+        Ok(EventAttrArgs { variant })
     }
 }
 

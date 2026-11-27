@@ -10,13 +10,17 @@ mod result_sink;
 pub use result_sink::ResultSink;
 
 use crate::error::{Result, SdkError};
+use crate::result::PluginResult;
 use message::{ResultFormat, ResultKind, TaskResultMessage};
 
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
+use malbox_plugin_transport::{DROP_RESULT_NAME, SHARED_RESULT_NAME, job_config};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
 
@@ -34,7 +38,7 @@ struct ProgressPayload<'a> {
 /// The runtime creates one of these per task and hands it to [`Context`].
 /// During `on_task` the context uses it to stream [`TaskResultMessage`]s
 /// back to the daemon. It is `None` when no task is active.
-pub type ResultSender = tokio::sync::mpsc::Sender<TaskResultMessage>;
+pub type ResultSender = tokio::sync::mpsc::UnboundedSender<TaskResultMessage>;
 
 pub(super) struct ContextInner {
     pub task_id: i32,
@@ -45,6 +49,8 @@ pub(super) struct ContextInner {
     #[cfg(feature = "guest")]
     pub stash: Option<Arc<ResultStash>>,
     pub claimed_paths: Mutex<HashSet<PathBuf>>,
+    /// Analysed artifacts pushed so far (checked against `malbox.max_artifacts`).
+    pub analysed_pushes: AtomicU64,
 }
 
 fn lock_or_err<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>> {
@@ -69,6 +75,7 @@ impl Context {
     ///
     /// Used by the runtime; downstream test code should use
     /// [`Context::test_new`](crate::testkit) under the `testkit` feature.
+    #[cfg(any(test, feature = "host", feature = "guest", feature = "testkit"))]
     pub(crate) fn new(
         task_id: i32,
         sample_path: PathBuf,
@@ -87,6 +94,7 @@ impl Context {
                 #[cfg(feature = "guest")]
                 stash,
                 claimed_paths: Mutex::new(HashSet::new()),
+                analysed_pushes: AtomicU64::new(0),
             }),
         }
     }
@@ -109,10 +117,7 @@ impl Context {
     /// If a result channel is available, a PROGRESS-kind message is sent
     /// over it. Otherwise, just logs the progress.
     ///
-    /// # Panics
-    ///
-    /// Uses `blocking_send` internally. Must be called from a blocking
-    /// context (e.g. `spawn_blocking`), **not** from within an async task.
+    /// Never blocks: the result channel is unbounded.
     pub fn progress(&self, pct: f64, message: &str) -> Result<()> {
         let clamped = pct.clamp(0.0, 1.0);
         info!(kind = "progress", progress = clamped, %message, "Plugin progress");
@@ -138,13 +143,33 @@ impl Context {
                 stash_handle: String::new(),
                 stash_format: ResultFormat::Unspecified,
                 stash_size: 0,
+                artifact: None,
             };
 
-            tx.blocking_send(msg)
+            tx.send(msg)
                 .map_err(|e| SdkError::Channel(format!("progress: {e}")))?;
         }
 
         Ok(())
+    }
+
+    /// Merge `{key: value}` into the task-wide shared data. Arrays are
+    /// unioned with the existing value; anything else overwrites it.
+    pub fn shared_put(&self, key: &str, value: serde_json::Value) -> Result<()> {
+        let mut obj = serde_json::Map::new();
+        obj.insert(key.to_string(), value);
+        self.results().push(PluginResult::Json {
+            name: SHARED_RESULT_NAME.to_string(),
+            data: serde_json::to_vec(&obj)?,
+        })
+    }
+
+    /// Ask the daemon to skip this artifact's later stages.
+    pub fn drop_artifact(&self) -> Result<()> {
+        self.results().push(PluginResult::Json {
+            name: DROP_RESULT_NAME.to_string(),
+            data: b"{}".to_vec(),
+        })
     }
 
     /// Send a transport-level event to the daemon.
@@ -234,6 +259,92 @@ impl TaskInfo<'_> {
     pub fn config_value(&self, key: &str) -> Option<&str> {
         self.inner.config.get(key).map(|s| s.as_str())
     }
+
+    /// The orchestrator job id, when run by the daemon.
+    pub fn job_id(&self) -> Option<i64> {
+        self.config_value(job_config::JOB_ID)?.parse().ok()
+    }
+
+    /// The artifact this job analyses. `None` unless the daemon sent
+    /// `malbox.artifact_id`.
+    pub fn artifact(&self) -> Option<ArtifactInfo> {
+        let id = self.config_value(job_config::ARTIFACT_ID)?.parse().ok()?;
+        let get = |k: &str| self.config_value(k).unwrap_or_default().to_string();
+        Some(ArtifactInfo {
+            id,
+            sha256: get(job_config::ARTIFACT_SHA256),
+            artifact_type: get(job_config::ARTIFACT_TYPE),
+            name: get(job_config::ARTIFACT_NAME),
+            depth: self
+                .config_value(job_config::ARTIFACT_DEPTH)
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        })
+    }
+
+    /// Whether the submitter asked for a deep scan.
+    pub fn deep_scan(&self) -> bool {
+        self.config_value(job_config::DEEP_SCAN) == Some("true")
+    }
+
+    /// Ancestors of the current artifact, root first.
+    pub fn ancestry(&self) -> Vec<AncestryEntry> {
+        self.json_value(job_config::ANCESTRY)
+    }
+
+    /// Task-wide shared data written by earlier plugins.
+    pub fn shared(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.json_value(job_config::SHARED)
+    }
+
+    /// Indicators reported earlier for this artifact and its ancestors.
+    pub fn indicators(&self) -> Vec<crate::report::Indicator> {
+        self.json_value(job_config::INDICATORS)
+    }
+
+    /// Resolved plugin parameters (manifest defaults plus submission overrides).
+    pub fn params(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.json_value(job_config::PARAMS)
+    }
+
+    fn json_value<T: DeserializeOwned + Default>(&self, key: &str) -> T {
+        let Some(raw) = self.config_value(key) else {
+            return T::default();
+        };
+        serde_json::from_str(raw).unwrap_or_else(|e| {
+            warn!(key, error = %e, "invalid JSON in job config");
+            T::default()
+        })
+    }
+}
+
+/// The artifact a job analyses.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ArtifactInfo {
+    /// Database id of the artifact.
+    pub id: i64,
+    /// Hex SHA-256 of the artifact's content.
+    pub sha256: String,
+    /// Detected artifact type.
+    pub artifact_type: String,
+    /// File name the artifact was submitted or pushed under.
+    pub name: String,
+    /// Distance from the submitted sample (the root is 0).
+    pub depth: u32,
+}
+
+/// One ancestor of the current artifact.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[non_exhaustive]
+pub struct AncestryEntry {
+    /// Hex SHA-256 of the ancestor's content.
+    pub sha256: String,
+    /// Detected type of the ancestor.
+    pub artifact_type: String,
+    /// Database label of how the ancestor relates to its own parent
+    /// (see [`ArtifactRelation::as_str`](crate::ArtifactRelation::as_str)).
+    pub relation: String,
 }
 
 #[cfg(test)]

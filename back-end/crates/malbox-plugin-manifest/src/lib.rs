@@ -11,11 +11,12 @@ pub mod runtime;
 
 pub use error::ManifestError;
 pub use manifest::{
-    EventFilterConfig, EventsConfig, ExecutionContextConfig, PluginInfo, PluginManifest,
-    PluginStateConfig, PluginTypeConfig, ResultConfig, ScopeConfig, parse_manifest,
-    validate_manifest,
+    ExecutionContextConfig, ParameterConfig, ParameterKind, PluginInfo, PluginManifest,
+    PluginStateConfig, PluginTypeConfig, ResultConfig, RoutingConfig, ScopeConfig, Stage,
+    parse_manifest, validate_manifest,
 };
 pub use runtime::{
-    AutoCollectConfig, AutoCollectSectionConfig, PathsConfig, ResolvedAutoCollectSection,
-    ResolvedRuntimeConfig, RuntimeConfig, StashConfig,
+    AutoCollectConfig, AutoCollectRuleConfig, AutoCollectSectionConfig, PathsConfig,
+    ResolvedAutoCollectRule, ResolvedAutoCollectSection, ResolvedRuntimeConfig, RuntimeConfig,
+    StashConfig,
 };

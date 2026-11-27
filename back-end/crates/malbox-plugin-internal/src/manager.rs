@@ -113,7 +113,11 @@ impl PluginManager {
     ///   and returns a handle. The handle owns the instance - it is not inserted
     ///   into `self.instances`.
     /// - **Scoped**: not yet implemented.
-    pub async fn acquire(&self, plugin_id: &PluginId) -> Result<PluginHandle> {
+    ///
+    /// A persistent instance found in [`Failed`](PluginLifecycle::Failed) is
+    /// restarted once and the call returns [`ManagerError::PluginBusy`]; the
+    /// health loop promotes the new instance to `Ready`.
+    pub async fn acquire(&self, plugin_id: &PluginId, task_id: i32) -> Result<PluginHandle> {
         let snapshot = self.registry.snapshot();
         let entry = snapshot
             .get(plugin_id)
@@ -124,19 +128,28 @@ impl PluginManager {
                 let instance_lock = self
                     .instances
                     .get(plugin_id)
+                    .map(|r| Arc::clone(r.value()))
                     .ok_or_else(|| ManagerError::PluginNotFound(plugin_id.clone()))?;
 
-                let mut instance = instance_lock.value().lock().await;
+                let mut instance = instance_lock.lock().await;
+                if instance.lifecycle.is_failed() {
+                    drop(instance);
+                    warn!(plugin = %plugin_id, "persistent plugin failed, restarting");
+                    self.restart_persistent(plugin_id).await?;
+                    return Err(ManagerError::PluginBusy(plugin_id.clone()));
+                }
                 if !instance.lifecycle.can_acquire() {
                     return Err(ManagerError::PluginBusy(plugin_id.clone()));
                 }
 
-                instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
+                instance.lifecycle = PluginLifecycle::Busy { task_id };
+                drop(instance);
 
                 Ok(PluginHandle::new(
                     plugin_id.clone(),
                     Arc::clone(entry),
-                    Arc::clone(instance_lock.value()),
+                    instance_lock,
+                    None,
                 ))
             }
             PluginStateConfig::Ephemeral => {
@@ -150,7 +163,7 @@ impl PluginManager {
 
                 let mut instance = spawn_host_plugin(entry, self.ipc.clone()).await?;
                 instance.lifecycle = PluginLifecycle::Ready;
-                instance.lifecycle = PluginLifecycle::Busy { task_id: 0 };
+                instance.lifecycle = PluginLifecycle::Busy { task_id };
 
                 let instance_lock = Arc::new(Mutex::new(instance));
 
@@ -158,10 +171,50 @@ impl PluginManager {
                     plugin_id.clone(),
                     Arc::clone(entry),
                     instance_lock,
+                    None,
                 ))
             }
             PluginStateConfig::Scoped => Err(ManagerError::ScopedNotImplemented),
         }
+    }
+
+    /// Forcefully stop the process behind a handle (cancellation, timeout or
+    /// crash). Persistent host plugins are respawned. Guest handles are just
+    /// released.
+    pub async fn kill_handle(&self, handle: PluginHandle) -> Result<()> {
+        let mut instance = handle.instance().lock().await;
+        let PluginRuntime::Host(host) = &mut instance.runtime else {
+            drop(instance);
+            handle.release().await;
+            return Ok(());
+        };
+        if let Err(e) = host.process.kill().await {
+            debug!(plugin = %handle.plugin_id(), error = %e, "kill failed (process likely exited)");
+        }
+        instance.lifecycle = PluginLifecycle::Stopped;
+        drop(instance);
+
+        if handle.entry().manifest.runtime.state == PluginStateConfig::Persistent {
+            self.restart_persistent(handle.plugin_id()).await?;
+        }
+        Ok(())
+    }
+
+    /// Respawn a persistent host plugin, replacing its instance entry with a
+    /// fresh `Starting` instance.
+    pub async fn restart_persistent(&self, plugin_id: &PluginId) -> Result<()> {
+        let snapshot = self.registry.snapshot();
+        let entry = snapshot
+            .get(plugin_id)
+            .ok_or_else(|| ManagerError::PluginNotFound(plugin_id.clone()))?;
+
+        self.ipc.remove_channels(plugin_id.clone());
+        self.ipc.cleanup_dead_nodes().await;
+        let instance = spawn_host_plugin(entry, self.ipc.clone()).await?;
+        self.instances
+            .insert(plugin_id.clone(), Arc::new(Mutex::new(instance)));
+        info!(plugin = %plugin_id, "persistent plugin restarted");
+        Ok(())
     }
 
     /// Register a guest plugin that connected from inside a VM.
@@ -180,6 +233,11 @@ impl PluginManager {
         let mut grpc_client = crate::transport::daemon::GrpcClient::connect(&addr)
             .await
             .map_err(ManagerError::Transport)?;
+        let control_client = Arc::new(Mutex::new(
+            crate::transport::daemon::GrpcClient::connect(&addr)
+                .await
+                .map_err(ManagerError::Transport)?,
+        ));
 
         // Initialize the guest plugin (triggers on_start, decoder/provider registration).
         let init_resp = grpc_client
@@ -200,14 +258,17 @@ impl PluginManager {
         let mut instance = PluginInstance {
             entry: Arc::clone(entry),
             lifecycle: PluginLifecycle::Ready,
-            runtime: PluginRuntime::Guest(GuestRuntime { grpc_client }),
+            runtime: PluginRuntime::Guest(GuestRuntime {
+                grpc_client,
+                control_client: Arc::clone(&control_client),
+            }),
             started_at: Some(Instant::now()),
             last_health_check: None,
             log_file_path: None,
         };
 
         // Start consuming the guest plugin's log stream in the background.
-        if let PluginRuntime::Guest(ref mut guest) = instance.runtime {
+        if let PluginRuntime::Guest(guest) = &mut instance.runtime {
             match guest.grpc_client.stream_logs(true).await {
                 Ok(stream) => {
                     let run_id = format!(
@@ -241,6 +302,7 @@ impl PluginManager {
             plugin_id.clone(),
             Arc::clone(entry),
             instance_lock,
+            Some(control_client),
         ))
     }
 

@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
+use malbox_plugin_transport::artifact::ArtifactMeta;
 use malbox_plugin_transport::error::TransportError;
 use malbox_plugin_transport::ipc::headers::{
     EventKind, FLAG_HAS_MORE_CHUNKS, FLAG_IS_FINAL, ResponseKind, ResultFormat, TaskRequestHeader,
@@ -26,7 +27,7 @@ use malbox_plugin_transport::ipc::notify::NotifyKind;
 use malbox_plugin_transport::ipc::{
     CallbackProgression, DaemonEventPublisher, DaemonNotifyListener, IpcService, Node, NodeBuilder,
     PluginEventSubscriber, PluginNotifier, ReactorWaker, ReactorWakeupListener, SignalHandlingMode,
-    TaskClient, TaskPendingResponse, WaitSetBuilder, cleanup_stale_resources,
+    TaskClient, TaskPendingResponse, WaitSetBuilder, cleanup_stale_resources, decode_artifact_meta,
 };
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
@@ -304,6 +305,10 @@ struct ChunkAccum {
     chunked_name: Option<String>,
     chunked_data: Vec<u8>,
     chunked_format: OutputFormat,
+    /// Artifact metadata attached to the in-progress chunked transfer.
+    chunked_meta: Option<ArtifactMeta>,
+    /// Metadata frame received ahead of the next completed output.
+    pending_meta: Option<ArtifactMeta>,
 }
 
 impl ChunkAccum {
@@ -313,6 +318,8 @@ impl ChunkAccum {
             chunked_name: None,
             chunked_data: Vec::new(),
             chunked_format: OutputFormat::Bytes,
+            chunked_meta: None,
+            pending_meta: None,
         }
     }
 
@@ -323,6 +330,7 @@ impl ChunkAccum {
                 result_name: name,
                 data: std::mem::take(&mut self.chunked_data),
                 format: self.chunked_format,
+                artifact: self.chunked_meta.take(),
             });
         }
     }
@@ -531,17 +539,19 @@ impl Reactor {
         let task = &mut self.active[idx];
 
         if Instant::now() > task.deadline {
-            let msg = match task.state {
-                TaskState::WaitingReady { .. } => format!(
-                    "task {}: plugin task server did not become ready within timeout",
-                    task.task_id
+            match task.state {
+                TaskState::WaitingReady { .. } => warn!(
+                    plugin = %task.plugin_id,
+                    task_id = task.task_id,
+                    "plugin task server did not become ready within timeout"
                 ),
-                TaskState::Collecting { .. } => format!("task {} timed out", task.task_id),
-            };
-            return TaskOutcome::Finished(Err(ManagerError::ExecutionFailed(
-                task.plugin_id.clone(),
-                msg,
-            )));
+                TaskState::Collecting { .. } => warn!(
+                    plugin = %task.plugin_id,
+                    task_id = task.task_id,
+                    "task timed out"
+                ),
+            }
+            return TaskOutcome::Finished(Err(ManagerError::Timeout(task.plugin_id.clone())));
         }
 
         let Some(channels) = self.channels.get(&task.plugin_id) else {
@@ -621,14 +631,22 @@ impl Reactor {
                     *server_connected = true;
                     let h = &response.header;
 
-                    if h.flags & FLAG_IS_FINAL != 0 {
-                        accum.flush_chunked();
-                        return TaskOutcome::Finished(Ok(std::mem::take(&mut accum.outputs)));
-                    }
-
                     let kind = ResponseKind::try_from(h.kind).unwrap_or(ResponseKind::Result);
 
+                    // The SDK marks error frames final, so check the kind
+                    // before treating a final frame as success.
                     match kind {
+                        ResponseKind::Error => {
+                            let msg = String::from_utf8_lossy(&response.payload).into_owned();
+                            return TaskOutcome::Finished(Err(ManagerError::Reported(
+                                plugin_id.clone(),
+                                msg,
+                            )));
+                        }
+                        _ if h.flags & FLAG_IS_FINAL != 0 => {
+                            accum.flush_chunked();
+                            return TaskOutcome::Finished(Ok(std::mem::take(&mut accum.outputs)));
+                        }
                         ResponseKind::Result => {
                             let format = match ResultFormat::try_from(h.format) {
                                 Ok(ResultFormat::Json) => OutputFormat::Json,
@@ -655,6 +673,7 @@ impl Reactor {
                                     accum.chunked_name = Some(result_name);
                                     accum.chunked_data = data;
                                     accum.chunked_format = format;
+                                    accum.chunked_meta = accum.pending_meta.take();
                                     if h.total_size > 0 {
                                         accum.chunked_data.reserve(h.total_size as usize);
                                     }
@@ -677,6 +696,7 @@ impl Reactor {
                                     result_name,
                                     data,
                                     format,
+                                    artifact: accum.pending_meta.take(),
                                 });
                             }
                         }
@@ -696,6 +716,7 @@ impl Reactor {
                                             .to_string(),
                                         data,
                                         format,
+                                        artifact: accum.pending_meta.take(),
                                     });
                                 }
                                 Err(e) => {
@@ -709,18 +730,22 @@ impl Reactor {
                                 }
                             }
                         }
+                        ResponseKind::ArtifactMeta => {
+                            match decode_artifact_meta(&response.payload) {
+                                Ok(meta) => accum.pending_meta = Some(meta),
+                                Err(e) => warn!(
+                                    plugin = %plugin_id,
+                                    task_id,
+                                    error = %e,
+                                    "ignoring undecodable artifact metadata frame"
+                                ),
+                            }
+                        }
                         ResponseKind::Progress => {
                             debug!(plugin = %plugin_id, task_id, "progress update");
                         }
                         ResponseKind::Ready => {
                             debug!(plugin = %plugin_id, task_id, "plugin ready");
-                        }
-                        ResponseKind::Error => {
-                            let msg = String::from_utf8_lossy(&response.payload);
-                            return TaskOutcome::Finished(Err(ManagerError::ExecutionFailed(
-                                plugin_id.clone(),
-                                format!("plugin task error: {msg}"),
-                            )));
                         }
                     }
                 }
@@ -730,10 +755,11 @@ impl Reactor {
                         return TaskOutcome::Pending;
                     }
                     if *server_connected {
-                        // Server finished or crashed without a final marker:
-                        // flush whatever arrived.
-                        accum.flush_chunked();
-                        return TaskOutcome::Finished(Ok(std::mem::take(&mut accum.outputs)));
+                        // Server went away without a final marker.
+                        warn!(plugin = %plugin_id, task_id, "plugin disconnected mid-task");
+                        return TaskOutcome::Finished(Err(ManagerError::Crashed(
+                            plugin_id.clone(),
+                        )));
                     }
                     return TaskOutcome::Pending;
                 }

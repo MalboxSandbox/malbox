@@ -14,7 +14,7 @@ pub(crate) mod collector;
 mod files;
 mod stream;
 
-use collector::AutoCollectSection;
+use collector::{AutoCollectRule, AutoCollectSection};
 
 use crate::error::{Result, SdkError};
 use crate::log::LogBus;
@@ -27,14 +27,27 @@ use malbox_plugin_transport::plugin::{
     ResultChunkStream, TaskResultStream,
 };
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{info, warn};
+
+/// An auto-collect rule baked into the plugin binary: files matching
+/// `include` (and not `exclude`) are pushed as artifacts with `relation`
+/// (an [`ArtifactRelation`](crate::artifact::ArtifactRelation) discriminant).
+#[derive(Debug, Clone, Copy)]
+pub struct AutoCollectRuleRuntime {
+    pub include: &'static [&'static str],
+    pub exclude: &'static [&'static str],
+    pub relation: u8,
+    pub analyze: bool,
+}
 
 /// Auto-collection settings for a single directory (artifacts or external logs).
 ///
@@ -50,6 +63,8 @@ pub struct AutoCollectRuntimeConfig {
     pub exclude: &'static [&'static str],
     /// Skip files larger than this (bytes). Prevents collecting huge dumps.
     pub max_file_size: u64,
+    /// Artifact rules (only used for `auto_collect_artifacts`).
+    pub rules: &'static [AutoCollectRuleRuntime],
 }
 
 /// Configuration for the guest plugin runtime.
@@ -135,6 +150,71 @@ struct GuestService<P: Send + Sync + 'static> {
     auto_collect_artifacts: AutoCollectSection,
     auto_collect_external_logs: AutoCollectSection,
     default_timeout: u64,
+    /// Stop signals for running tasks, keyed by task id.
+    stops: Arc<StopRegistry>,
+}
+
+type StopRegistry = std::sync::Mutex<HashMap<i32, std::sync::mpsc::Sender<()>>>;
+
+/// Default foreground `ExecuteCommand` timeout.
+const DEFAULT_EXEC_TIMEOUT_MS: u64 = 60_000;
+
+/// Run a foreground command, killing it after `timeout`.
+fn run_foreground(
+    mut cmd: std::process::Command,
+    timeout: Duration,
+) -> std::io::Result<proto::ExecResponse> {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let pid = child.id();
+    let read_all = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = read_all(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let stderr = read_all(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+
+    let deadline = std::time::Instant::now() + timeout;
+    let exit_code = loop {
+        if let Some(status) = child.try_wait()? {
+            break status.code();
+        }
+        if std::time::Instant::now() >= deadline {
+            warn!(pid, "command timed out, killing");
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    Ok(proto::ExecResponse {
+        exit_code,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+        pid: Some(pid),
+    })
 }
 
 #[tonic::async_trait]
@@ -196,7 +276,14 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let (proto_tx, proto_rx) =
             mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(TASK_CHANNEL_CAPACITY);
         let (result_tx, mut result_rx) =
-            mpsc::channel::<crate::context::message::TaskResultMessage>(TASK_CHANNEL_CAPACITY);
+            mpsc::unbounded_channel::<crate::context::message::TaskResultMessage>();
+        let task_id = req.task_id;
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        self.stops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(task_id, stop_tx);
+        let stops = Arc::clone(&self.stops);
 
         let plugin = self.plugin.clone();
         let full_sample_path = if std::path::Path::new(&req.sample_path).is_relative()
@@ -219,8 +306,9 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let relay_tx = proto_tx.clone();
         tokio::spawn(async move {
             while let Some(msg) = result_rx.recv().await {
+                let is_final = msg.is_final;
                 let proto_msg = stream::message_to_proto(msg, &relay_stash);
-                if relay_tx.send(Ok(proto_msg)).await.is_err() {
+                if relay_tx.send(Ok(proto_msg)).await.is_err() || is_final {
                     break;
                 }
             }
@@ -230,11 +318,12 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
             stream::guest_linear_task(
                 plugin,
                 stream::TaskExecution {
-                    task_id: req.task_id,
+                    task_id,
                     sample_path: full_sample_path,
                     config: req.config,
                     result_tx,
                     proto_tx,
+                    stop_rx,
                     stash,
                     artifact_dir,
                     external_log_dir,
@@ -243,10 +332,33 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
                     default_timeout,
                 },
             );
+            stops
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&task_id);
         });
 
         let stream: TaskResultStream = Box::pin(ReceiverStream::new(proto_rx));
         Ok(Response::new(stream))
+    }
+
+    async fn stop_task(
+        &self,
+        request: Request<proto::StopTaskRequest>,
+    ) -> std::result::Result<Response<proto::StopTaskResponse>, Status> {
+        let task_id = request.into_inner().task_id;
+        let acknowledged = self
+            .stops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&task_id)
+            .map(|tx| {
+                // The receiver may already be gone if the task just finished.
+                let _ = tx.send(());
+            })
+            .is_some();
+        info!(task_id, acknowledged, "StopTask received");
+        Ok(Response::new(proto::StopTaskResponse { acknowledged }))
     }
 
     // -- File transfer ----------------------------------------------------
@@ -308,18 +420,48 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         }
     }
 
-    // -- Command execution (no-op) ----------------------------------------
+    // -- Command execution ------------------------------------------------
 
     async fn execute_command(
         &self,
-        _request: Request<proto::ExecRequest>,
+        request: Request<proto::ExecRequest>,
     ) -> std::result::Result<Response<proto::ExecResponse>, Status> {
-        Ok(Response::new(proto::ExecResponse {
-            exit_code: None,
-            stdout: vec![],
-            stderr: vec![],
-            pid: None,
-        }))
+        let req = request.into_inner();
+        let cwd = match req.cwd.as_deref() {
+            None => self.sample_dir.clone(),
+            Some(c) if Path::new(c).is_absolute() => PathBuf::from(c),
+            Some(c) => {
+                files::resolve_path(&self.sample_dir, c).map_err(Status::invalid_argument)?
+            }
+        };
+
+        let mut cmd = std::process::Command::new(&req.command);
+        cmd.args(&req.args).current_dir(&cwd).envs(&req.env);
+
+        if req.background {
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", req.command)))?;
+            let pid = child.id();
+            info!(command = %req.command, pid, "Spawned background command");
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            return Ok(Response::new(proto::ExecResponse {
+                exit_code: None,
+                stdout: vec![],
+                stderr: vec![],
+                pid: Some(pid),
+            }));
+        }
+
+        let timeout = Duration::from_millis(req.timeout_ms.unwrap_or(DEFAULT_EXEC_TIMEOUT_MS));
+        let command = req.command.clone();
+        let resp = tokio::task::spawn_blocking(move || run_foreground(cmd, timeout))
+            .await
+            .map_err(|e| Status::internal(format!("command task failed: {e}")))?
+            .map_err(|e| Status::internal(format!("failed to run {command}: {e}")))?;
+        Ok(Response::new(resp))
     }
 
     // -- Log streaming ----------------------------------------------------
@@ -502,7 +644,19 @@ impl<P: GuestPlugin> GuestRuntime<P> {
             include: cfg.include.iter().map(|s| (*s).to_string()).collect(),
             exclude: cfg.exclude.iter().map(|s| (*s).to_string()).collect(),
             max_file_size: cfg.max_file_size,
+            rules: cfg
+                .rules
+                .iter()
+                .filter_map(AutoCollectRule::compile)
+                .collect(),
         };
+        let mut external_logs = to_section(&self.config.auto_collect_external_logs);
+        if !external_logs.rules.is_empty() {
+            warn!(
+                "auto-collect rules are only supported for artifacts; ignoring external_logs rules"
+            );
+            external_logs.rules.clear();
+        }
 
         let service = GuestService {
             plugin: self.plugin,
@@ -513,8 +667,9 @@ impl<P: GuestPlugin> GuestRuntime<P> {
             log_bus: Arc::clone(&log_bus),
             stash: Arc::clone(&stash),
             auto_collect_artifacts: to_section(&self.config.auto_collect_artifacts),
-            auto_collect_external_logs: to_section(&self.config.auto_collect_external_logs),
+            auto_collect_external_logs: external_logs,
             default_timeout: self.config.analysis_timeout,
+            stops: Arc::new(std::sync::Mutex::new(HashMap::new())),
         };
 
         let addr = self.config.listen_addr;
@@ -575,12 +730,19 @@ mod guest_runtime_config_tests {
             include: &["**/*"],
             exclude: &[],
             max_file_size: 50 * 1024 * 1024,
+            rules: &[AutoCollectRuleRuntime {
+                include: &["drops/**"],
+                exclude: &[],
+                relation: 2,
+                analyze: true,
+            }],
         },
         auto_collect_external_logs: AutoCollectRuntimeConfig {
             enabled: true,
             include: &["**/*"],
             exclude: &[],
             max_file_size: 50 * 1024 * 1024,
+            rules: &[],
         },
     };
 

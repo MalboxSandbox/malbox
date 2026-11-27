@@ -1,7 +1,7 @@
 use crate::{
     Environment, LogLevel, PathConfig, guest_access::GuestAccessConfig, images::ImagesConfig,
-    machinery::MachineryConfig, machines::MachineConfig, plugins::PluginsConfig,
-    providers::ProvidersConfig,
+    machinery::MachineryConfig, machines::MachineConfig, orchestration::OrchestrationConfig,
+    plugins::PluginsConfig, providers::ProvidersConfig,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,8 @@ pub struct Config {
     pub guest_access: Option<GuestAccessConfig>,
     #[serde(default)]
     pub plugins: PluginsConfig,
-    pub analysis: AnalysisConfig,
+    #[serde(default)]
+    pub orchestration: OrchestrationConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub machines: Vec<MachineConfig>,
 }
@@ -43,9 +44,6 @@ impl Config {
                 environment: Environment::Development,
                 log_level: LogLevel::Info,
                 debug: false,
-                max_workers: default_max_workers(),
-                min_workers: default_min_workers(),
-                idle_timeout_ms: default_idle_timeout_ms(),
             },
             http: HttpConfig {
                 host: "127.0.0.1".to_string(),
@@ -63,21 +61,7 @@ impl Config {
             images: None,
             guest_access: None,
             plugins: PluginsConfig::default(),
-            analysis: AnalysisConfig {
-                timeout: 300,
-                max_vms: 5,
-                default_profile: "default".to_string(),
-                windows: PlatformAnalysisConfig {
-                    default_profile: "win10_default".to_string(),
-                    timeout: Some(300),
-                    max_vms: Some(3),
-                },
-                linux: PlatformAnalysisConfig {
-                    default_profile: "ubuntu_default".to_string(),
-                    timeout: Some(300),
-                    max_vms: Some(2),
-                },
-            },
+            orchestration: OrchestrationConfig::default(),
             machines: Vec::new(),
         }
     }
@@ -91,12 +75,6 @@ pub struct GeneralConfig {
     pub log_level: LogLevel,
     #[serde(default)]
     pub debug: bool,
-    #[serde(default = "default_max_workers")]
-    pub max_workers: usize,
-    #[serde(default = "default_min_workers")]
-    pub min_workers: usize,
-    #[serde(default = "default_idle_timeout_ms")]
-    pub idle_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,24 +129,6 @@ impl Default for DatabaseConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisConfig {
-    pub timeout: u32,
-    pub max_vms: u32,
-    pub default_profile: String,
-    pub windows: PlatformAnalysisConfig,
-    pub linux: PlatformAnalysisConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlatformAnalysisConfig {
-    pub default_profile: String,
-    pub timeout: Option<u32>,
-    pub max_vms: Option<u32>,
-}
-
 fn default_log_level() -> LogLevel {
     LogLevel::Info
 }
@@ -181,14 +141,42 @@ fn default_db_port() -> u16 {
     5432
 }
 
-fn default_max_workers() -> usize {
-    4
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn default_min_workers() -> usize {
-    1
-}
+    const BASE: &str = r#"
+[general]
+environment = "development"
+[http]
+host = "127.0.0.1"
+port = 8080
+[database]
+"#;
 
-fn default_idle_timeout_ms() -> u64 {
-    60_000
+    #[test]
+    fn parses_without_orchestration_section() {
+        let cfg: Config = toml::from_str(BASE).expect("parse");
+        assert_eq!(
+            cfg.orchestration.max_depth,
+            OrchestrationConfig::default().max_depth
+        );
+    }
+
+    #[test]
+    fn rejects_legacy_analysis_section() {
+        let src = format!("{BASE}\n[analysis]\ntimeout = 300\n");
+        let err = toml::from_str::<Config>(&src).unwrap_err().to_string();
+        assert!(err.contains("unknown field `analysis`"), "{err}");
+    }
+
+    #[test]
+    fn rejects_legacy_worker_fields() {
+        let src = BASE.replace(
+            "environment = \"development\"",
+            "environment = \"development\"\nmax_workers = 4",
+        );
+        let err = toml::from_str::<Config>(&src).unwrap_err().to_string();
+        assert!(err.contains("unknown field `max_workers`"), "{err}");
+    }
 }

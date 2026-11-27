@@ -4,10 +4,12 @@ use axum::{
     routing::get,
 };
 use malbox_database::repositories::{
-    plugin_reports::fetch_latest_plugin_reports_for_sample,
+    artifacts::fetch_sample_appearances,
+    plugin_reports::{
+        fetch_latest_plugin_report_for_sample, fetch_latest_plugin_reports_for_sample,
+    },
     sample_verdicts::fetch_sample_verdict_by_sha256,
     samples::fetch_sample_by_hash,
-    task_results::{ResultRole, fetch_task_results},
     tasks::{Task, fetch_tasks_by_sample_id, fetch_tasks_for_sample},
 };
 use serde::{Deserialize, Serialize};
@@ -17,8 +19,7 @@ use crate::http::dto::{
     PluginReportView, ReportBody, SampleDto, SampleReportResponse, SinglePluginReportResponse,
 };
 use crate::http::report_service::{
-    aggregate_plugin_reports, build_plugin_report_envelope, flat_artifact_links, load_full_report,
-    synthesize_report,
+    aggregate_plugin_reports, build_plugin_report_envelope, single_plugin_view,
 };
 use crate::http::{Result, error::Error};
 
@@ -53,13 +54,16 @@ struct TaskSummary {
     created_on: String,
     started_on: Option<String>,
     completed_on: Option<String>,
+    partial: bool,
+    error_count: i32,
+    artifact_count: i32,
 }
 
 impl From<Task> for TaskSummary {
     fn from(t: Task) -> Self {
         TaskSummary {
-            id: t.id.unwrap_or_default(),
-            status: crate::http::report_service::task_status_str(&t.status),
+            id: t.id,
+            status: t.status.as_str().to_string(),
             platform: t
                 .platform
                 .map(|p| format!("{:?}", p).to_lowercase())
@@ -71,8 +75,19 @@ impl From<Task> for TaskSummary {
             created_on: t.created_on.to_string(),
             started_on: t.started_on.map(|d| d.to_string()),
             completed_on: t.completed_on.map(|d| d.to_string()),
+            partial: t.partial,
+            error_count: t.error_count,
+            artifact_count: t.artifact_count,
         }
     }
+}
+
+/// Where the sample was found inside another task's artifact tree.
+#[derive(Serialize)]
+struct SampleAppearance {
+    task_id: i32,
+    artifact_id: i64,
+    depth: i32,
 }
 
 #[derive(Serialize)]
@@ -96,6 +111,7 @@ struct SampleOverviewResponse {
     sample: SampleDto,
     tasks: Vec<TaskSummary>,
     aggregate: SampleVerdictView,
+    appearances: Vec<SampleAppearance>,
 }
 
 // GET /v1/samples?{md5|sha1|sha256|sha512}=hex
@@ -146,6 +162,16 @@ async fn get_sample_overview(
     let tasks = fetch_tasks_for_sample(&state.pool, sample.id)
         .await
         .map_err(|e| Error::Internal(e.to_string()))?;
+    let appearances = fetch_sample_appearances(&state.pool, sample.id)
+        .await
+        .map_err(|e| Error::Internal(e.to_string()))?
+        .into_iter()
+        .map(|(task_id, artifact_id, depth)| SampleAppearance {
+            task_id,
+            artifact_id,
+            depth,
+        })
+        .collect();
 
     let aggregate = match verdict {
         Some(v) => SampleVerdictView {
@@ -160,6 +186,7 @@ async fn get_sample_overview(
     };
 
     Ok(Json(SampleOverviewResponse {
+        appearances,
         sample: SampleDto::from(sample),
         tasks: tasks.into_iter().map(TaskSummary::from).collect(),
         aggregate,
@@ -212,47 +239,28 @@ async fn get_sample_plugin_report(
         .map_err(|e| Error::Internal(e.to_string()))?
         .ok_or(Error::NotFound)?;
 
-    let reports = fetch_latest_plugin_reports_for_sample(&state.pool, sample.id)
+    let (pr, task_id) = fetch_latest_plugin_report_for_sample(&state.pool, sample.id, &plugin_name)
         .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
-    let pr = reports
-        .into_iter()
-        .find(|r| r.plugin_name == plugin_name)
+        .map_err(|e| Error::Internal(e.to_string()))?
         .ok_or(Error::NotFound)?;
-    let task_id = pr.task_id;
 
-    let results = fetch_task_results(&state.pool, task_id)
-        .await
-        .map_err(|e| Error::Internal(e.to_string()))?;
-    let plugin_rows: Vec<_> = results
-        .into_iter()
-        .filter(|r| r.plugin_name == plugin_name)
-        .collect();
-    let report_row = plugin_rows
-        .iter()
-        .find(|r| matches!(r.role, ResultRole::Report));
-    let artifact_rows: Vec<_> = plugin_rows
-        .iter()
-        .filter(|r| !matches!(r.role, ResultRole::Report))
-        .cloned()
-        .collect();
-
-    let (report, synthesized) = match report_row {
-        Some(row) => match load_full_report(&state.config, row).await {
-            Some(r) => (Some(r), false),
-            None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
-        },
-        None => (Some(synthesize_report(&plugin_name, &artifact_rows)), true),
-    };
-    let report_value = report.map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null));
-    let artifacts = flat_artifact_links(task_id, &plugin_rows);
+    let view = single_plugin_view(
+        &state.pool,
+        &state.config.paths.data_dir,
+        task_id,
+        pr.artifact_id,
+        &plugin_name,
+    )
+    .await
+    .map_err(|e| Error::Internal(e.to_string()))?
+    .ok_or(Error::NotFound)?;
 
     Ok(Json(SinglePluginReportResponse {
         plugin_name,
         task_id,
-        report: report_value,
-        synthesized,
-        failed: false,
-        artifacts,
+        report: view.report,
+        synthesized: view.synthesized,
+        failed: view.failed,
+        artifacts: view.artifacts,
     }))
 }

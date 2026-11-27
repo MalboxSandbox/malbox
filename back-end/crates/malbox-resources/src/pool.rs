@@ -1,8 +1,11 @@
 //! Machine pool for managing persistent, user-created machines.
 
+mod acquire;
 mod provisioning;
 mod reconcile;
 mod revert;
+
+pub use acquire::{AcquireOutcome, MachineRequest};
 
 use crate::error::{ResourceError, Result};
 use malbox_database::PgPool;
@@ -44,24 +47,13 @@ impl MachinePool {
         }
     }
 
-    /// Acquire a ready machine for a task.
-    pub async fn acquire(
-        &self,
-        platform: MachinePlatform,
-        task_id: i32,
-    ) -> Result<Option<DbMachine>> {
-        machinery::acquire_machine(&self.db, platform, task_id)
-            .await
-            .map_err(|e| ResourceError::Database(e.to_string()))
-    }
-
     /// Release a machine after task completion.
     ///
     /// Marks the machine as `reverting` and spawns an async revert.
     pub async fn release(&self, machine_id: i32) -> Result<()> {
         machinery::release_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         let pool = self.clone();
         tokio::spawn(async move {
@@ -84,14 +76,14 @@ impl MachinePool {
     pub async fn get(&self, machine_id: i32) -> Result<Option<DbMachine>> {
         machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))
+            .map_err(|e| ResourceError::Database(e.into()))
     }
 
     /// List all machines.
     pub async fn list(&self) -> Result<Vec<DbMachine>> {
         machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))
+            .map_err(|e| ResourceError::Database(e.into()))
     }
 
     /// Delete a snapshot from both the provider and the database.
@@ -120,11 +112,11 @@ impl MachinePool {
 
         provision_runs::delete_provision_runs_for_snapshot(&self.db, snapshot.id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         snapshots::delete_snapshot(&self.db, snapshot.id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         info!(
             machine_id,
@@ -143,7 +135,7 @@ impl MachinePool {
 
         let snap = snapshots::fetch_active_snapshot(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         let plugins = snap
             .and_then(|s| s.guest_plugins)

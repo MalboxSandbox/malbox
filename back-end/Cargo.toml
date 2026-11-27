@@ -9,11 +9,8 @@ exclude = [
     "examples/plugins/guest-yara-scanner",
     "examples/plugins/guest-exec-checker",
     "examples/plugins/host-event-reactor",
-    "examples/plugins/host-string-extractor",
-    "examples/plugins/host-result-chain",
     "examples/plugins/host-report-showcase",
-    "examples/plugins/host-vbs-analyzer",
-    "examples/plugins/host-yara-scanner",
+    "examples/plugins/host-archive-extractor",
     "xtask",
 ]
 
@@ -100,6 +97,8 @@ magic = "0.16.7"
 color-eyre = "0.6.5"
 dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
 serde_json = "1.0.150"
+regex = "1"
+globset = "0.4"
 tokio-stream = { version = "0.1.18", features = ["io-util"] }
 futures = "0.3.32"
 semver = { version = "1.0.28", features = [ "serde" ] }

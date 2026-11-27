@@ -38,6 +38,22 @@ pub struct MalboxPluginMeta {
     pub execution: MalboxExecutionContext,
 }
 
+/// One auto-collect rule: files matching `include` (and not `exclude`) are
+/// pushed as artifacts with the given relation.
+///
+/// `relation` is 1-7 (see `ArtifactRelation`); `analyze` is -1 (relation
+/// default), 0 (false) or 1 (true).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MalboxAutoCollectRule {
+    pub include: *const *const c_char,
+    pub include_count: usize,
+    pub exclude: *const *const c_char,
+    pub exclude_count: usize,
+    pub relation: i32,
+    pub analyze: i32,
+}
+
 /// Auto-collection configuration for a single directory.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +64,8 @@ pub struct MalboxAutoCollectConfig {
     pub exclude: *const *const c_char,
     pub exclude_count: usize,
     pub max_file_size: u64,
+    pub rules: *const MalboxAutoCollectRule,
+    pub rule_count: usize,
 }
 
 /// Runtime configuration baked into a guest plugin at build time.

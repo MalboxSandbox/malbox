@@ -1,5 +1,6 @@
 use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::result::PluginResult;
+use malbox_plugin_sdk::{ArtifactOpts, ArtifactRelation, ArtifactSource, SdkError};
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,6 +8,49 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::event::PyEvent;
 use super::result::PyPluginResult;
+
+pyo3::create_exception!(
+    malbox_plugin_sdk,
+    ArtifactLimitError,
+    pyo3::exceptions::PyRuntimeError,
+    "Raised when a job has pushed as many analysed artifacts as it may."
+);
+
+/// Convert a JSON value into a Python object via the stdlib `json` module.
+fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
+    let text = serde_json::to_string(value)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(py.import("json")?.call_method1("loads", (text,))?.unbind())
+}
+
+/// Resolve an artifact relation label (`root` is reserved and rejected).
+fn parse_relation(relation: &str) -> PyResult<ArtifactRelation> {
+    relation
+        .parse::<ArtifactRelation>()
+        .ok()
+        .filter(|r| *r != ArtifactRelation::Root)
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown artifact relation: {relation}"
+            ))
+        })
+}
+
+/// Validate `ResultSink.push_artifact` arguments without a live context.
+#[pyfunction]
+#[pyo3(signature = (data, path, relation))]
+pub fn _validate_artifact_args(
+    data: Option<&[u8]>,
+    path: Option<PathBuf>,
+    relation: &str,
+) -> PyResult<()> {
+    if data.is_some() == path.is_some() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "exactly one of data or path is required",
+        ));
+    }
+    parse_relation(relation).map(|_| ())
+}
 
 fn ctx_from_ptr(ptr: *const (), valid: &AtomicBool) -> PyResult<&'static Context> {
     if !valid.load(Ordering::Acquire) || ptr.is_null() {
@@ -62,6 +106,68 @@ impl PyTaskInfo {
             .task()
             .config_value(key)
             .map(String::from))
+    }
+
+    #[getter]
+    fn job_id(&self) -> PyResult<Option<i64>> {
+        Ok(ctx_from_ptr(self.ptr, &self.valid)?.task().job_id())
+    }
+
+    #[getter]
+    fn artifact(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+        let Some(a) = ctx_from_ptr(self.ptr, &self.valid)?.task().artifact() else {
+            return Ok(None);
+        };
+        let value = serde_json::json!({
+            "id": a.id,
+            "sha256": a.sha256,
+            "artifact_type": a.artifact_type,
+            "name": a.name,
+            "depth": a.depth,
+        });
+        json_to_py(py, &value).map(Some)
+    }
+
+    #[getter]
+    fn deep_scan(&self) -> PyResult<bool> {
+        Ok(ctx_from_ptr(self.ptr, &self.valid)?.task().deep_scan())
+    }
+
+    #[getter]
+    fn ancestry(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let entries: Vec<serde_json::Value> = ctx_from_ptr(self.ptr, &self.valid)?
+            .task()
+            .ancestry()
+            .into_iter()
+            .map(|e| {
+                serde_json::json!({
+                    "sha256": e.sha256,
+                    "artifact_type": e.artifact_type,
+                    "relation": e.relation,
+                })
+            })
+            .collect();
+        json_to_py(py, &serde_json::Value::Array(entries))
+    }
+
+    #[getter]
+    fn shared(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let map = ctx_from_ptr(self.ptr, &self.valid)?.task().shared();
+        json_to_py(py, &serde_json::Value::Object(map))
+    }
+
+    #[getter]
+    fn params(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let map = ctx_from_ptr(self.ptr, &self.valid)?.task().params();
+        json_to_py(py, &serde_json::Value::Object(map))
+    }
+
+    #[getter]
+    fn indicators(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let indicators = ctx_from_ptr(self.ptr, &self.valid)?.task().indicators();
+        let value = serde_json::to_value(indicators)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        json_to_py(py, &value)
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -124,6 +230,36 @@ impl PyResultSink {
             .results()
             .push_all(inner)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    #[pyo3(signature = (name, data=None, path=None, relation="extracted", analyze=None, allow_dynamic_recursion=false))]
+    fn push_artifact(
+        &self,
+        name: &str,
+        data: Option<Vec<u8>>,
+        path: Option<PathBuf>,
+        relation: &str,
+        analyze: Option<bool>,
+        allow_dynamic_recursion: bool,
+    ) -> PyResult<()> {
+        _validate_artifact_args(data.as_deref(), path.clone(), relation)?;
+        let mut opts = ArtifactOpts::new(parse_relation(relation)?)
+            .allow_dynamic_recursion(allow_dynamic_recursion);
+        if let Some(v) = analyze {
+            opts = opts.analyze(v);
+        }
+        let source = match (data, path) {
+            (Some(bytes), None) => ArtifactSource::Bytes(bytes),
+            (None, Some(p)) => ArtifactSource::File(p),
+            _ => unreachable!("validated by _validate_artifact_args"),
+        };
+        ctx_from_ptr(self.ptr, &self.valid)?
+            .results()
+            .push_artifact(name, source, opts)
+            .map_err(|e| match e {
+                SdkError::ArtifactLimit { .. } => ArtifactLimitError::new_err(e.to_string()),
+                other => pyo3::exceptions::PyRuntimeError::new_err(other.to_string()),
+            })
     }
 }
 
@@ -195,5 +331,23 @@ impl PyContext {
     fn mark_collected(&self, path: PathBuf) -> PyResult<()> {
         ctx_from_ptr(self.ptr, &self.valid)?.mark_collected(path);
         Ok(())
+    }
+
+    fn shared_put(&self, py: Python<'_>, key: &str, value: Bound<'_, PyAny>) -> PyResult<()> {
+        let text: String = py
+            .import("json")?
+            .call_method1("dumps", (value,))?
+            .extract()?;
+        let parsed: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        ctx_from_ptr(self.ptr, &self.valid)?
+            .shared_put(key, parsed)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn drop_artifact(&self) -> PyResult<()> {
+        ctx_from_ptr(self.ptr, &self.valid)?
+            .drop_artifact()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }

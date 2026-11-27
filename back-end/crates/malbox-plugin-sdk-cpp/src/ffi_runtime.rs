@@ -144,7 +144,7 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
 
     malbox_plugin_sdk::internal::init_tracing("info", None);
 
-    let runtime = match HostRuntime::new(plugin, plugin_meta, &[]) {
+    let runtime = match HostRuntime::new(plugin, plugin_meta) {
         Ok(r) => r,
         Err(e) => {
             set_last_error(&format!("failed to create host runtime: {e}"));
@@ -242,51 +242,91 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         Err(()) => return -1,
     };
 
-    let convert_auto_collect = |ac: &crate::ffi_types::structs::MalboxAutoCollectConfig|
-        -> malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig
-    {
-        let include: &'static [&'static str] = if ac.include.is_null() || ac.include_count == 0 {
-            &[]
-        } else {
-            let slice = unsafe { std::slice::from_raw_parts(ac.include, ac.include_count) };
-            let leaked: Vec<&'static str> = slice
-                .iter()
-                .filter_map(|&p| {
-                    if p.is_null() {
-                        None
-                    } else {
-                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
-                    }
-                })
-                .collect();
-            Box::leak(leaked.into_boxed_slice())
-        };
-        let exclude: &'static [&'static str] = if ac.exclude.is_null() || ac.exclude_count == 0 {
-            &[]
-        } else {
-            let slice = unsafe { std::slice::from_raw_parts(ac.exclude, ac.exclude_count) };
-            let leaked: Vec<&'static str> = slice
-                .iter()
-                .filter_map(|&p| {
-                    if p.is_null() {
-                        None
-                    } else {
-                        unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok()
-                    }
-                })
-                .collect();
-            Box::leak(leaked.into_boxed_slice())
-        };
-        malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
-            enabled: ac.enabled,
-            include,
-            exclude,
-            max_file_size: ac.max_file_size,
+    /// Leak a C array of pattern strings into a `'static` slice (null entries skipped).
+    ///
+    /// # Safety
+    /// `ptr`, if non-null, must point to `count` C-string pointers.
+    unsafe fn leak_patterns(ptr: *const *const c_char, count: usize) -> &'static [&'static str] {
+        if ptr.is_null() || count == 0 {
+            return &[];
         }
-    };
+        let slice = unsafe { std::slice::from_raw_parts(ptr, count) };
+        let leaked: Vec<&'static str> = slice
+            .iter()
+            .filter(|p| !p.is_null())
+            .filter_map(|&p| unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok())
+            .collect();
+        Box::leak(leaked.into_boxed_slice())
+    }
 
-    let auto_collect_artifacts = convert_auto_collect(&config.auto_collect_artifacts);
-    let auto_collect_external_logs = convert_auto_collect(&config.auto_collect_external_logs);
+    /// Convert one C auto-collect section, leaking its strings and rules.
+    ///
+    /// # Safety
+    /// All pointers in `ac` must be valid for their declared counts.
+    unsafe fn convert_auto_collect(
+        ac: &crate::ffi_types::structs::MalboxAutoCollectConfig,
+    ) -> Result<malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig, ()> {
+        use malbox_plugin_sdk::ArtifactRelation;
+        use malbox_plugin_sdk::runtime::guest::AutoCollectRuleRuntime;
+
+        let rules: &'static [AutoCollectRuleRuntime] = if ac.rules.is_null() || ac.rule_count == 0 {
+            &[]
+        } else {
+            let c_rules = unsafe { std::slice::from_raw_parts(ac.rules, ac.rule_count) };
+            let mut out = Vec::with_capacity(c_rules.len());
+            for r in c_rules {
+                let relation = match u8::try_from(r.relation)
+                    .ok()
+                    .and_then(|v| ArtifactRelation::try_from(v).ok())
+                {
+                    Some(rel) if rel != ArtifactRelation::Root => rel,
+                    _ => {
+                        set_last_error(&format!(
+                            "unknown auto-collect rule relation {}",
+                            r.relation
+                        ));
+                        return Err(());
+                    }
+                };
+                let analyze = match r.analyze {
+                    -1 => relation.default_analyze(),
+                    0 => false,
+                    1 => true,
+                    other => {
+                        set_last_error(&format!("invalid auto-collect rule analyze {other}"));
+                        return Err(());
+                    }
+                };
+                out.push(AutoCollectRuleRuntime {
+                    include: unsafe { leak_patterns(r.include, r.include_count) },
+                    exclude: unsafe { leak_patterns(r.exclude, r.exclude_count) },
+                    relation: relation as u8,
+                    analyze,
+                });
+            }
+            Box::leak(out.into_boxed_slice())
+        };
+        Ok(
+            malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
+                enabled: ac.enabled,
+                include: unsafe { leak_patterns(ac.include, ac.include_count) },
+                exclude: unsafe { leak_patterns(ac.exclude, ac.exclude_count) },
+                max_file_size: ac.max_file_size,
+                rules,
+            },
+        )
+    }
+
+    let Ok(auto_collect_artifacts) =
+        (unsafe { convert_auto_collect(&config.auto_collect_artifacts) })
+    else {
+        return -1;
+    };
+    let Ok(auto_collect_external_logs) =
+        (unsafe { convert_auto_collect(&config.auto_collect_external_logs) })
+    else {
+        return -1;
+    };
 
     let plugin = GuestVtablePlugin::new(vtable);
 
@@ -417,6 +457,8 @@ mod tests {
             exclude: std::ptr::null(),
             exclude_count: 0,
             max_file_size: 0,
+            rules: std::ptr::null(),
+            rule_count: 0,
         };
         let config = MalboxGuestRuntimeConfig {
             port: 50051,
@@ -469,6 +511,8 @@ mod tests {
             exclude: std::ptr::null(),
             exclude_count: 0,
             max_file_size: 0,
+            rules: std::ptr::null(),
+            rule_count: 0,
         };
         let config = MalboxGuestRuntimeConfig {
             port: 50051,

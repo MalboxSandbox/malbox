@@ -4,12 +4,15 @@
 //! external-log directories and sends any files that were not already
 //! explicitly sent (or marked as collected) by the plugin.
 
+use crate::artifact::{ArtifactOpts, ArtifactRelation, ArtifactSource};
 use crate::context::Context;
 use crate::result::PluginResult;
-use globset::{Glob, GlobSetBuilder};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
+
+use super::AutoCollectRuleRuntime;
 
 /// Resolved auto-collection settings for a single directory.
 #[derive(Debug, Clone)]
@@ -18,6 +21,53 @@ pub(crate) struct AutoCollectSection {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub max_file_size: u64,
+    /// Artifact rules; the first matching rule decides how a file is pushed.
+    pub rules: Vec<AutoCollectRule>,
+}
+
+/// A compiled auto-collect rule that turns matching files into artifacts.
+#[derive(Debug, Clone)]
+pub(crate) struct AutoCollectRule {
+    include: GlobSet,
+    exclude: GlobSet,
+    relation: ArtifactRelation,
+    analyze: bool,
+}
+
+impl AutoCollectRule {
+    /// Compile a baked-in rule. Invalid rules are logged and skipped.
+    pub(crate) fn compile(rule: &AutoCollectRuleRuntime) -> Option<Self> {
+        let Some(relation) = ArtifactRelation::try_from(rule.relation)
+            .ok()
+            .filter(|r| *r != ArtifactRelation::Root)
+        else {
+            warn!(
+                relation = rule.relation,
+                "invalid auto-collect rule relation, skipping rule"
+            );
+            return None;
+        };
+        let to_vec = |p: &[&str]| p.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        match (
+            build_globset(&to_vec(rule.include)),
+            build_globset(&to_vec(rule.exclude)),
+        ) {
+            (Ok(include), Ok(exclude)) => Some(Self {
+                include,
+                exclude,
+                relation,
+                analyze: rule.analyze,
+            }),
+            (Err(e), _) | (_, Err(e)) => {
+                warn!(error = %e, "failed to compile auto-collect rule globs, skipping rule");
+                None
+            }
+        }
+    }
+
+    fn matches(&self, relative: &Path) -> bool {
+        self.include.is_match(relative) && !self.exclude.is_match(relative)
+    }
 }
 
 /// Collect files from `dir` and send them as results via `ctx.results().push()`.
@@ -112,10 +162,18 @@ pub(crate) fn auto_collect(
             format!("{result_prefix}/{rel_str}")
         };
 
-        if let Err(e) = ctx
-            .results()
-            .push(PluginResult::file(result_name.clone(), &file_path))
-        {
+        let rule = config.rules.iter().find(|r| r.matches(relative));
+        let pushed = match rule {
+            Some(rule) => ctx.results().push_artifact(
+                &result_name,
+                ArtifactSource::File(file_path.clone()),
+                ArtifactOpts::new(rule.relation).analyze(rule.analyze),
+            ),
+            None => ctx
+                .results()
+                .push(PluginResult::file(result_name.clone(), &file_path)),
+        };
+        if let Err(e) = pushed {
             warn!(
                 path = %file_path.display(),
                 error = %e,
@@ -127,7 +185,7 @@ pub(crate) fn auto_collect(
     }
 }
 
-fn build_globset(patterns: &[String]) -> std::result::Result<globset::GlobSet, globset::Error> {
+fn build_globset(patterns: &[String]) -> std::result::Result<GlobSet, globset::Error> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
         builder.add(Glob::new(pattern)?);

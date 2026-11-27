@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
+malbox-plugin-transport = { path = "../malbox-plugin-transport", default-features = false }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]

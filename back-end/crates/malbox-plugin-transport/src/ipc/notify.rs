@@ -4,7 +4,6 @@
 //! Different senders use different EventIds to signal which channel has data:
 //! - EventId(0) = task request available
 //! - EventId(1) = daemon event available
-//! - EventId(2) = result from subscription available
 
 use crate::error::{Result, TransportError};
 
@@ -20,7 +19,6 @@ type IpcServiceType = iceoryx2::service::ipc::Service;
 pub enum NotifyKind {
     TaskAvailable = 0,
     DaemonEvent = 1,
-    ResultAvailable = 2,
 }
 
 impl NotifyKind {
@@ -32,7 +30,6 @@ impl NotifyKind {
         match id.as_value() {
             0 => Some(Self::TaskAvailable),
             1 => Some(Self::DaemonEvent),
-            2 => Some(Self::ResultAvailable),
             _ => None,
         }
     }
@@ -139,12 +136,10 @@ mod tests {
 
         notifier.wake(NotifyKind::TaskAvailable).expect("wake");
         notifier.wake(NotifyKind::DaemonEvent).expect("wake");
-        notifier.wake(NotifyKind::ResultAvailable).expect("wake");
 
         let kinds = listener.drain().expect("drain");
         assert!(kinds.contains(&NotifyKind::TaskAvailable));
         assert!(kinds.contains(&NotifyKind::DaemonEvent));
-        assert!(kinds.contains(&NotifyKind::ResultAvailable));
     }
 
     #[test]

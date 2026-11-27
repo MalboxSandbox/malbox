@@ -155,6 +155,15 @@ async fn deactivate_all(pool: &PgPool, machine_id: i32) -> Result<()> {
     Ok(())
 }
 
+/// Fetch a snapshot by ID.
+pub async fn fetch_snapshot_by_id(pool: &PgPool, id: Uuid) -> Result<Option<MachineSnapshot>> {
+    sqlx::query_as::<_, MachineSnapshot>(r#"SELECT * FROM "machine_snapshots" WHERE id = $1"#)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| SnapshotError::FetchFailed { source: e }.into())
+}
+
 /// Fetch a snapshot by machine ID and name.
 pub async fn fetch_snapshot_by_name(
     pool: &PgPool,

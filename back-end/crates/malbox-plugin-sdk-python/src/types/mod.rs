@@ -10,6 +10,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyContext>()?;
     m.add_class::<context::PyTaskInfo>()?;
     m.add_class::<context::PyResultSink>()?;
+    m.add(
+        "ArtifactLimitError",
+        m.py().get_type::<context::ArtifactLimitError>(),
+    )?;
+    m.add_function(wrap_pyfunction!(context::_validate_artifact_args, m)?)?;
     m.add_class::<event::PyEvent>()?;
     m.add_class::<result::PyPluginResult>()?;
     m.add_class::<result::PyReportBuilder>()?;

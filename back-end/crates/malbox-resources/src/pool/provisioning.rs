@@ -100,14 +100,14 @@ impl MachinePool {
 
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .map_err(|e| ResourceError::Database(e.into()))?
             .ok_or(ResourceError::MachineNotFound {
                 id: machine_id.to_string(),
             })?;
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         let provider_config = self
             .provider_configs
@@ -147,7 +147,7 @@ impl MachinePool {
             &ip_str,
         )
         .await
-        .map_err(|e| ResourceError::Database(e.to_string()))?;
+        .map_err(|e| ResourceError::Database(e.into()))?;
 
         // Stop before snapshotting — produces an internal disk-only snapshot
         allocate
@@ -173,7 +173,7 @@ impl MachinePool {
                 true,
             )
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
             info!(
                 machine_id,
@@ -184,7 +184,7 @@ impl MachinePool {
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Ready, None)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         self.machine_available.notify_waiters();
         info!(machine_id, "Machine is ready");
@@ -205,7 +205,7 @@ impl MachinePool {
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
         let params = build_create_params(config, image_path);
         let mut machine = allocate
@@ -238,7 +238,7 @@ impl MachinePool {
             &ip_str,
         )
         .await
-        .map_err(|e| ResourceError::Database(e.to_string()))?;
+        .map_err(|e| ResourceError::Database(e.into()))?;
 
         allocate
             .stop(&machine, true)
@@ -262,7 +262,7 @@ impl MachinePool {
                 true,
             )
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?;
+            .map_err(|e| ResourceError::Database(e.into()))?;
 
             info!(
                 machine_id,
@@ -287,7 +287,7 @@ impl MachinePool {
         // Atomic Ready → Provisioning transition (prevents concurrent provisioning)
         let db_machine = machinery::transition_to_provisioning(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.to_string()))?
+            .map_err(|e| ResourceError::Database(e.into()))?
             .ok_or(ResourceError::InvalidMachineState {
                 id: machine_id,
                 status: "not ready".to_string(),
@@ -298,7 +298,7 @@ impl MachinePool {
         if let Some(ref snap_name) = step.snapshot {
             let existing = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
                 .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?;
+                .map_err(|e| ResourceError::Database(e.into()))?;
 
             if existing.iter().any(|s| s.name == *snap_name) {
                 let _ = machinery::update_machine_status(
@@ -376,7 +376,7 @@ impl MachinePool {
             config_json.as_ref(),
         )
         .await
-        .map_err(|e| ResourceError::Database(e.to_string()))?;
+        .map_err(|e| ResourceError::Database(e.into()))?;
 
         // Run the provisioner
         let result = self
@@ -397,7 +397,7 @@ impl MachinePool {
 
                 provision_runs::update_provision_run_success(&self.db, run.id, None, snapshot_id)
                     .await
-                    .map_err(|e| ResourceError::Database(e.to_string()))?
+                    .map_err(|e| ResourceError::Database(e.into()))?
             }
             Err(ref e) => {
                 let output_json = serde_json::to_value(e.to_string()).ok();
@@ -408,7 +408,7 @@ impl MachinePool {
                     output_json.as_ref(),
                 )
                 .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?
+                .map_err(|e| ResourceError::Database(e.into()))?
             }
         };
 
@@ -459,7 +459,7 @@ impl MachinePool {
         if let Some(snapshot_cap) = self.provider.snapshot() {
             let snap = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
                 .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?
+                .map_err(|e| ResourceError::Database(e.into()))?
                 .into_iter()
                 .find(|s| s.name == revert_name);
 
@@ -610,7 +610,7 @@ impl MachinePool {
                     true,
                 )
                 .await
-                .map_err(|e| ResourceError::Database(e.to_string()))?;
+                .map_err(|e| ResourceError::Database(e.into()))?;
 
                 info!(
                     machine_id,

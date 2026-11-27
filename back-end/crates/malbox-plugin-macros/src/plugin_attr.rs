@@ -129,6 +129,20 @@ fn generate_runtime_const(
     let ac_art_include: Vec<&str> = ac_art.include.iter().map(|s| s.as_str()).collect();
     let ac_art_exclude: Vec<&str> = ac_art.exclude.iter().map(|s| s.as_str()).collect();
     let ac_art_max = ac_art.max_file_size;
+    let ac_art_rules = ac_art.rules.iter().map(|r| {
+        let include = r.include.iter().map(String::as_str);
+        let exclude = r.exclude.iter().map(String::as_str);
+        let relation = r.relation as u8;
+        let analyze = r.analyze;
+        quote::quote! {
+            malbox_plugin_sdk::runtime::guest::AutoCollectRuleRuntime {
+                include: &[#(#include),*],
+                exclude: &[#(#exclude),*],
+                relation: #relation,
+                analyze: #analyze,
+            }
+        }
+    });
 
     let ac_ext = &resolved.auto_collect_external_logs;
     let ac_ext_enabled = ac_ext.enabled;
@@ -158,12 +172,14 @@ fn generate_runtime_const(
                     include: &[#(#ac_art_include),*],
                     exclude: &[#(#ac_art_exclude),*],
                     max_file_size: #ac_art_max,
+                    rules: &[#(#ac_art_rules),*],
                 },
                 auto_collect_external_logs: malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
                     enabled: #ac_ext_enabled,
                     include: &[#(#ac_ext_include),*],
                     exclude: &[#(#ac_ext_exclude),*],
                     max_file_size: #ac_ext_max,
+                    rules: &[],
                 },
             };
     })

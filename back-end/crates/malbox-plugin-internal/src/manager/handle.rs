@@ -6,15 +6,18 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tokio::sync::Mutex;
+use malbox_plugin_transport::artifact::ArtifactMeta;
+use tokio::sync::{Mutex, oneshot};
 use tracing::instrument;
 
-use crate::manager::error::Result;
+use crate::manager::error::{ManagerError, Result};
 use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::manager::runtime::PluginRuntime;
 use crate::registry::manifest::PluginStateConfig;
 use crate::registry::types::{PluginEntry, PluginId};
+use crate::transport::daemon::GrpcClient;
 
 /// Format of a plugin output payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +32,8 @@ pub struct PluginOutput {
     pub result_name: String,
     pub data: Vec<u8>,
     pub format: OutputFormat,
+    /// Artifact metadata the plugin attached to this output, if any.
+    pub artifact: Option<ArtifactMeta>,
 }
 
 /// A handle to a running plugin instance, used by workers to execute tasks.
@@ -42,6 +47,8 @@ pub struct PluginHandle {
     plugin_id: PluginId,
     entry: Arc<PluginEntry>,
     instance: Arc<Mutex<PluginInstance>>,
+    /// Control connection for guest plugins; `None` for host plugins.
+    control_client: Option<Arc<Mutex<GrpcClient>>>,
 }
 
 impl PluginHandle {
@@ -50,11 +57,13 @@ impl PluginHandle {
         plugin_id: PluginId,
         entry: Arc<PluginEntry>,
         instance: Arc<Mutex<PluginInstance>>,
+        control_client: Option<Arc<Mutex<GrpcClient>>>,
     ) -> Self {
         Self {
             plugin_id,
             entry,
             instance,
+            control_client,
         }
     }
 
@@ -68,22 +77,51 @@ impl PluginHandle {
         &self.entry
     }
 
+    pub(crate) fn instance(&self) -> &Arc<Mutex<PluginInstance>> {
+        &self.instance
+    }
+
     /// Execute a task on the plugin and collect the resulting outputs.
     ///
-    /// Delegates to the typed runtime (host IPC or guest gRPC) stored on
-    /// the plugin instance.
+    /// `timeout` bounds the whole execution. For guest plugins, `ready` fires
+    /// on the plugin's first READY message; host runtimes drop it.
     #[instrument(skip_all, fields(plugin = %self.plugin_id(), task_id), err)]
     pub async fn execute_task(
         &self,
         task_id: i32,
         sample_path: &str,
         config: HashMap<String, String>,
+        timeout: Duration,
+        ready: Option<oneshot::Sender<()>>,
     ) -> Result<Vec<PluginOutput>> {
         let mut instance = self.instance.lock().await;
         instance
             .runtime
-            .execute_task(&self.plugin_id, &self.entry, task_id, sample_path, config)
+            .execute_task(
+                &self.plugin_id,
+                &self.entry,
+                task_id,
+                sample_path,
+                config,
+                timeout,
+                ready,
+            )
             .await
+    }
+
+    /// Ask a guest plugin to stop observing `task_id` early. Host plugins are
+    /// cancelled by killing their process, so this is a no-op for them.
+    pub async fn stop_task(&self, task_id: i32) -> Result<()> {
+        let Some(client) = &self.control_client else {
+            return Ok(());
+        };
+        client
+            .lock()
+            .await
+            .stop_task(task_id)
+            .await
+            .map_err(ManagerError::Transport)?;
+        Ok(())
     }
 
     /// Release the plugin instance, transitioning it to the appropriate
@@ -92,13 +130,12 @@ impl PluginHandle {
     /// - **Persistent** plugins return to [`PluginLifecycle::Ready`] so they
     ///   can accept new tasks immediately.
     /// - **Ephemeral** plugins are stopped and their process is killed.
-    /// - **Scoped** plugins are returned to [`PluginLifecycle::Ready`] (full
-    ///   scoped release logic is not yet implemented).
+    /// - **Scoped** plugins are returned to [`PluginLifecycle::Ready`].
     pub async fn release(self) {
         let mut instance = self.instance.lock().await;
 
         match self.entry.manifest.runtime.state {
-            PluginStateConfig::Persistent => {
+            PluginStateConfig::Persistent | PluginStateConfig::Scoped => {
                 instance.lifecycle = PluginLifecycle::Ready;
             }
             PluginStateConfig::Ephemeral => {
@@ -109,10 +146,6 @@ impl PluginHandle {
                 }
 
                 instance.lifecycle = PluginLifecycle::Stopped;
-            }
-            PluginStateConfig::Scoped => {
-                // TODO: Implement scoped plugin release logic
-                instance.lifecycle = PluginLifecycle::Ready;
             }
         }
     }

@@ -1,7 +1,40 @@
 //! Proto <-> Event conversions.
 
 use super::proto;
+use crate::artifact::{ArtifactMeta, ArtifactRelation};
 use crate::messages::events::Event;
+
+impl From<ArtifactMeta> for proto::ArtifactMeta {
+    fn from(m: ArtifactMeta) -> Self {
+        let relation = match m.relation {
+            // Plugins never send Root; map it to UNSPECIFIED so the daemon
+            // drops the metadata instead of trusting it.
+            ArtifactRelation::Root => proto::ArtifactRelation::Unspecified,
+            ArtifactRelation::Extracted => proto::ArtifactRelation::Extracted,
+            ArtifactRelation::Dropped => proto::ArtifactRelation::Dropped,
+            ArtifactRelation::Unpacked => proto::ArtifactRelation::Unpacked,
+            ArtifactRelation::Memdump => proto::ArtifactRelation::Memdump,
+            ArtifactRelation::Downloaded => proto::ArtifactRelation::Downloaded,
+            ArtifactRelation::Pcap => proto::ArtifactRelation::Pcap,
+            ArtifactRelation::Output => proto::ArtifactRelation::Output,
+        };
+        proto::ArtifactMeta {
+            relation: relation.into(),
+            analyze: m.analyze,
+            allow_dynamic_recursion: m.allow_dynamic_recursion,
+        }
+    }
+}
+
+/// Convert proto artifact metadata; `None` for `UNSPECIFIED` or unknown relations.
+pub fn artifact_meta_from_proto(m: &proto::ArtifactMeta) -> Option<ArtifactMeta> {
+    let relation = u8::try_from(m.relation).ok().filter(|v| *v != 0)?;
+    Some(ArtifactMeta {
+        relation: ArtifactRelation::try_from(relation).ok()?,
+        analyze: m.analyze,
+        allow_dynamic_recursion: m.allow_dynamic_recursion,
+    })
+}
 
 /// Convert an internal `Event` into a `TaskResult` proto message.
 ///
@@ -19,15 +52,6 @@ pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
         Event::PluginStarted { plugin_id } | Event::PluginStopped { plugin_id } => {
             format!(r#"{{"plugin_id":{}}}"#, plugin_id).into_bytes()
         }
-        Event::PluginResultAvailable {
-            source,
-            result_name,
-        } => format!(
-            r#"{{"source":"{}","result_name":"{}"}}"#,
-            escape_json_str(source),
-            escape_json_str(result_name),
-        )
-        .into_bytes(),
         Event::SampleStarted { sample_id }
         | Event::SampleStopped { sample_id }
         | Event::SampleResultProduced { sample_id } => {
@@ -42,26 +66,9 @@ pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
         data,
         format: proto::ResultFormat::Json.into(),
         is_final: false,
-        kind: proto::ResultKind::Result.into(),
+        kind: proto::ResultKind::Event.into(),
+        artifact: None,
     }
-}
-
-fn escape_json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -77,6 +84,22 @@ mod tests {
         assert_eq!(result.data, br#"{"task_id":42}"#);
         assert_eq!(result.format, i32::from(proto::ResultFormat::Json));
         assert!(!result.is_final);
+        assert_eq!(result.kind, i32::from(proto::ResultKind::Event));
+    }
+
+    #[test]
+    fn artifact_meta_roundtrip() {
+        let meta = ArtifactMeta {
+            relation: ArtifactRelation::Unpacked,
+            analyze: true,
+            allow_dynamic_recursion: true,
+        };
+        let p = proto::ArtifactMeta::from(meta);
+        assert_eq!(artifact_meta_from_proto(&p), Some(meta));
+        assert_eq!(
+            artifact_meta_from_proto(&proto::ArtifactMeta::default()),
+            None
+        );
     }
 
     #[test]

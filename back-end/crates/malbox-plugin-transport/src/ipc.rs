@@ -5,13 +5,13 @@
 //! exists solely for the reactor waker, whose notifier is shared by many
 //! async tasks. The two variants interoperate on the same services.
 
+pub mod artifact_meta;
 pub mod cleanup;
 pub mod daemon_notify;
 pub mod events;
 pub mod headers;
 pub mod notify;
 pub mod reactor_wakeup;
-pub mod results;
 pub mod tasks;
 
 pub use iceoryx2::node::Node;
@@ -28,16 +28,16 @@ pub use iceoryx2::service::ipc_threadsafe::Service as IpcServiceThreadsafe;
 /// iceoryx2's debug/trace lines.
 pub use iceoryx2::prelude::set_log_level_from_env_or_default;
 
+pub use artifact_meta::{decode_artifact_meta, encode_artifact_meta};
 pub use cleanup::{CleanupReport, cleanup_stale_resources};
 pub use daemon_notify::{DaemonNotifier, DaemonNotifyKind, DaemonNotifyListener};
 pub use events::{
     DaemonEventPublisher, DaemonEventSubscriber, PluginEventPublisher, PluginEventSubscriber,
     ReceivedEvent,
 };
-pub use headers::{EventHeader, EventKind, ResultHeader, TaskRequestHeader, TaskResponseHeader};
+pub use headers::{EventHeader, EventKind, TaskRequestHeader, TaskResponseHeader};
 pub use notify::{NotifyKind, PluginNotifier, PluginWakeupListener};
 pub use reactor_wakeup::{ReactorWaker, ReactorWakeupListener};
-pub use results::{ResultPublisher, ResultSubscriber};
 pub use tasks::{ActiveTaskRequest, TaskClient, TaskPendingResponse, TaskResponse, TaskServer};
 
 /// Serializes tests using the shared `malbox/daemon/notify` service. With no

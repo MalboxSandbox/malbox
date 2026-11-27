@@ -50,4 +50,6 @@ pub struct TaskResultMessage {
     pub stash_format: ResultFormat,
     /// For ResultRef: byte size of the stashed data.
     pub stash_size: u64,
+    /// Artifact metadata when this result is an artifact push.
+    pub artifact: Option<malbox_plugin_transport::artifact::ArtifactMeta>,
 }

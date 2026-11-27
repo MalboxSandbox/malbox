@@ -45,6 +45,10 @@ pub enum SdkError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The job's analysed-artifact budget (`malbox.max_artifacts`) is spent.
+    #[error("artifact limit reached ({limit})")]
+    ArtifactLimit { limit: u64 },
+
     /// An opaque error returned by plugin handler code.
     #[error("plugin error: {0}")]
     Plugin(Box<dyn std::error::Error + Send + Sync>),

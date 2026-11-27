@@ -1,190 +1,245 @@
 use super::machinery::MachinePlatform;
+use super::plugin_reports::DbClassification;
 use crate::error::{Result, TaskError};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool, QueryBuilder, query_as};
-use time::PrimitiveDateTime;
+use sqlx::{AssertSqlSafe, FromRow, PgConnection, PgPool, QueryBuilder};
+use time::{OffsetDateTime, PrimitiveDateTime};
+use uuid::Uuid;
 
-#[derive(sqlx::Type, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(sqlx::Type, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[sqlx(type_name = "task_state", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum TaskState {
     Pending,
-    Initializing,
-    PreparingResources,
     Running,
-    Stopping,
     Completed,
     Failed,
     Canceled,
 }
+
+impl TaskState {
+    /// Lowercase wire name, matching the `task_state` SQL enum.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Canceled)
+    }
+}
+
+/// Every column of `tasks`, in table order. Shared by all task queries.
+const TASK_COLUMNS: &str = "id, target, plugins, excluded_plugins, timeout, priority, machine_id, \
+    platform, snapshot_id, params, max_depth, max_artifacts, max_detonations, max_total_bytes, \
+    created_on, started_on, completed_on, updated_at, deadline, status, sample_id, parent_task_id, \
+    owner, tags, error_count, artifact_count, partial, shared_data, verdict_classification, \
+    verdict_score, verdict_artifact_id";
+
 #[derive(Debug, Clone, FromRow)]
 pub struct Task {
-    pub id: Option<i32>,
+    pub id: i32,
     pub target: String,
     pub plugins: Vec<String>,
-    pub profile: Option<String>,
-    pub platform: Option<MachinePlatform>,
+    pub excluded_plugins: Vec<String>,
     pub timeout: i64,
-    pub enforce_timeout: Option<bool>,
     pub priority: i64,
     pub machine_id: Option<i32>,
-    pub machine_memory: Option<i64>,
-    pub machine_cpus: Option<i32>,
+    pub platform: Option<MachinePlatform>,
+    pub snapshot_id: Option<Uuid>,
+    pub params: serde_json::Value,
+    pub max_depth: i32,
+    pub max_artifacts: i32,
+    pub max_detonations: i32,
+    pub max_total_bytes: i64,
     pub created_on: PrimitiveDateTime,
     pub started_on: Option<PrimitiveDateTime>,
     pub completed_on: Option<PrimitiveDateTime>,
+    pub updated_at: Option<PrimitiveDateTime>,
+    pub deadline: OffsetDateTime,
     pub status: TaskState,
     pub sample_id: Option<i64>,
+    pub parent_task_id: Option<i32>,
     pub owner: Option<String>,
     pub tags: Option<Vec<String>>,
-    pub snapshot_id: Option<uuid::Uuid>,
+    pub error_count: i32,
+    pub artifact_count: i32,
+    pub partial: bool,
+    pub shared_data: serde_json::Value,
+    pub verdict_classification: Option<DbClassification>,
+    pub verdict_score: Option<i16>,
+    pub verdict_artifact_id: Option<i64>,
 }
 
-pub async fn insert_task(pool: &PgPool, task: Task) -> Result<Task> {
-    query_as!(
-        Task,
-        r#"
-        INSERT into "tasks" (
-            target, plugins, profile, platform,
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status, sample_id, owner, tags, snapshot_id
-        )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
-        )
-        RETURNING
-            id, target, plugins, profile, platform AS "platform: MachinePlatform",
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
-        "#,
-        task.target,
-        &task.plugins,
-        task.profile,
-        task.platform as Option<MachinePlatform>,
-        task.timeout,
-        task.enforce_timeout,
-        task.priority,
-        task.machine_id,
-        task.machine_memory,
-        task.machine_cpus,
-        task.created_on,
-        task.started_on,
-        task.completed_on,
-        task.status as TaskState,
-        task.sample_id,
-        task.owner,
-        task.tags.as_deref(),
-        task.snapshot_id,
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        TaskError::InsertFailed {
-            name: task.target,
-            message: "Failed to insert task".to_string(),
-            source: e,
-        }
-        .into()
-    })
+/// Insertable columns of `tasks`. `created_on` is set to the current UTC
+/// time and `status` to `pending`.
+#[derive(Debug, Clone)]
+pub struct NewTask<'a> {
+    pub target: &'a str,
+    pub plugins: &'a [String],
+    pub excluded_plugins: &'a [String],
+    pub timeout: i64,
+    pub priority: i64,
+    pub machine_id: Option<i32>,
+    pub platform: Option<MachinePlatform>,
+    pub snapshot_id: Option<Uuid>,
+    pub params: &'a serde_json::Value,
+    pub max_depth: i32,
+    pub max_artifacts: i32,
+    pub max_detonations: i32,
+    pub max_total_bytes: i64,
+    pub deadline: OffsetDateTime,
+    pub sample_id: Option<i64>,
+    pub parent_task_id: Option<i32>,
+    pub owner: Option<&'a str>,
+    pub tags: Option<&'a [String]>,
+    pub shared_data: &'a serde_json::Value,
+}
+
+/// Final bookkeeping written when a task reaches a terminal state.
+#[derive(Debug, Clone)]
+pub struct TaskFinalization {
+    pub status: TaskState,
+    pub error_count: i32,
+    pub artifact_count: i32,
+    pub partial: bool,
+    pub verdict_classification: Option<DbClassification>,
+    pub verdict_score: Option<i16>,
+    pub verdict_artifact_id: Option<i64>,
+}
+
+fn fetch_err(message: &str, source: sqlx::Error) -> crate::error::DatabaseError {
+    TaskError::FetchFailed {
+        message: message.to_string(),
+        source,
+    }
+    .into()
+}
+
+fn update_err(task_id: i32, message: &str, source: sqlx::Error) -> crate::error::DatabaseError {
+    TaskError::UpdateFailed {
+        task_id,
+        message: message.to_string(),
+        source,
+    }
+    .into()
+}
+
+/// Insert a task. Runs on a caller-supplied connection so the root artifact
+/// can be inserted in the same transaction.
+pub async fn insert_task(conn: &mut PgConnection, t: &NewTask<'_>) -> Result<Task> {
+    let sql = format!(
+        "insert into tasks (target, plugins, excluded_plugins, timeout, priority, machine_id, \
+         platform, snapshot_id, params, max_depth, max_artifacts, max_detonations, max_total_bytes, \
+         created_on, deadline, status, sample_id, parent_task_id, owner, tags, shared_data) \
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
+         (now() at time zone 'utc'), $14, 'pending', $15, $16, $17, $18, $19) \
+         returning {TASK_COLUMNS}"
+    );
+    sqlx::query_as::<_, Task>(AssertSqlSafe(sql))
+        .bind(t.target)
+        .bind(t.plugins)
+        .bind(t.excluded_plugins)
+        .bind(t.timeout)
+        .bind(t.priority)
+        .bind(t.machine_id)
+        .bind(t.platform.clone())
+        .bind(t.snapshot_id)
+        .bind(t.params)
+        .bind(t.max_depth)
+        .bind(t.max_artifacts)
+        .bind(t.max_detonations)
+        .bind(t.max_total_bytes)
+        .bind(t.deadline)
+        .bind(t.sample_id)
+        .bind(t.parent_task_id)
+        .bind(t.owner)
+        .bind(t.tags)
+        .bind(t.shared_data)
+        .fetch_one(conn)
+        .await
+        .map_err(|e| {
+            TaskError::InsertFailed {
+                name: t.target.to_string(),
+                message: "Failed to insert task".to_string(),
+                source: e,
+            }
+            .into()
+        })
 }
 
 pub async fn fetch_task(pool: &PgPool, id: i32) -> Result<Option<Task>> {
-    query_as!(
-        Task,
-        r#"
-        SELECT
-            id, target, plugins, profile, platform AS "platform: MachinePlatform",
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
-        FROM "tasks" WHERE id = $1
-        "#,
-        id
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        TaskError::FetchFailed {
-            message: "Failed to fetch task".to_string(),
-            source: e,
-        }
-        .into()
-    })
+    let sql = format!("select {TASK_COLUMNS} from tasks where id = $1");
+    sqlx::query_as::<_, Task>(AssertSqlSafe(sql))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| fetch_err("Failed to fetch task", e))
 }
 
-pub async fn fetch_all_tasks(pool: &PgPool) -> Result<Vec<Task>> {
-    query_as!(
-        Task,
-        r#"
-        SELECT
-            id, target, plugins, profile, platform AS "platform: MachinePlatform",
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
-        FROM "tasks" ORDER BY created_on DESC
-        "#,
+/// Ids of tasks the orchestrator still has to drive.
+pub async fn fetch_active_task_ids(pool: &PgPool) -> Result<Vec<i32>> {
+    sqlx::query_scalar::<_, i32>(
+        "select id from tasks where status in ('pending', 'running') order by id",
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| {
-        TaskError::FetchFailed {
-            message: "Failed to fetch all tasks".to_string(),
-            source: e,
-        }
-        .into()
-    })
+    .map_err(|e| fetch_err("Failed to fetch active tasks", e))
 }
 
-pub async fn fetch_pending_tasks(pool: &PgPool) -> Result<Vec<Task>> {
-    query_as!(
-        Task,
-        r#"
-        SELECT
-            id, target, plugins, profile, platform AS "platform: MachinePlatform",
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
-        FROM "tasks" WHERE status = 'pending'
-        "#,
+pub async fn set_task_running(pool: &PgPool, id: i32) -> Result<()> {
+    sqlx::query(
+        "update tasks set status = 'running', \
+         started_on = coalesce(started_on, (now() at time zone 'utc')) where id = $1",
     )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        TaskError::FetchFailed {
-            message: "Failed to fetch pending tasks".to_string(),
-            source: e,
-        }
-        .into()
-    })
-}
-
-/// Mark tasks stuck in transient states as Failed.
-///
-/// Called on scheduler startup to recover rows left in Running/Initializing/
-/// PreparingResources/Stopping after a crash or kill — nothing else will ever
-/// transition them, so they'd otherwise stay in those states forever.
-/// Returns the number of rows reset.
-pub async fn reset_orphaned_tasks(pool: &PgPool) -> Result<u64> {
-    let utc_now = time::OffsetDateTime::now_utc();
-    let now = PrimitiveDateTime::new(utc_now.date(), utc_now.time());
-
-    let result = sqlx::query!(
-        r#"
-        UPDATE "tasks"
-        SET status = 'failed', completed_on = $1
-        WHERE status IN ('running', 'initializing', 'preparing_resources', 'stopping')
-        "#,
-        now,
-    )
+    .bind(id)
     .execute(pool)
     .await
-    .map_err(|e| TaskError::FetchFailed {
-        message: "Failed to reset orphaned tasks".to_string(),
-        source: e,
-    })?;
+    .map_err(|e| update_err(id, "Failed to mark task running", e))?;
+    Ok(())
+}
 
-    Ok(result.rows_affected())
+pub async fn finalize_task(pool: &PgPool, id: i32, f: &TaskFinalization) -> Result<()> {
+    sqlx::query(
+        "update tasks set status = $2, error_count = $3, artifact_count = $4, partial = $5, \
+         verdict_classification = $6, verdict_score = $7, verdict_artifact_id = $8, \
+         completed_on = (now() at time zone 'utc') where id = $1",
+    )
+    .bind(id)
+    .bind(f.status)
+    .bind(f.error_count)
+    .bind(f.artifact_count)
+    .bind(f.partial)
+    .bind(f.verdict_classification)
+    .bind(f.verdict_score)
+    .bind(f.verdict_artifact_id)
+    .execute(pool)
+    .await
+    .map_err(|e| update_err(id, "Failed to finalize task", e))?;
+    Ok(())
+}
+
+/// Return a terminal task to `running` with a fresh `deadline` (rescan of a
+/// finished task); the old deadline has usually passed already.
+///
+/// # Errors
+///
+/// Returns [`TaskError`] when the update fails.
+pub async fn reopen_task(pool: &PgPool, id: i32, deadline: OffsetDateTime) -> Result<()> {
+    sqlx::query(
+        "update tasks set status = 'running', completed_on = null, deadline = $2 where id = $1",
+    )
+    .bind(id)
+    .bind(deadline)
+    .execute(pool)
+    .await
+    .map_err(|e| update_err(id, "Failed to reopen task", e))?;
+    Ok(())
 }
 
 /// Filter and pagination parameters for task listing.
@@ -205,49 +260,42 @@ pub struct TaskPage {
     pub has_more: bool,
 }
 
-pub async fn fetch_tasks_page(pool: &PgPool, filter: &TaskFilter) -> Result<TaskPage> {
-    let limit = filter.limit.clamp(1, 200);
-    let fetch_limit = limit + 1;
-
-    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "SELECT id, target, plugins, profile, platform, \
-         timeout, enforce_timeout, priority, machine_id, machine_memory, \
-         machine_cpus, created_on, started_on, completed_on, \
-         status, sample_id, owner, tags, snapshot_id \
-         FROM tasks WHERE TRUE",
-    );
-
+fn push_filters(qb: &mut QueryBuilder<sqlx::Postgres>, filter: &TaskFilter) {
     if let Some(statuses) = &filter.statuses {
         qb.push(" AND status = ANY(");
-        qb.push_bind(statuses.as_slice());
+        qb.push_bind(statuses.clone());
         qb.push(")");
     }
-
     if let Some(platform) = &filter.platform {
         qb.push(" AND platform = ");
         qb.push_bind(platform.clone());
     }
-
     if let Some(owner) = &filter.owner {
         qb.push(" AND owner = ");
         qb.push_bind(owner.clone());
     }
-
     if let Some(tag) = &filter.tag {
         qb.push(" AND ");
         qb.push_bind(tag.clone());
         qb.push(" = ANY(tags)");
     }
-
     if let Some(after) = &filter.after {
         qb.push(" AND created_on >= ");
         qb.push_bind(*after);
     }
-
     if let Some(before) = &filter.before {
         qb.push(" AND created_on <= ");
         qb.push_bind(*before);
     }
+}
+
+pub async fn fetch_tasks_page(pool: &PgPool, filter: &TaskFilter) -> Result<TaskPage> {
+    let limit = filter.limit.clamp(1, 200);
+    let fetch_limit = limit + 1;
+
+    let mut qb: QueryBuilder<sqlx::Postgres> =
+        QueryBuilder::new(format!("SELECT {TASK_COLUMNS} FROM tasks WHERE TRUE"));
+    push_filters(&mut qb, filter);
 
     if let (Some(cursor_ts), Some(cursor_id)) = (&filter.cursor_created_on, &filter.cursor_id) {
         qb.push(" AND (created_on, id) < (");
@@ -264,10 +312,7 @@ pub async fn fetch_tasks_page(pool: &PgPool, filter: &TaskFilter) -> Result<Task
         .build_query_as::<Task>()
         .fetch_all(pool)
         .await
-        .map_err(|e| TaskError::FetchFailed {
-            message: "Failed to fetch tasks page".to_string(),
-            source: e,
-        })?;
+        .map_err(|e| fetch_err("Failed to fetch tasks page", e))?;
 
     let has_more = rows.len() as i64 > limit;
     rows.truncate(limit as usize);
@@ -285,40 +330,8 @@ pub struct TaskCounts {
 
 pub async fn count_tasks(pool: &PgPool, filter: &TaskFilter) -> Result<TaskCounts> {
     let mut qb: QueryBuilder<sqlx::Postgres> =
-        QueryBuilder::new("SELECT status::text, COUNT(*) as count FROM tasks WHERE TRUE");
-
-    if let Some(statuses) = &filter.statuses {
-        qb.push(" AND status = ANY(");
-        qb.push_bind(statuses.as_slice());
-        qb.push(")");
-    }
-
-    if let Some(platform) = &filter.platform {
-        qb.push(" AND platform = ");
-        qb.push_bind(platform.clone());
-    }
-
-    if let Some(owner) = &filter.owner {
-        qb.push(" AND owner = ");
-        qb.push_bind(owner.clone());
-    }
-
-    if let Some(tag) = &filter.tag {
-        qb.push(" AND ");
-        qb.push_bind(tag.clone());
-        qb.push(" = ANY(tags)");
-    }
-
-    if let Some(after) = &filter.after {
-        qb.push(" AND created_on >= ");
-        qb.push_bind(*after);
-    }
-
-    if let Some(before) = &filter.before {
-        qb.push(" AND created_on <= ");
-        qb.push_bind(*before);
-    }
-
+        QueryBuilder::new("SELECT status::text AS status, COUNT(*) AS count FROM tasks WHERE TRUE");
+    push_filters(&mut qb, filter);
     qb.push(" GROUP BY status");
 
     #[derive(FromRow)]
@@ -331,10 +344,7 @@ pub async fn count_tasks(pool: &PgPool, filter: &TaskFilter) -> Result<TaskCount
         .build_query_as::<StatusCount>()
         .fetch_all(pool)
         .await
-        .map_err(|e| TaskError::FetchFailed {
-            message: "Failed to count tasks".to_string(),
-            source: e,
-        })?;
+        .map_err(|e| fetch_err("Failed to count tasks", e))?;
 
     let total = rows.iter().map(|r| r.count).sum();
     let by_status = rows.into_iter().map(|r| (r.status, r.count)).collect();
@@ -343,75 +353,21 @@ pub async fn count_tasks(pool: &PgPool, filter: &TaskFilter) -> Result<TaskCount
 }
 
 pub async fn fetch_tasks_by_sample_id(pool: &PgPool, sample_id: i64) -> Result<Vec<i32>> {
-    struct TaskId {
-        id: Option<i32>,
-    }
-
-    let rows = sqlx::query_as!(
-        TaskId,
-        r#"SELECT id FROM tasks WHERE sample_id = $1 ORDER BY created_on DESC"#,
-        sample_id
+    sqlx::query_scalar::<_, i32>(
+        "select id from tasks where sample_id = $1 order by created_on desc",
     )
+    .bind(sample_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| TaskError::FetchFailed {
-        message: "Failed to fetch tasks by sample".to_string(),
-        source: e,
-    })?;
-
-    Ok(rows.into_iter().filter_map(|r| r.id).collect())
+    .map_err(|e| fetch_err("Failed to fetch tasks by sample", e))
 }
 
 pub async fn fetch_tasks_for_sample(pool: &PgPool, sample_id: i64) -> Result<Vec<Task>> {
-    Ok(query_as!(
-        Task,
-        r#"
-        SELECT id, target, plugins, profile,
-               platform AS "platform: MachinePlatform",
-               timeout, enforce_timeout, priority,
-               machine_id, machine_memory, machine_cpus,
-               created_on, started_on, completed_on,
-               status AS "status!: TaskState",
-               sample_id, owner, tags, snapshot_id
-        FROM tasks
-        WHERE sample_id = $1
-        ORDER BY created_on DESC
-        "#,
-        sample_id
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| TaskError::FetchFailed {
-        message: "Failed to fetch tasks for sample".to_string(),
-        source: e,
-    })?)
-}
-
-pub async fn update_task_status(pool: &PgPool, id: i32, status: TaskState) -> Result<Task> {
-    query_as!(
-        Task,
-        r#"
-        UPDATE "tasks"
-        SET
-            status = $1
-        WHERE id = $2
-        RETURNING
-            id, target, plugins, profile, platform AS "platform: MachinePlatform",
-            timeout, enforce_timeout, priority, machine_id, machine_memory,
-            machine_cpus, created_on, started_on, completed_on,
-            status AS "status!: TaskState", sample_id, owner, tags, snapshot_id
-        "#,
-        status as TaskState,
-        id
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        TaskError::UpdateFailed {
-            task_id: id,
-            message: "Failed to update status".to_string(),
-            source: e,
-        }
-        .into()
-    })
+    let sql =
+        format!("select {TASK_COLUMNS} from tasks where sample_id = $1 order by created_on desc");
+    sqlx::query_as::<_, Task>(AssertSqlSafe(sql))
+        .bind(sample_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| fetch_err("Failed to fetch tasks for sample", e))
 }

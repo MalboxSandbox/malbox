@@ -185,11 +185,10 @@ impl HostPlugin for VtablePlugin {
             None => return Ok(()),
         };
 
-        let owned = rust_event_to_c(&event);
+        let c_event = rust_event_to_c(&event);
 
-        // SAFETY: owned.event is Copy; the OwnedCEvent keeps any backing
-        // CStrings alive until after the callback returns.
-        let rc = unsafe { on_event(self.vtable.plugin_ptr, owned.event) };
+        // SAFETY: MalboxEvent is a plain Copy value with no borrowed data.
+        let rc = unsafe { on_event(self.vtable.plugin_ptr, c_event) };
         check_rc(rc)
     }
 }
@@ -252,7 +251,7 @@ mod tests {
         let plugin = VtablePlugin::new(vtable);
 
         // Use a real mpsc channel so we can observe what push sends.
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context::test_new_full(
             1,
             std::path::PathBuf::new(),
