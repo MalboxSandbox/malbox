@@ -9,7 +9,8 @@ pub mod provider;
 pub mod provisioner;
 
 pub use machine::{
-    Arch, CreateMachineParams, Machine, MachineEndpoint, MachineId, MachineState, Platform,
+    Arch, CreateMachineParams, Machine, MachineEndpoint, MachineId, MachineState, ManagementAccess,
+    Platform,
 };
 pub use provider::capabilities::{
     Allocate, Clone, ExecOptions, ExecResult, GuestAccess, GuestSession, GuestStatus, Migrate,

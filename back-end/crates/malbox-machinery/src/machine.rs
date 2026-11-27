@@ -65,6 +65,18 @@ pub struct MachineEndpoint {
     pub platform: Platform,
 }
 
+/// How provisioners reach a machine's management interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManagementAccess {
+    /// TCP management service on the endpoint address (WinRM 5986 / SSH 22).
+    Network { port: u16 },
+    /// Exec through a container engine API; no network service in the guest.
+    ContainerEngine {
+        container: String,
+        engine_host: String,
+    },
+}
+
 /// Provider-assigned machine identifier.
 ///
 /// For libvirt this is the name suffix: domain `malbox-win10-test` → id `win10-test`.

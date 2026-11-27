@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
+use malbox_machinery::ManagementAccess;
 use malbox_machinery::provisioner::config::deserialize;
 use malbox_machinery::provisioner::{
     ProvisionContext, ProvisionResult, ProvisionStatus, Provisioner, ProvisionerMetadata,
@@ -107,6 +108,26 @@ impl AnsibleProvisioner {
     }
 }
 
+/// Build the dynamic inventory for a machine, honouring its management access.
+fn inventory_content(context: &ProvisionContext) -> String {
+    let ip = context.endpoint.address;
+    let host = match &context.access {
+        ManagementAccess::ContainerEngine {
+            container,
+            engine_host,
+        } => format!(
+            "{container} ansible_connection=community.docker.docker_api ansible_docker_docker_host={engine_host}"
+        ),
+        ManagementAccess::Network { port } => match context.endpoint.platform {
+            malbox_machinery::Platform::Windows => format!(
+                "{ip} ansible_connection=winrm ansible_winrm_transport=ntlm ansible_winrm_server_cert_validation=ignore ansible_port={port} ansible_user=Administrator ansible_password=packer"
+            ),
+            malbox_machinery::Platform::Linux => ip.to_string(),
+        },
+    };
+    format!("[malbox]\n{host}\n")
+}
+
 #[async_trait]
 impl Provisioner for AnsibleProvisioner {
     #[tracing::instrument(skip_all, fields(playbook = %self.config.playbook.display(), machine_ip = %context.endpoint.address), err)]
@@ -114,22 +135,10 @@ impl Provisioner for AnsibleProvisioner {
         &self,
         context: &ProvisionContext,
     ) -> Result<ProvisionResult, Box<dyn std::error::Error + Send + Sync>> {
-        let machine_ip = context.endpoint.address.to_string();
-
         // Determine inventory source.
-        // If "dynamic", create a temp file with the machine IP and
-        // platform-specific connection variables.
+        // If "dynamic", create a temp file describing how to reach the machine.
         let temp_inventory = if self.config.inventory == "dynamic" {
-            let host_vars = match context.endpoint.platform {
-                malbox_machinery::Platform::Windows => {
-                    format!(
-                        "{} ansible_connection=winrm ansible_winrm_transport=ntlm ansible_winrm_server_cert_validation=ignore ansible_port=5986 ansible_user=Administrator ansible_password=packer",
-                        machine_ip
-                    )
-                }
-                malbox_machinery::Platform::Linux => machine_ip.clone(),
-            };
-            let content = format!("[malbox]\n{}\n", host_vars);
+            let content = inventory_content(context);
             let temp = tempfile::Builder::new()
                 .prefix("malbox-ansible-inventory-")
                 .suffix(".ini")
@@ -138,6 +147,7 @@ impl Provisioner for AnsibleProvisioner {
             debug!(
                 path = %temp.path().display(),
                 platform = ?context.endpoint.platform,
+                access = ?context.access,
                 "Generated dynamic inventory"
             );
             Some(temp)
@@ -289,3 +299,46 @@ inventory::submit!(ProvisionerMetadata {
         Ok(Box::new(AnsibleProvisioner::new(config)?))
     },
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use malbox_machinery::machine::MachineEndpoint;
+    use malbox_machinery::provisioner::TomlValue;
+
+    fn context(platform: malbox_machinery::Platform, access: ManagementAccess) -> ProvisionContext {
+        ProvisionContext {
+            endpoint: MachineEndpoint {
+                address: "10.0.0.5".parse().unwrap(),
+                id: "u1".into(),
+                platform,
+            },
+            config: TomlValue::Table(Default::default()),
+            access,
+        }
+    }
+
+    #[test]
+    fn container_engine_inventory_uses_docker_api_connection() {
+        let ctx = context(
+            malbox_machinery::Platform::Linux,
+            ManagementAccess::ContainerEngine {
+                container: "malbox-u1".into(),
+                engine_host: "unix:///var/run/docker.sock".into(),
+            },
+        );
+        assert_eq!(
+            inventory_content(&ctx),
+            "[malbox]\nmalbox-u1 ansible_connection=community.docker.docker_api ansible_docker_docker_host=unix:///var/run/docker.sock\n"
+        );
+    }
+
+    #[test]
+    fn linux_network_inventory_is_bare_ip() {
+        let ctx = context(
+            malbox_machinery::Platform::Linux,
+            ManagementAccess::Network { port: 22 },
+        );
+        assert_eq!(inventory_content(&ctx), "[malbox]\n10.0.0.5\n");
+    }
+}

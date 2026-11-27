@@ -1,6 +1,6 @@
 //! Allocate capability — core machine lifecycle management.
 
-use crate::machine::{CreateMachineParams, Machine, MachineEndpoint};
+use crate::machine::{CreateMachineParams, Machine, MachineEndpoint, ManagementAccess, Platform};
 use async_trait::async_trait;
 use std::error::Error;
 
@@ -47,5 +47,17 @@ pub trait Allocate: Send + Sync {
         _machine: &Machine,
     ) -> Result<Option<MachineEndpoint>, Box<dyn Error + Send + Sync>> {
         Ok(None)
+    }
+
+    /// How provisioners reach this machine's management interface.
+    ///
+    /// Defaults to the platform's network management port (WinRM 5986 on
+    /// Windows, SSH 22 on Linux). Providers without a guest network service
+    /// override this.
+    fn management_access(&self, _machine: &Machine, platform: Platform) -> ManagementAccess {
+        match platform {
+            Platform::Windows => ManagementAccess::Network { port: 5986 },
+            Platform::Linux => ManagementAccess::Network { port: 22 },
+        }
     }
 }

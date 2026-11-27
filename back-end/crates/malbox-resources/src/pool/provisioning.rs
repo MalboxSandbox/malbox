@@ -6,7 +6,7 @@ use malbox_database::repositories::machinery::{self, MachinePlatform, MachineSta
 use malbox_database::repositories::provision_runs::{self, ProvisionRun};
 use malbox_database::repositories::snapshots;
 use malbox_machinery::Machine;
-use malbox_machinery::machine::CreateMachineParams;
+use malbox_machinery::machine::{CreateMachineParams, ManagementAccess};
 use malbox_machinery::provider::capabilities::Allocate;
 use malbox_machinery::provisioner::{ProvisionContext, ProvisionStatus, create_provisioner};
 use sha2::{Digest, Sha256};
@@ -516,19 +516,26 @@ impl MachinePool {
             .await
             .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {}", e)))?;
 
-        // Wait for the management service
-        let mgmt_port = match platform {
-            malbox_machinery::Platform::Windows => 5986,
-            malbox_machinery::Platform::Linux => 22,
-        };
+        // Wait for the management service, unless the provider reaches the
+        // machine some other way (e.g. container engine exec).
+        let access = allocate.management_access(runtime_vm, platform);
+        match access {
+            ManagementAccess::Network { port } => {
+                info!(
+                    machine_id,
+                    %ip, port,
+                    "Waiting for management service"
+                );
 
-        info!(
-            machine_id,
-            %ip, port = mgmt_port,
-            "Waiting for management service"
-        );
-
-        wait_for_connectivity(ip, mgmt_port, std::time::Duration::from_secs(180)).await?;
+                wait_for_connectivity(ip, port, std::time::Duration::from_secs(180)).await?;
+            }
+            ManagementAccess::ContainerEngine { .. } => {
+                info!(
+                    machine_id,
+                    "Management via container engine, skipping TCP wait"
+                );
+            }
+        }
 
         let endpoint = malbox_machinery::machine::MachineEndpoint {
             address: ip,
@@ -539,6 +546,7 @@ impl MachinePool {
         let context = ProvisionContext {
             endpoint,
             config: step.config.clone(),
+            access,
         };
 
         info!(

@@ -6,7 +6,7 @@
 //!
 //! Registration uses the `inventory` crate, same pattern as providers.
 
-use crate::machine::MachineEndpoint;
+use crate::machine::{MachineEndpoint, ManagementAccess};
 use async_trait::async_trait;
 use std::error::Error;
 
@@ -42,6 +42,9 @@ pub struct ProvisionContext {
     pub endpoint: MachineEndpoint,
     /// Provisioner-specific configuration from the step's TOML config.
     pub config: toml::Value,
+    /// How to reach the machine; provisioners must honour it instead of
+    /// assuming SSH/WinRM.
+    pub access: ManagementAccess,
 }
 
 /// Result of a provisioning operation.
