@@ -8,3 +8,6 @@ type = "host"
 [runtime]
 state = "persistent"
 execution = "parallel"
+
+[routing]
+stage = "static"

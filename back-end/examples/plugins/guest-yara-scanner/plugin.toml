@@ -20,6 +20,3 @@ description = "Raw list of YARA rule matches with metadata"
 user_visible = true
 display_name = "YARA Matches"
 render = "json"
-
-[events]
-subscribe = ["TaskCreated", "TaskStarting"]

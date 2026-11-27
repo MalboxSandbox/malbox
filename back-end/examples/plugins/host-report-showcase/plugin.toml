@@ -9,6 +9,10 @@ type = "host"
 state = "ephemeral"
 execution = "parallel"
 
+[routing]
+# Never routed automatically; select it explicitly to run it.
+accepts = "showcase/never"
+
 [results.report]
 description = "Comprehensive report showcasing all block types"
 user_visible = true
@@ -20,7 +24,7 @@ description = "Simulated screenshot artifact for image block"
 user_visible = true
 display_name = "Screenshot"
 
-[results.pcap]
+[results.network_capture]
 description = "Simulated pcap artifact for download block"
 user_visible = true
 display_name = "Network Capture"

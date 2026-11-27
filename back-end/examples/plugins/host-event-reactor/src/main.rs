@@ -31,13 +31,6 @@ impl EventReactor {
         info!("Configuration reloaded");
     }
 
-    #[malbox::on_event(PluginResultAvailable)]
-    fn on_result_available(&self) -> Result<()> {
-        let count = self.results_seen.fetch_add(1, Ordering::Relaxed) + 1;
-        info!(total = count, "Plugin result available - tracking");
-        Ok(())
-    }
-
     #[malbox::on_event(TaskCompleted)]
     fn on_task_done(&self) -> Result<()> {
         let count = self.results_seen.load(Ordering::Relaxed);

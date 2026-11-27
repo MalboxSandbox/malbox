@@ -1,0 +1,19 @@
+[plugin]
+name = "host-archive-extractor"
+version = "0.1.0"
+description = "Example host plugin that extracts zip archives as child artifacts"
+authors = ["Malbox Team"]
+type = "host"
+
+[runtime]
+state = "ephemeral"
+execution = "parallel"
+
+[routing]
+stage = "extract"
+accepts = "archive/zip"
+monitored_keys = ["passwords"]
+
+[parameters.passwords]
+type = "list"
+default = []
