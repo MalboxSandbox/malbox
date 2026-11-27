@@ -15,6 +15,10 @@
     # Must match the user created in configure-autologin.yml.
     sandbox_username: John
     sandbox_password: malbox!sandbox42
+    # Working directory of the plugins, and so of the samples they launch.
+    # Used when a plugin has no paths.sample_dir; matches the guest SDK's
+    # Windows [runtime.paths].sample_dir default.
+    sample_dir: C:\malbox\samples
 
   tasks:
     - name: Create plugin install directory
@@ -23,12 +27,13 @@
         state: directory
       loop: "{{ guest_plugins }}"
 
+    # Always created: it is the scheduled task's working directory, and the
+    # task fails to start if that directory is missing.
     - name: Create plugin sample directory
       win_file:
-        path: "{{ item.paths.sample_dir }}"
+        path: "{{ item.paths.sample_dir | default(sample_dir) }}"
         state: directory
       loop: "{{ guest_plugins }}"
-      when: item.paths is defined
 
     - name: Create plugin artifact directory
       win_file:
@@ -92,7 +97,8 @@
         description: "Malbox guest plugin: {{ item.name }}"
         actions:
           - path: "{{ malbox_plugins_dir }}\\{{ item.name }}\\start.bat"
-            working_directory: "{{ malbox_plugins_dir }}\\{{ item.name }}"
+            # Samples inherit the plugin's working directory.
+            working_directory: "{{ item.paths.sample_dir | default(sample_dir) }}"
         triggers:
           - type: logon
             user_id: "{{ sandbox_username }}"
