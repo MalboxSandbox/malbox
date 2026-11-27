@@ -33,3 +33,6 @@ tempfile.workspace = true
 tonic = "0.14.6"
 tokio-stream = { workspace = true }
 async-stream = "0.3"
+
+[lints]
+workspace = true

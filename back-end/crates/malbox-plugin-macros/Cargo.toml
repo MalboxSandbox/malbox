@@ -12,3 +12,6 @@ quote = "1.0.45"
 proc-macro2 = "1.0.106"
 malbox-plugin-manifest = { path = "../malbox-plugin-manifest" }
 toml = { workspace = true }
+
+[lints]
+workspace = true

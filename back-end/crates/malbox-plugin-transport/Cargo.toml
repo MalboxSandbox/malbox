@@ -23,3 +23,6 @@ thiserror.workspace = true
 
 [build-dependencies]
 tonic-prost-build = { version = "0.14.6", optional = true }
+
+[lints]
+workspace = true

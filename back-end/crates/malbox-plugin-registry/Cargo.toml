@@ -21,3 +21,6 @@ which = "8"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

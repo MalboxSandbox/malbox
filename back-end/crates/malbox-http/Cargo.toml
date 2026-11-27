@@ -32,3 +32,6 @@ base64 = "0.22"
 serde_json = "1.0.150"
 toml.workspace = true
 tower-http = { version = "0.6.11", features = ["trace", "fs"] }
+
+[lints]
+workspace = true

@@ -11,3 +11,6 @@ serde_json.workspace = true
 toml.workspace = true
 malbox-config.path = "../malbox-config"
 inventory.workspace = true
+
+[lints]
+workspace = true

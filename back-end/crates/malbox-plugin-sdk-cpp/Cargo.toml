@@ -26,3 +26,6 @@ malbox-plugin-sdk = { path = "../malbox-plugin-sdk", features = ["testkit"] }
 
 [build-dependencies]
 cbindgen = "0.29"
+
+[lints]
+workspace = true

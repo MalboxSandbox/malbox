@@ -9,3 +9,6 @@ edition = "2024"
 tracing = { workspace = true }
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[lints]
+workspace = true

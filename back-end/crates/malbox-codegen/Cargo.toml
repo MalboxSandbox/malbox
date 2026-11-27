@@ -13,3 +13,6 @@ clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true
