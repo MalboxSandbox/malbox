@@ -47,6 +47,28 @@ Configuration in `malbox.toml`:
 uri = "qemu:///system"
 ```
 
+### container
+
+The container provider runs **Linux** machines as Docker or Podman containers and supports the **Allocate**, **Snapshot**, and **GuestAccess** capabilities. It talks to the engine API over a unix socket and is enabled via the `provider-container` feature flag on the daemon. The flag is not a default feature.
+
+- **Host:** needs rootful Docker or rootful Podman, because the host cannot reach the container IPs of a rootless engine.
+- **Images:** images are `docker save` / OCI archives registered like any other image.
+- **Snapshots:** a snapshot is a committed image, and reverting recreates the container, which takes well under a second.
+- **Guest access:** GuestAccess uses the `docker-exec` transport. Relative guest paths resolve under `sample_dir`, which defaults to `/opt/malbox/samples`.
+- **Provisioning:** Ansible connects through `community.docker.docker_api`, which needs no sshd in the container. The container needs `/bin/sh` and `python3`.
+- **Guest plugins:** guest plugins start from executable scripts in `/opt/malbox/autostart/`. `linux/deploy-guest-plugin-container.yml` installs them and starts each plugin as the unprivileged `sandbox` user from the sample directory, so the samples they launch run as that user from there. Override `sandbox_username` and `sample_dir` through the provisioner's `extra_vars`.
+
+```toml
+[providers.container]
+socket = "unix:///var/run/docker.sock"   # Podman: unix:///run/podman/podman.sock
+network = "malbox"                       # bridge network, created if missing
+subnet = "172.30.0.0/24"                 # static machine IPs come from here
+internal = false                         # true = no egress
+# runtime = "runsc"                      # default OCI runtime
+```
+
+Per-machine `[machines.provider_config]` accepts `runtime`, `cap_add`, and `command` (a full argv that replaces the autostart command). `disk_size` is ignored.
+
 ## Next steps
 
 - Read about [Provisioners](/machinery/provisioners) for configuring machines after creation
