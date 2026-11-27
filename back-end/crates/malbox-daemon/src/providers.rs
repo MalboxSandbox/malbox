@@ -6,6 +6,7 @@
 //!
 //! Providers are enabled via Cargo features:
 //! - `provider-libvirt` - libvirt/KVM provider
+//! - `provider-container` - Docker/Podman container provider
 //!
 //! Example usage:
 //! ```bash
@@ -24,6 +25,9 @@
 
 #[cfg(feature = "provider-libvirt")]
 use malbox_provider_libvirt as _;
+
+#[cfg(feature = "provider-container")]
+use malbox_provider_container as _;
 
 // Uncomment as providers are implemented:
 // #[cfg(feature = "provider-vmware")]

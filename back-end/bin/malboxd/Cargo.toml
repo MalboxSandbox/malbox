@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["provider-libvirt", "provisioner-ansible"]
 provider-libvirt = ["malbox-daemon/provider-libvirt"]
+provider-container = ["malbox-daemon/provider-container"]
 provisioner-ansible = ["malbox-daemon/provisioner-ansible"]
 
 [dependencies]

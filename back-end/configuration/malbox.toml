@@ -71,6 +71,15 @@ enabled = ["libvirt"]
 uri = "qemu:///system"
 # storage_pool = "default"
 
+# Container provider (Docker/Podman, rootful). Linux machines only.
+# Requires `provider-container` compiled in; images are `docker save` archives.
+# [providers.container]
+# socket = "unix:///var/run/docker.sock"   # Podman: unix:///run/podman/podman.sock
+# network = "malbox"
+# subnet = "172.30.0.0/24"
+# internal = false                         # true = no egress
+# runtime = "runsc"                        # optional default OCI runtime
+
 [machinery]
 
 # All fields are required (no defaults). Remove a machine from this list
@@ -106,6 +115,20 @@ uri = "qemu:///system"
 # cpus = 2
 # memory = 2048          # MB
 # disk_size = 32768      # MB
+#
+# [[machines]]
+# name = "alpine-container"
+# image = "alpine-ctr"   # registered `docker save` archive
+# platform = "linux"     # container provider supports Linux only
+# arch = "x64"
+# cpus = 1
+# memory = 512           # MB
+# disk_size = 1024       # MB (ignored by the container provider)
+# # Optional: container provider overrides
+# [machines.provider_config]
+# runtime = "runsc"                # overrides [providers.container].runtime
+# cap_add = ["SYS_PTRACE"]
+# command = ["/bin/sh", "-c", "exec tail -f /dev/null"]   # replaces the autostart command
 
 # -----------------------------------------------------------------------------
 # Images

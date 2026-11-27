@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["provider-libvirt", "provisioner-ansible"]
 provider-libvirt = ["dep:malbox-provider-libvirt"]
+provider-container = ["dep:malbox-provider-container"]
 # Add more providers here as they're implemented:
 # provider-vmware = ["dep:malbox-provider-vmware"]
 # provider-virtualbox = ["dep:malbox-provider-virtualbox"]
@@ -25,6 +26,7 @@ malbox-plugin-registry = { path = "../malbox-plugin-registry" }
 
 # Provider implementations (optional, feature-gated)
 malbox-provider-libvirt = { path = "../malbox-provider-libvirt", optional = true }
+malbox-provider-container = { path = "../malbox-provider-container", optional = true }
 # malbox-provider-vmware = { path = "../malbox-provider-vmware", optional = true }
 # malbox-provider-virtualbox = { path = "../malbox-provider-virtualbox", optional = true }
 
