@@ -1,0 +1,124 @@
+---
+# Deploy guest plugins into a container machine (container provider).
+#
+# Runs over the community.docker.docker_api connection; the container needs
+# /bin/sh and python3 but no sshd. Plugins are not started here: the container
+# command runs every executable in /opt/malbox/autostart/ when the container
+# next starts from the committed snapshot.
+#
+# Plugins run as an unprivileged user from the sample directory, so the sample
+# they launch runs as that user from there too (like the Windows playbook's
+# sandbox user). Override sandbox_username / sample_dir through the
+# provisioner's extra_vars; sandbox_username: root keeps the old behaviour.
+- name: Deploy Guest Plugins (container)
+  hosts: all
+  gather_facts: false
+
+  vars:
+    # guest_plugins is injected by the ansible provisioner as an extra var.
+    # Each entry has: {name, binary, toml, port} and optionally paths
+    # (paths.sample_dir, paths.artifact_dir, paths.stash_dir, paths.log_dir).
+    guest_plugins: []
+    # Account the plugins (and therefore the samples) run as.
+    sandbox_username: sandbox
+    # Guest SDK's unix runtime root; sample_dir must match the plugins'
+    # [runtime.paths].sample_dir (default: <root>/samples).
+    malbox_runtime_dir: /tmp/malbox
+    sample_dir: "{{ malbox_runtime_dir }}/samples"
+
+  tasks:
+    - name: Create the sandbox user
+      ansible.builtin.user:
+        name: "{{ sandbox_username }}"
+        shell: /bin/sh
+        create_home: true
+
+    # The plugin creates its runtime directories at startup, now unprivileged.
+    - name: Create runtime and sample directories, owned by the sandbox user
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ sandbox_username }}"
+        mode: "0755"
+      loop:
+        - "{{ malbox_runtime_dir }}"
+        - "{{ sample_dir }}"
+
+    - name: Create plugin install directory
+      ansible.builtin.file:
+        path: "/opt/malbox/plugins/{{ item.name }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+
+    - name: Create autostart and log directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/malbox/autostart
+        - /var/log/malbox
+
+    - name: Create plugin sample directory
+      ansible.builtin.file:
+        path: "{{ item.paths.sample_dir }}"
+        state: directory
+        owner: "{{ sandbox_username }}"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin artifact directory
+      ansible.builtin.file:
+        path: "{{ item.paths.artifact_dir }}"
+        state: directory
+        owner: "{{ sandbox_username }}"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin stash directory
+      ansible.builtin.file:
+        path: "{{ item.paths.stash_dir }}"
+        state: directory
+        owner: "{{ sandbox_username }}"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Create plugin log directory
+      ansible.builtin.file:
+        path: "{{ item.paths.log_dir }}"
+        state: directory
+        owner: "{{ sandbox_username }}"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+      when: item.paths is defined
+
+    - name: Copy guest plugin binary
+      ansible.builtin.copy:
+        src: "{{ item.binary }}"
+        dest: "/opt/malbox/plugins/{{ item.name }}/{{ item.name }}"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
+
+    - name: Copy guest plugin manifest
+      ansible.builtin.copy:
+        src: "{{ item.toml }}"
+        dest: "/opt/malbox/plugins/{{ item.name }}/plugin.toml"
+        mode: "0644"
+      loop: "{{ guest_plugins }}"
+
+    # cd before su: su without a login flag keeps the working directory, so
+    # the plugin and the sample it launches start in the sample directory.
+    # The log redirect is opened by this (root) shell.
+    - name: Create guest plugin autostart script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          cd {{ item.paths.sample_dir | default(sample_dir) }}
+          exec su -s /bin/sh {{ sandbox_username }} -c 'exec /opt/malbox/plugins/{{ item.name }}/{{ item.name }}' >> {{ item.paths.log_dir | default('/var/log/malbox') }}/{{ item.name }}.log 2>&1
+        dest: "/opt/malbox/autostart/{{ item.name }}.sh"
+        mode: "0755"
+      loop: "{{ guest_plugins }}"
