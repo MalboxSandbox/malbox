@@ -1,0 +1,11 @@
+
+# Appended to malbox.toml once the image is registered (machines whose image
+# is missing are skipped at startup). Name and image must match run.sh.
+[[machines]]
+name = "container-dev"
+image = "container-dev-alpine"
+platform = "linux"
+arch = "x64"
+cpus = 1
+memory = 512
+disk_size = 1024

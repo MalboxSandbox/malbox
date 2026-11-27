@@ -1,0 +1,48 @@
+# Template for the container provider dev setup; run.sh renders it into the
+# state directory. @NAME@ placeholders are substituted by run.sh.
+
+[general]
+environment = "development"
+log_level = "info"
+
+[http]
+host = "127.0.0.1"
+port = @PORT@
+cors_origins = ["http://localhost:5173"]
+
+# Dedicated Postgres: the database name is fixed to "malbox", and the daemon
+# destroys DB machines that are not in this config, so never share the dev DB.
+[database]
+host = "127.0.0.1"
+port = @PG_PORT@
+user = "postgres"
+
+[providers]
+enabled = ["container"]
+
+# Own network and subnet: keeps this setup apart from a regular container
+# provider setup (default network "malbox", 172.30.0.0/24) on the same host.
+[providers.container]
+socket = "unix://@SOCKET@"
+network = "malbox-dev"
+subnet = "172.30.1.0/24"
+
+[images]
+store_path = "@STATE@/images"
+
+[guest_access]
+transport = "docker-exec"
+[guest_access.config]
+# Must equal the guest plugin's compiled sample_dir (unix default).
+sample_dir = "/tmp/malbox/samples"
+
+[plugins]
+directory = "@STATE@/plugins"
+watch = false
+
+[[orchestration.detonation_profiles]]
+name = "linux-dev"
+accepts = "code/shell|executable/linux/.*"
+platform = "linux"
+snapshot = "with-plugins"
+timeout_secs = 60

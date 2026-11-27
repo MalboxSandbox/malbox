@@ -1,0 +1,4 @@
+# Analysis machine image for the container provider.
+# Needs /bin/sh (default command) and python3 (Ansible modules).
+FROM docker.io/library/alpine:3.20
+RUN apk add --no-cache python3
