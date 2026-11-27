@@ -44,11 +44,11 @@ malbox task submit <file> [options]
 | `--tags` | `string[]` | No | - | Tags for the task (accepts multiple values) |
 | `--owner` | `string` | No | - | Task owner |
 | `--platform` | `linux` \| `windows` | No | - | Guest platform |
-| `--snapshot-id` | `uuid` | No | - | Machine snapshot to analyse on |
+| `--snapshot-id` | `uuid` | No | - | Machine snapshot to analyze on |
 | `--plugins` | `string[]` | No | - | Plugins to run (accepts multiple values) |
 | `--target-filename` | `string` | No | file name | Sample file name inside the guest |
 
-A task runs on a machine only when both `--platform` and `--snapshot-id` are given; otherwise only host plugins run.
+A task runs on a machine only when you pass both `--platform` and `--snapshot-id`. Otherwise, only host plugins run.
 
 ### task list
 
