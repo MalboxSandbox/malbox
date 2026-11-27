@@ -8,7 +8,7 @@
 	let { data, collapsed = false }: Props = $props();
 	const pretty = $derived(JSON.stringify(data, null, 2));
 
-	let open = $state(!collapsed);
+	let open = $derived(!collapsed);
 </script>
 
 <div class="rounded-lg bg-[var(--color-bg-primary)]">

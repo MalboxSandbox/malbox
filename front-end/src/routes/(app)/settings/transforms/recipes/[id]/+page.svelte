@@ -11,11 +11,12 @@
 
 	let { data }: Props = $props();
 
-	let name = $state(data.recipe.name);
-	let description = $state(data.recipe.description ?? '');
-	let scope = $state<RecipeScope>(data.recipe.scope);
-	let tagsInput = $state(data.recipe.tags.join(', '));
-	let steps = $state<RecipeStep[]>(structuredClone(data.recipe.steps));
+	// Writable deriveds: editable locally, reset when `data` reloads.
+	let name = $derived(data.recipe.name);
+	let description = $derived(data.recipe.description ?? '');
+	let scope = $derived<RecipeScope>(data.recipe.scope);
+	let tagsInput = $derived(data.recipe.tags.join(', '));
+	let steps = $derived<RecipeStep[]>(structuredClone(data.recipe.steps));
 
 	let saving = $state(false);
 	let error = $state<string | null>(null);

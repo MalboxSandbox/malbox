@@ -93,9 +93,6 @@ importers:
       '@eslint/js':
         specifier: ^9.39.4
         version: 9.39.4
-      '@melt-ui/pp':
-        specifier: ^0.3.2
-        version: 0.3.2(@melt-ui/svelte@0.86.6(svelte@5.59.1(@typescript-eslint/types@8.60.0)))(svelte@5.59.1(@typescript-eslint/types@8.60.0))
       '@melt-ui/svelte':
         specifier: ^0.86.6
         version: 0.86.6(svelte@5.59.1(@typescript-eslint/types@8.60.0))
@@ -390,12 +387,6 @@ packages:
 
   '@marijn/find-cluster-break@1.0.2':
     resolution: {integrity: sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==}
-
-  '@melt-ui/pp@0.3.2':
-    resolution: {integrity: sha512-xKkPvaIAFinklLXcQOpwZ8YSpqAFxykjWf8Y/fSJQwsixV/0rcFs07hJ49hJjPy5vItvw5Qa0uOjzFUbXzBypQ==}
-    peerDependencies:
-      '@melt-ui/svelte': '>= 0.29.0'
-      svelte: ^3.55.0 || ^4.0.0 || ^5.0.0-next.1
 
   '@melt-ui/svelte@0.86.6':
     resolution: {integrity: sha512-Jer+M7DgIwT5IHfTayb4Iw/fkkxWNmC/mqn/nMh9JrbPbkxmyabfLQnhJ+JDn5HK77f84j34lubO3iqFtYAfMg==}
@@ -2032,13 +2023,6 @@ snapshots:
       svelte: 5.59.1(@typescript-eslint/types@8.60.0)
 
   '@marijn/find-cluster-break@1.0.2': {}
-
-  '@melt-ui/pp@0.3.2(@melt-ui/svelte@0.86.6(svelte@5.59.1(@typescript-eslint/types@8.60.0)))(svelte@5.59.1(@typescript-eslint/types@8.60.0))':
-    dependencies:
-      '@melt-ui/svelte': 0.86.6(svelte@5.59.1(@typescript-eslint/types@8.60.0))
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-      svelte: 5.59.1(@typescript-eslint/types@8.60.0)
 
   '@melt-ui/svelte@0.86.6(svelte@5.59.1(@typescript-eslint/types@8.60.0))':
     dependencies:

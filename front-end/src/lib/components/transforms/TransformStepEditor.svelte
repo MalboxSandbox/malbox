@@ -18,16 +18,12 @@
 
 	const transform = $derived(transformStore.registry.get(step.transformId));
 	const schema = $derived(transform?.paramSchema ?? []);
-	let localParams = $state<Record<string, string | number | boolean>>({ ...step.params });
-	let expanded = $state(false);
-
-	$effect(() => {
-		localParams = { ...step.params };
-		expanded = schema.length > 0 && Object.keys(step.params).length === 0;
-	});
+	// Writable deriveds: reset whenever the step changes, locally overridable.
+	let localParams = $derived<Record<string, string | number | boolean>>({ ...step.params });
+	let expanded = $derived(schema.length > 0 && Object.keys(step.params).length === 0);
 
 	function handleParamChange(key: string, value: string | number | boolean) {
-		localParams[key] = value;
+		localParams = { ...localParams, [key]: value };
 		onUpdate({ ...localParams });
 	}
 
