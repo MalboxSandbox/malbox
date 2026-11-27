@@ -10,12 +10,7 @@
 	let statsTab = $state<'user' | 'globales'>('user');
 
 	const completed = $derived(counts.by_status['completed'] ?? 0);
-	const running = $derived(
-		(counts.by_status['running'] ?? 0) +
-			(counts.by_status['initializing'] ?? 0) +
-			(counts.by_status['preparing_resources'] ?? 0) +
-			(counts.by_status['stopping'] ?? 0)
-	);
+	const running = $derived(counts.by_status['running'] ?? 0);
 	const pending = $derived(counts.by_status['pending'] ?? 0);
 </script>
 

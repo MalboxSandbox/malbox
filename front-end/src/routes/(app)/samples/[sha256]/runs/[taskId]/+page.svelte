@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AggregateSummary from '#lib/components/report/AggregateSummary.svelte';
+	import ArtifactTree from '#lib/components/report/ArtifactTree.svelte';
 	import { invalidate } from '$app/navigation';
 	import { startPolling } from '#lib/api/polling.ts';
 	import { isTerminalStatus } from '#lib/api/format.ts';
@@ -58,4 +59,9 @@
 	{/if}
 
 	<AggregateSummary task={data.task} report={reportStore.current} />
+
+	<div class="space-y-3">
+		<h2 class="text-sm font-semibold text-[var(--color-text-primary)]">Artifacts</h2>
+		<ArtifactTree taskId={data.task.id} taskStatus={data.task.status} />
+	</div>
 </div>

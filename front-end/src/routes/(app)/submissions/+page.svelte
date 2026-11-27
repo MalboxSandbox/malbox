@@ -37,7 +37,7 @@
 			case 'finished':
 				return 'completed';
 			case 'pending':
-				return 'pending,running,initializing,preparing_resources,stopping';
+				return 'pending,running';
 			default:
 				return undefined;
 		}

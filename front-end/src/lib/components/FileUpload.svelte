@@ -7,7 +7,7 @@
 	import { looksLikeHash, resolveHashToSample } from '#lib/api/submission.ts';
 	import { isApiError } from '#lib/api/errors.ts';
 	import SubmissionConfigModal from '#lib/components/SubmissionConfigModal.svelte';
-	import type { Platform } from '#lib/api/types.ts';
+	import type { ChildDetonation, Platform } from '#lib/api/types.ts';
 
 	let activeTab = $state<'file' | 'url'>('file');
 	let urlInput = $state('');
@@ -28,16 +28,11 @@
 		snapshotId: string | null;
 		priority: number;
 		vmMode: 'windows' | 'linux' | 'no-vm';
-	}>({
-		timeout: null,
-		platform: null,
-		tags: [],
-		plugins: [],
-		machineId: null,
-		snapshotId: null,
-		priority: 2,
-		vmMode: 'windows'
-	});
+		deepScan: boolean;
+		ignoreCache: boolean;
+		detonateChildren: ChildDetonation;
+		maxDetonations: number;
+	}>(defaultConfig());
 
 	function defaultConfig() {
 		return {
@@ -48,7 +43,11 @@
 			machineId: null,
 			snapshotId: null,
 			priority: 2,
-			vmMode: 'windows' as const
+			vmMode: 'windows' as const,
+			deepScan: false,
+			ignoreCache: false,
+			detonateChildren: 'extracted' as const,
+			maxDetonations: 3
 		};
 	}
 
@@ -121,6 +120,14 @@
 					...(submissionConfig.snapshotId !== null && {
 						snapshot_id: submissionConfig.snapshotId
 					}),
+					machine_id: submissionConfig.machineId ?? undefined,
+					params: {
+						detonate: submissionConfig.vmMode === 'no-vm' ? 'never' : 'auto',
+						detonate_children: submissionConfig.detonateChildren,
+						max_detonations: submissionConfig.maxDetonations,
+						deep_scan: submissionConfig.deepScan,
+						ignore_cache: submissionConfig.ignoreCache
+					},
 					priority: submissionConfig.priority
 				});
 				toasts.push({ kind: 'success', message: `Task #${task_id} submitted.` });

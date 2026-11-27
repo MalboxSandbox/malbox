@@ -22,6 +22,7 @@
 	import PluginDetailView from '#lib/components/report/PluginDetailView.svelte';
 	import BlockRenderer from '#lib/components/report/BlockRenderer.svelte';
 	import ScoreBadge from '#lib/components/report/ScoreBadge.svelte';
+	import ArtifactTree from '#lib/components/report/ArtifactTree.svelte';
 	import { FileTextIcon, PlayIcon, BanIcon, RefreshCwIcon, HistoryIcon } from '@lucide/svelte';
 	import type {
 		PluginReportView,
@@ -29,7 +30,8 @@
 		TaskReport,
 		Platform,
 		KvPair,
-		Block
+		Block,
+		ChildDetonation
 	} from '#lib/api/types.ts';
 	import type { PageData } from './$types';
 
@@ -41,6 +43,7 @@
 	const sample = $derived(data.sample);
 	const tasks = $derived(data.tasks);
 	const taskReports = $derived(data.taskReports);
+	const appearances = $derived(data.appearances);
 
 	const sortedTasks = $derived(
 		[...tasks].sort((a, b) => new Date(b.created_on).getTime() - new Date(a.created_on).getTime())
@@ -148,6 +151,10 @@
 		snapshotId: string | null;
 		priority: number;
 		vmMode: 'windows' | 'linux' | 'no-vm';
+		deepScan: boolean;
+		ignoreCache: boolean;
+		detonateChildren: ChildDetonation;
+		maxDetonations: number;
 	}>({
 		timeout: null,
 		platform: null,
@@ -156,7 +163,11 @@
 		machineId: null,
 		snapshotId: null,
 		priority: 2,
-		vmMode: 'windows'
+		vmMode: 'windows',
+		deepScan: false,
+		ignoreCache: false,
+		detonateChildren: 'extracted',
+		maxDetonations: 3
 	});
 	let rescanning = $state(false);
 
@@ -170,6 +181,14 @@
 				...(rescanConfig.tags.length > 0 && { tags: rescanConfig.tags.join(',') }),
 				...(rescanConfig.plugins.length > 0 && { plugins: rescanConfig.plugins.join(',') }),
 				...(rescanConfig.snapshotId !== null && { snapshot_id: rescanConfig.snapshotId }),
+				machine_id: rescanConfig.machineId ?? undefined,
+				params: {
+					detonate: rescanConfig.vmMode === 'no-vm' ? 'never' : 'auto',
+					detonate_children: rescanConfig.detonateChildren,
+					max_detonations: rescanConfig.maxDetonations,
+					deep_scan: rescanConfig.deepScan,
+					ignore_cache: rescanConfig.ignoreCache
+				},
 				priority: rescanConfig.priority
 			});
 			toasts.push({ kind: 'success', message: `Re-analysis task #${task_id} submitted.` });
@@ -261,6 +280,21 @@
 					class="ml-auto text-xs font-medium text-[var(--color-accent)] transition-colors hover:text-[var(--color-accent)]/80"
 					onclick={() => (activeRunId = null)}>View latest</button
 				>
+			</div>
+		{/if}
+
+		{#if appearances.length > 0}
+			<div
+				class="mb-3.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3.5 py-2 text-xs text-sky-200/80"
+			>
+				<span>Also found inside:</span>
+				{#each appearances as ap (`${ap.task_id}-${ap.artifact_id}`)}
+					<a
+						href="/submissions/{ap.task_id}"
+						class="font-medium text-[var(--color-accent)] hover:underline"
+						>task #{ap.task_id} (depth {ap.depth})</a
+					>
+				{/each}
 			</div>
 		{/if}
 
@@ -422,6 +456,16 @@
 
 			<VerdictsSummary plugins={currentPlugins} onpluginclick={(p) => (activePluginView = p)} />
 		</div>
+
+		{#if activeRun}
+			<SectionDivider id="artifacts" title="Artifacts">
+				<a
+					href="/samples/{sample.sha256}/runs/{activeRun.task.id}"
+					class="text-xs text-[var(--color-accent)] hover:underline">Run details</a
+				>
+			</SectionDivider>
+			<ArtifactTree taskId={activeRun.task.id} taskStatus={activeRun.task.status} />
+		{/if}
 
 		<!-- Per-plugin report sections -->
 		{#each currentPlugins as plugin (plugin.plugin_name)}

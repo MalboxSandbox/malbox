@@ -5,6 +5,17 @@ import { isTerminalStatus } from '#lib/api/format.ts';
 import { toasts } from '#lib/stores/toasts.svelte.ts';
 import { contextMenuSettings } from '#lib/stores/contextMenuSettings.svelte.ts';
 import { valuePreviewStore } from '#lib/stores/valuePreview.svelte.ts';
+import { goto, invalidateAll } from '$app/navigation';
+import {
+	cancelArtifact,
+	cancelTask,
+	promoteArtifact,
+	rescanArtifact,
+	rescanSample,
+	setArtifactPriority
+} from '#lib/api/tasks.ts';
+import { isApiError } from '#lib/api/errors.ts';
+import type { TaskStatus } from '#lib/api/types.ts';
 
 function defang(value: string): string {
 	const { dotReplacement, protocolReplacement } = contextMenuSettings.settings;
@@ -216,6 +227,94 @@ function customActionItems(contextType: ContextType): MenuItem[] {
 
 const SEP: MenuItem = { kind: 'separator' };
 
+function errorMessage(e: unknown): string {
+	if (isApiError(e)) return e.message;
+	return e instanceof Error ? e.message : String(e);
+}
+
+/** Runs an API action, reports the outcome as a toast and refreshes page data. */
+async function runAction(
+	action: () => Promise<unknown>,
+	success: string,
+	failure: string
+): Promise<boolean> {
+	try {
+		await action();
+		toasts.push({ kind: 'success', message: success });
+		await invalidateAll();
+		return true;
+	} catch (e) {
+		toasts.push({ kind: 'error', message: `${failure}: ${errorMessage(e)}` });
+		return false;
+	}
+}
+
+function artifactAnalysisItems(ctx: ContextPayload): MenuItem[] {
+	const taskId = ctx.metadata?.taskId as number | undefined;
+	const artifactId = ctx.metadata?.artifactId as number | undefined;
+	if (taskId === undefined || artifactId === undefined) return [];
+	const state = ctx.metadata?.state as string | undefined;
+	const items: MenuItem[] = [];
+	if (state === 'pending' || state === 'running') {
+		items.push({
+			kind: 'action',
+			id: 'artifact-cancel',
+			label: 'Cancel analysis',
+			icon: 'cancel',
+			handler() {
+				runAction(
+					() => cancelArtifact(fetch, taskId, artifactId),
+					`Canceled analysis of ${ctx.value}`,
+					'Cancel failed'
+				);
+			}
+		});
+	}
+	items.push(
+		{
+			kind: 'action',
+			id: 'artifact-rescan',
+			label: 'Rescan',
+			icon: 'upload',
+			handler() {
+				runAction(
+					() => rescanArtifact(fetch, taskId, artifactId),
+					`Rescan of ${ctx.value} queued`,
+					'Rescan failed'
+				);
+			}
+		},
+		{
+			kind: 'action',
+			id: 'artifact-promote',
+			label: 'Analyse separately',
+			icon: 'summary',
+			async handler() {
+				try {
+					const res = await promoteArtifact(fetch, taskId, artifactId);
+					toasts.push({ kind: 'success', message: `Task #${res.task_id} submitted` });
+					await goto(`/samples/${res.sample.sha256}?run=${res.task_id}`);
+				} catch (e) {
+					toasts.push({ kind: 'error', message: `Promote failed: ${errorMessage(e)}` });
+				}
+			}
+		},
+		{
+			kind: 'action',
+			id: 'artifact-priority',
+			label: 'Raise priority',
+			handler() {
+				runAction(
+					() => setArtifactPriority(fetch, taskId, artifactId, 1000, true),
+					`Raised priority of ${ctx.value}`,
+					'Priority change failed'
+				);
+			}
+		}
+	);
+	return items;
+}
+
 export function resolveMenuItems(ctx: ContextPayload): MenuItem[] {
 	switch (ctx.type) {
 		case 'hash':
@@ -328,6 +427,8 @@ function buildArtifactMenu(ctx: ContextPayload): MenuItem[] {
 	}
 	if (items.length > 0) items.push(SEP);
 	items.push(copyAction('Copy name'));
+	const analysis = artifactAnalysisItems(ctx);
+	if (analysis.length > 0) items.push(SEP, ...analysis);
 	const custom = customActionItems('artifact');
 	if (custom.length > 0) items.push(SEP, ...custom);
 	if (s.showSendToWorkbench) items.push(sendToWorkbench());
@@ -336,7 +437,8 @@ function buildArtifactMenu(ctx: ContextPayload): MenuItem[] {
 
 function buildTaskMenu(ctx: ContextPayload): MenuItem[] {
 	const taskId = ctx.metadata?.taskId as number | undefined;
-	const status = ctx.metadata?.status as string | undefined;
+	const status = ctx.metadata?.status as TaskStatus | undefined;
+	const sampleId = ctx.metadata?.sampleId as number | undefined;
 	const items: MenuItem[] = [];
 
 	if (taskId) {
@@ -350,26 +452,31 @@ function buildTaskMenu(ctx: ContextPayload): MenuItem[] {
 			}
 		});
 		items.push(SEP);
-		items.push({
-			kind: 'action',
-			id: 'resubmit',
-			label: 'Re-submit',
-			icon: 'upload',
-			handler() {
-				window.location.href = `/dashboard?resubmit=${taskId}`;
-			}
-		});
-		if (
-			status &&
-			!isTerminalStatus(status as 'pending' | 'running' | 'completed' | 'failed' | 'canceled')
-		) {
+		if (sampleId !== undefined) {
+			items.push({
+				kind: 'action',
+				id: 'resubmit',
+				label: 'Re-submit',
+				icon: 'upload',
+				async handler() {
+					try {
+						const res = await rescanSample(fetch, sampleId);
+						toasts.push({ kind: 'success', message: `Task #${res.task_id} submitted` });
+						await goto(`/samples/${res.sha256}?run=${res.task_id}`);
+					} catch (e) {
+						toasts.push({ kind: 'error', message: `Re-submit failed: ${errorMessage(e)}` });
+					}
+				}
+			});
+		}
+		if (status && !isTerminalStatus(status)) {
 			items.push({
 				kind: 'action',
 				id: 'cancel',
 				label: 'Cancel',
 				icon: 'cancel',
 				handler() {
-					fetch(`/v1/tasks/${taskId}/cancel`, { method: 'POST' });
+					runAction(() => cancelTask(fetch, taskId), `Task ${taskId} canceled`, 'Cancel failed');
 				}
 			});
 		}

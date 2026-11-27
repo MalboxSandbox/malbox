@@ -19,11 +19,12 @@ export const load: PageLoad = async ({ fetch, params, parent, depends }) => {
 		throw err;
 	}
 
-	const completedTasks = overview.tasks.filter(
-		(t) => t.status === 'completed' || t.status === 'running'
+	// Running and pending tasks already have partial results (artifact tree).
+	const reportableTasks = overview.tasks.filter(
+		(t) => t.status === 'completed' || t.status === 'running' || t.status === 'pending'
 	);
 	const taskReports = (
-		await Promise.all(completedTasks.map((t) => getTaskReport(fetch, t.id).catch(() => null)))
+		await Promise.all(reportableTasks.map((t) => getTaskReport(fetch, t.id).catch(() => null)))
 	).filter((r): r is NonNullable<typeof r> => r !== null);
 
 	// getTaskReport strips sections from plugin envelopes for payload size.
@@ -50,6 +51,7 @@ export const load: PageLoad = async ({ fetch, params, parent, depends }) => {
 		taskReports: enrichedTaskReports,
 		tasks: overview.tasks,
 		sample: overview.sample,
-		aggregate: overview.aggregate
+		aggregate: overview.aggregate,
+		appearances: overview.appearances
 	};
 };

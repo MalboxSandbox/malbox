@@ -4,7 +4,13 @@
 	import { icons } from '#lib/icons/index.ts';
 	import { listAvailablePlugins } from '#lib/api/plugins.ts';
 	import { listMachines, listSnapshots } from '#lib/api/machines.ts';
-	import type { Platform, AvailablePlugins, Machine, Snapshot } from '#lib/api/types.ts';
+	import type {
+		Platform,
+		AvailablePlugins,
+		ChildDetonation,
+		Machine,
+		Snapshot
+	} from '#lib/api/types.ts';
 
 	interface SubmissionConfig {
 		timeout: number | null;
@@ -15,6 +21,10 @@
 		snapshotId: string | null;
 		priority: number;
 		vmMode: 'windows' | 'linux' | 'no-vm';
+		deepScan: boolean;
+		ignoreCache: boolean;
+		detonateChildren: ChildDetonation;
+		maxDetonations: number;
 	}
 
 	interface Props {
@@ -35,6 +45,10 @@
 	let draftSnapshotId = $state<string | null>(null);
 	let draftPriority = $state(2);
 	let draftVmMode = $state<'windows' | 'linux' | 'no-vm'>('windows');
+	let draftDeepScan = $state(false);
+	let draftIgnoreCache = $state(false);
+	let draftDetonateChildren = $state<ChildDetonation>('extracted');
+	let draftMaxDetonations = $state(3);
 	let tagInput = $state('');
 
 	let availablePlugins = $state<AvailablePlugins | null>(null);
@@ -57,7 +71,11 @@
 			config.tags.length > 0 ||
 			config.plugins.length > 0 ||
 			config.machineId !== null ||
-			config.snapshotId !== null
+			config.snapshotId !== null ||
+			config.deepScan ||
+			config.ignoreCache ||
+			config.detonateChildren !== 'extracted' ||
+			config.maxDetonations !== 3
 	);
 
 	const platformMachines = $derived(
@@ -87,6 +105,10 @@
 			draftSnapshotId = config.snapshotId;
 			draftPriority = config.priority;
 			draftVmMode = config.vmMode;
+			draftDeepScan = config.deepScan;
+			draftIgnoreCache = config.ignoreCache;
+			draftDetonateChildren = config.detonateChildren;
+			draftMaxDetonations = config.maxDetonations;
 			tagInput = '';
 			loadPlugins();
 			loadAllMachines();
@@ -203,7 +225,11 @@
 			machineId: draftMachineId,
 			snapshotId: draftSnapshotId,
 			priority: draftPriority,
-			vmMode: draftVmMode
+			vmMode: draftVmMode,
+			deepScan: draftDeepScan,
+			ignoreCache: draftIgnoreCache,
+			detonateChildren: draftDetonateChildren,
+			maxDetonations: Math.min(10, Math.max(1, Math.round(draftMaxDetonations) || 1))
 		});
 		open.set(false);
 	}
@@ -216,6 +242,10 @@
 		draftSnapshotId = null;
 		draftPriority = 2;
 		draftVmMode = 'windows';
+		draftDeepScan = false;
+		draftIgnoreCache = false;
+		draftDetonateChildren = 'extracted';
+		draftMaxDetonations = 3;
 		tagInput = '';
 	}
 
@@ -648,6 +678,58 @@
 						}}
 						class="w-full accent-[var(--color-accent)]"
 					/>
+				</div>
+
+				<!-- Recursive analysis -->
+				<div class="flex gap-3">
+					<label class="flex-1">
+						<span class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+							>Detonate children</span
+						>
+						<select
+							bind:value={draftDetonateChildren}
+							class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none"
+						>
+							<option value="extracted">Extracted only</option>
+							<option value="none">None</option>
+							<option value="all">All</option>
+						</select>
+					</label>
+					<label class="flex-1">
+						<span class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+							>Max detonations</span
+						>
+						<input
+							type="number"
+							min="1"
+							max="10"
+							step="1"
+							bind:value={draftMaxDetonations}
+							class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none"
+						/>
+					</label>
+				</div>
+				<div class="flex gap-4">
+					<label
+						class="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-primary)]"
+					>
+						<input
+							type="checkbox"
+							bind:checked={draftDeepScan}
+							class="accent-[var(--color-accent)]"
+						/>
+						Deep scan
+					</label>
+					<label
+						class="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-primary)]"
+					>
+						<input
+							type="checkbox"
+							bind:checked={draftIgnoreCache}
+							class="accent-[var(--color-accent)]"
+						/>
+						Ignore cache
+					</label>
 				</div>
 
 				<!-- Tags input -->

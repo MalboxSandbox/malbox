@@ -1,15 +1,15 @@
-import { request, requestJson, type FetchLike } from './client';
+import { requestJson, type FetchLike } from './client';
 import type {
 	Task,
 	PaginatedTasks,
 	TaskCounts,
-	TaskResult,
 	TaskReport,
+	TaskTree,
+	Sample,
 	SinglePluginReport,
 	SampleLookup,
 	CreateTaskFromFileRequest,
 	CreateTaskFromUrlRequest,
-	CreateTaskFromHashRequest,
 	RescanSampleRequest
 } from './types';
 
@@ -52,34 +52,94 @@ export async function getTask(fetchFn: FetchLike, id: number): Promise<Task> {
 	return requestJson<Task>(fetchFn, `/v1/tasks/${id}`);
 }
 
-export async function getTaskResults(fetchFn: FetchLike, id: number): Promise<TaskResult[]> {
-	return requestJson<TaskResult[]>(fetchFn, `/v1/tasks/${id}/results`);
-}
-
-// Full report with sections stripped from plugin envelopes
-export async function getTaskReport(fetchFn: FetchLike, id: number): Promise<TaskReport> {
-	return requestJson<TaskReport>(fetchFn, `/v1/tasks/${id}/report`);
+// Full report with sections stripped from plugin envelopes. Without
+// `artifactId` the plugin views are the root artifact's and the aggregate
+// covers the whole artifact tree.
+export async function getTaskReport(
+	fetchFn: FetchLike,
+	id: number,
+	artifactId?: number
+): Promise<TaskReport> {
+	const qs = buildQueryString({ artifact_id: artifactId });
+	return requestJson<TaskReport>(fetchFn, `/v1/tasks/${id}/report${qs}`);
 }
 
 // Full report for a single plugin (with sections)
 export async function getPluginReport(
 	fetchFn: FetchLike,
 	taskId: number,
-	pluginName: string
+	pluginName: string,
+	artifactId?: number
 ): Promise<SinglePluginReport> {
+	const qs = buildQueryString({ artifact_id: artifactId });
 	return requestJson<SinglePluginReport>(
 		fetchFn,
-		`/v1/tasks/${taskId}/report/plugins/${encodeURIComponent(pluginName)}`
+		`/v1/tasks/${taskId}/report/plugins/${encodeURIComponent(pluginName)}${qs}`
 	);
 }
 
-/** Returns the raw Response so callers can choose JSON, blob, or download URL. */
-export async function getResultContent(
+export async function getTaskTree(fetchFn: FetchLike, id: number): Promise<TaskTree> {
+	return requestJson<TaskTree>(fetchFn, `/v1/tasks/${id}/tree`);
+}
+
+export async function cancelArtifact(
 	fetchFn: FetchLike,
 	taskId: number,
-	resultId: number
-): Promise<Response> {
-	return request(fetchFn, `/v1/tasks/${taskId}/results/${resultId}/content`);
+	artifactId: number,
+	descendants: 'cancel' | 'keep' = 'cancel'
+): Promise<{ status: string }> {
+	return requestJson(fetchFn, `/v1/tasks/${taskId}/artifacts/${artifactId}/cancel`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ descendants })
+	});
+}
+
+export async function cancelJob(
+	fetchFn: FetchLike,
+	taskId: number,
+	jobId: number
+): Promise<{ status: string }> {
+	return requestJson(fetchFn, `/v1/tasks/${taskId}/jobs/${jobId}/cancel`, { method: 'POST' });
+}
+
+export async function rescanArtifact(
+	fetchFn: FetchLike,
+	taskId: number,
+	artifactId: number,
+	opts: { plugins?: string[]; ignore_cache?: boolean } = {}
+): Promise<{ status: string }> {
+	return requestJson(fetchFn, `/v1/tasks/${taskId}/artifacts/${artifactId}/rescan`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(opts)
+	});
+}
+
+export async function promoteArtifact(
+	fetchFn: FetchLike,
+	taskId: number,
+	artifactId: number
+): Promise<{ task_id: number; root_artifact_id: number; sample: Sample & { id: number } }> {
+	return requestJson(fetchFn, `/v1/tasks/${taskId}/artifacts/${artifactId}/promote`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({})
+	});
+}
+
+export async function setArtifactPriority(
+	fetchFn: FetchLike,
+	taskId: number,
+	artifactId: number,
+	priority: number,
+	subtree = false
+): Promise<unknown> {
+	return requestJson(fetchFn, `/v1/tasks/${taskId}/artifacts/${artifactId}`, {
+		method: 'PATCH',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ priority, subtree })
+	});
 }
 
 export async function cancelTask(
@@ -106,17 +166,16 @@ export async function createTaskFromFile(
 ): Promise<{ task_id: number; sha256: string }> {
 	const form = new FormData();
 	form.append('file', req.file, req.file.name);
-	if (req.package !== undefined) form.append('package', req.package);
 	if (req.timeout !== undefined) form.append('timeout', String(req.timeout));
 	if (req.priority !== undefined) form.append('priority', String(req.priority));
 	if (req.platform !== undefined) form.append('platform', req.platform);
 	if (req.tags !== undefined) form.append('tags', req.tags);
 	if (req.owner !== undefined) form.append('owner', req.owner);
-	if (req.enforce_timeout !== undefined)
-		form.append('enforce_timeout', String(req.enforce_timeout));
 	if (req.target_filename !== undefined) form.append('target_filename', req.target_filename);
 	if (req.plugins !== undefined) form.append('plugins', req.plugins);
 	if (req.snapshot_id !== undefined) form.append('snapshot_id', req.snapshot_id);
+	if (req.machine_id !== undefined) form.append('machine_id', String(req.machine_id));
+	if (req.params !== undefined) form.append('params', JSON.stringify(req.params));
 
 	const res = await requestJson<{ task_id: number; sample: { sha256: string } }>(
 		fetchFn,
@@ -135,18 +194,6 @@ export async function createTaskFromUrl(
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ source: { url }, ...rest })
-	});
-}
-
-export async function createTaskFromHash(
-	fetchFn: FetchLike,
-	req: CreateTaskFromHashRequest
-): Promise<{ task_id: number }> {
-	const { hash, ...rest } = req;
-	return requestJson<{ task_id: number }>(fetchFn, '/v1/tasks', {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ source: { hash }, ...rest })
 	});
 }
 

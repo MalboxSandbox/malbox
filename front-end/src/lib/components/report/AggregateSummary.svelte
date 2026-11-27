@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { splitDateTime, isTerminalStatus, formatBytes } from '#lib/api/format.ts';
 	import { cancelTask } from '#lib/api/tasks.ts';
+	import { isApiError } from '#lib/api/errors.ts';
+	import { invalidate } from '$app/navigation';
+	import { toasts } from '#lib/stores/toasts.svelte.ts';
 	import ScoreCard from './ScoreCard.svelte';
 	import PluginTile from './PluginTile.svelte';
 	import ThreatOverview from './ThreatOverview.svelte';
@@ -86,8 +89,10 @@
 		canceling = true;
 		try {
 			await cancelTask(fetch, task.id);
+			await invalidate('malbox:run-report');
 		} catch (e) {
-			console.error('Failed to cancel task:', e);
+			const msg = isApiError(e) ? e.message : e instanceof Error ? e.message : String(e);
+			toasts.push({ kind: 'error', message: `Failed to cancel task: ${msg}` });
 			canceling = false;
 		}
 	}

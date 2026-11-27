@@ -43,7 +43,7 @@
 				use:contextmenu={{
 					type: 'task',
 					value: task.target,
-					metadata: { taskId: task.id, status: task.status }
+					metadata: { taskId: task.id, status: task.status, sampleId: task.sample?.id }
 				}}
 			>
 				<div class="flex flex-col gap-1">

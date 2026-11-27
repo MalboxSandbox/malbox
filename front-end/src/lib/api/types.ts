@@ -3,19 +3,9 @@
 // `unknown`-like records here and will be tightened against live responses
 // in the relevant route tasks (machines list, machine detail, images).
 
-export type TaskStatus =
-	| 'pending'
-	| 'initializing'
-	| 'preparing_resources'
-	| 'running'
-	| 'stopping'
-	| 'completed'
-	| 'failed'
-	| 'canceled';
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
 export type Platform = 'windows' | 'linux';
 export type Arch = 'x64' | 'x86';
-export type ResultFormat = 'json' | 'bytes';
-export type ResultRole = 'report' | 'artifact';
 export type PluginType = 'guest' | 'host';
 
 export interface Sample {
@@ -43,7 +33,22 @@ export interface Task {
 	created_on: string;
 	started_on: string | null;
 	completed_on: string | null;
-	sample?: Sample;
+	params: SubmissionParams;
+	excluded_plugins: string[];
+	max_depth: number;
+	max_artifacts: number;
+	max_detonations: number;
+	error_count: number;
+	artifact_count: number;
+	partial: boolean;
+	parent_task_id: number | null;
+	root_artifact_id: number | null;
+	verdict: {
+		classification: Classification;
+		score: number | null;
+		artifact_id: number | null;
+	} | null;
+	sample?: Sample & { id: number };
 }
 
 export interface PaginatedTasks {
@@ -57,15 +62,108 @@ export interface TaskCounts {
 	by_status: Record<string, number>;
 }
 
-export interface TaskResult {
+// --- Artifact tree (GET /v1/tasks/{id}/tree)
+
+export type ArtifactRelation =
+	| 'root'
+	| 'extracted'
+	| 'dropped'
+	| 'unpacked'
+	| 'memdump'
+	| 'downloaded'
+	| 'pcap'
+	| 'output';
+export type ArtifactState = 'stored' | 'dropped' | 'pending' | 'running' | 'done' | 'canceled';
+export type JobKind = 'host' | 'detonation';
+export type JobState =
+	| 'blocked'
+	| 'ready'
+	| 'running'
+	| 'completed'
+	| 'failed'
+	| 'skipped'
+	| 'cached'
+	| 'canceled';
+export type AnalysisStage = 'filter' | 'extract' | 'static' | 'dynamic' | 'post' | 'review';
+export type JobErrorClass = 'recoverable' | 'nonrecoverable' | 'timeout' | 'machine_lost';
+
+export interface TaskArtifact {
 	id: number;
-	task_id: number;
-	plugin_name: string;
-	result_name: string;
-	format: ResultFormat;
-	role: ResultRole;
+	sha256: string;
 	size_bytes: number;
-	created_on: string;
+	analyze: boolean;
+	sample_id: number | null;
+	depth: number;
+	artifact_type: string;
+	mime: string;
+	state: ArtifactState;
+	drop_reason: string | null;
+	priority: number;
+	canceled_by: string | null;
+	promoted_task_id: number | null;
+	name: string;
+	relation: ArtifactRelation;
+	verdict?: { classification: Classification; score: number | null } | null;
+	content_url?: string | null;
+}
+
+export interface ArtifactEdge {
+	parent_artifact_id: number;
+	child_artifact_id: number;
+	relation: ArtifactRelation;
+	name: string | null;
+	source_job_id: number | null;
+	source_plugin: string | null;
+}
+
+export interface TaskJob {
+	id: number;
+	artifact_id: number;
+	kind: JobKind;
+	analyzer: string;
+	stage: AnalysisStage;
+	state: JobState;
+	attempts: number;
+	max_attempts: number;
+	reruns: number;
+	error_class: JobErrorClass | null;
+	error_message: string | null;
+	cached_from_job_id: number | null;
+	machine_id: number | null;
+	started_on: string | null;
+	completed_on: string | null;
+}
+
+export interface TaskTree {
+	task_id: number;
+	root_artifact_id: number | null;
+	artifacts: TaskArtifact[];
+	edges: ArtifactEdge[];
+	jobs: TaskJob[];
+}
+
+// --- Submission parameters (mirrors malbox_scheduler::SubmissionParams)
+
+export type DetonateMode = 'auto' | 'always' | 'never';
+export type ChildDetonation = 'extracted' | 'none' | 'all';
+
+export interface SubmissionParams {
+	detonate?: DetonateMode;
+	detonate_children?: ChildDetonation;
+	max_depth?: number;
+	max_artifacts?: number;
+	max_detonations?: number;
+	max_total_bytes?: number;
+	max_artifact_time_secs?: number;
+	deadline_secs?: number;
+	deep_scan?: boolean;
+	ignore_cache?: boolean;
+	ignore_recursion_prevention?: boolean;
+	ignore_filtering?: boolean;
+	ignore_size?: boolean;
+	plugin_params?: Record<string, Record<string, unknown>>;
+	initial_data?: { passwords?: string[] };
+	detonation?: { profile?: string; package?: string; dll_function?: string };
 }
 
 export interface Plugin {
@@ -189,16 +287,16 @@ export interface ProvisionRun {
 
 export interface CreateTaskFromFileRequest {
 	file: File;
-	package?: string;
 	timeout?: number;
 	priority?: number;
 	platform?: Platform;
 	tags?: string;
 	owner?: string;
-	enforce_timeout?: boolean;
 	target_filename?: string;
 	plugins?: string;
 	snapshot_id?: string;
+	machine_id?: number;
+	params?: SubmissionParams;
 }
 
 export interface RescanSampleRequest {
@@ -210,17 +308,12 @@ export interface RescanSampleRequest {
 	target_filename?: string;
 	plugins?: string;
 	snapshot_id?: string;
+	machine_id?: number;
+	params?: SubmissionParams;
 }
 
 export interface CreateTaskFromUrlRequest {
 	url: string;
-	tags?: string;
-	timeout?: number;
-	priority?: number;
-}
-
-export interface CreateTaskFromHashRequest {
-	hash: string;
 	tags?: string;
 	timeout?: number;
 	priority?: number;
@@ -366,6 +459,8 @@ export interface ArtifactLink {
 	format: string;
 	size_bytes: number;
 	url: string;
+	artifact_id: number;
+	analyze: boolean;
 }
 
 export interface PluginReportView {
@@ -433,6 +528,9 @@ export interface TaskSummary {
 	created_on: string;
 	started_on: string | null;
 	completed_on: string | null;
+	error_count: number;
+	artifact_count: number;
+	partial: boolean;
 }
 
 export interface SampleInfo {
@@ -460,6 +558,7 @@ export interface SampleOverviewResponse {
 	sample: SampleInfo;
 	tasks: TaskSummary[];
 	aggregate: SampleAggregate;
+	appearances: { task_id: number; artifact_id: number; depth: number }[];
 }
 
 export interface SampleReportResponse {
