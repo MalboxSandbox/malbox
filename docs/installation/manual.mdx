@@ -64,7 +64,7 @@ SQLX_OFFLINE=true cargo build --release -p malboxd -p malbox
 
 ### Selecting features
 
-The daemon binary supports Cargo features for choosing which providers and provisioners to compile in. The default build includes all of them. To select specific ones:
+The daemon binary supports Cargo features for choosing which providers and provisioners to compile in. The default build includes `provider-libvirt` and `provisioner-ansible`. To select specific ones:
 
 ```bash
 SQLX_OFFLINE=true cargo build --release -p malboxd \
@@ -77,6 +77,7 @@ Available features:
 | Feature | Description |
 | --- | --- |
 | `provider-libvirt` | KVM/QEMU via libvirt |
+| `provider-container` | Linux machines as Docker or Podman containers. Not built by default. See [container provider](/machinery/providers#container). |
 | `provisioner-ansible` | Machine provisioning with Ansible |
 
 ## Install the binaries
