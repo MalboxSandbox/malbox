@@ -35,7 +35,7 @@ fn default_watch() -> bool {
 }
 
 fn default_registry_repo() -> String {
-    "DualHorizon/malbox-plugin-registry".to_string()
+    "MalboxSandbox/malbox-plugin-registry".to_string()
 }
 
 fn default_cache_dir() -> PathBuf {

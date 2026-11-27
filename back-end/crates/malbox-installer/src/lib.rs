@@ -19,7 +19,7 @@ pub use progress::{NullObserver, ProgressObserver};
 
 /// Canonical GitHub coordinates for malbox releases. Single source of truth so
 /// the installer, upgrader and source-tarball fallbacks never drift apart.
-pub const GITHUB_OWNER: &str = "DualHorizon";
+pub const GITHUB_OWNER: &str = "MalboxSandbox";
 pub const GITHUB_REPO: &str = "malbox";
 
 /// Resolve an XDG directory with a `$HOME`-based fallback. Never falls back
