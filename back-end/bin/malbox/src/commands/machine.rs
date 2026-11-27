@@ -324,7 +324,9 @@ async fn provision(ctx: &Context, args: ProvisionArgs) -> Result<()> {
         .field_opt("Error", result.error_message.as_deref())
         .field_opt("Snapshot", result.snapshot_id.as_ref().map(display_json));
 
-    if result.status == "completed" || result.status == "success" {
+    if result.status.eq_ignore_ascii_case("completed")
+        || result.status.eq_ignore_ascii_case("success")
+    {
         format::success("Provisioning completed.");
     } else {
         println!(
