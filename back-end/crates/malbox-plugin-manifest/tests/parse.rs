@@ -1,6 +1,9 @@
+//! Tests for `plugin.toml` parsing, validation and runtime resolution.
+
 use malbox_plugin_manifest::{
-    ManifestError, ParameterKind, PathsConfig, PluginManifest, PluginStateConfig, PluginTypeConfig,
-    ResolvedRuntimeConfig, RuntimeConfig, Stage, StashConfig, parse_manifest, validate_manifest,
+    AutoCollectConfig, ManifestError, ParameterKind, PathsConfig, PluginManifest,
+    PluginStateConfig, PluginTypeConfig, ResolvedRuntimeConfig, RuntimeConfig, Stage, StashConfig,
+    parse_manifest, validate_manifest,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -93,8 +96,9 @@ fn parse_manifest_file_not_found() {
 }
 
 fn write_toml(contents: &str) -> tempfile::NamedTempFile {
-    let mut f = tempfile::NamedTempFile::new().unwrap();
-    f.write_all(contents.as_bytes()).unwrap();
+    let mut f = tempfile::NamedTempFile::new().expect("create temp file");
+    f.write_all(contents.as_bytes())
+        .expect("write temp manifest");
     f
 }
 
@@ -125,7 +129,7 @@ state = "{state}"
 execution = "{execution}"
 "#
     ))
-    .unwrap()
+    .expect("valid runtime toml")
 }
 
 #[test]
@@ -160,7 +164,7 @@ fn resolve_respects_explicit_fields() {
             ttl_secs: Some(300),
         },
         log_filter: Some("debug".into()),
-        auto_collect: Default::default(),
+        auto_collect: AutoCollectConfig::default(),
         analysis_timeout: None,
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
@@ -234,7 +238,7 @@ fn validate_accepts_windows_paths_for_guest_plugin() {
             ttl_secs: None,
         },
         log_filter: Some("info".into()),
-        auto_collect: Default::default(),
+        auto_collect: AutoCollectConfig::default(),
         analysis_timeout: None,
     };
     let r = ResolvedRuntimeConfig::from_raw(&raw);
@@ -455,5 +459,5 @@ include = ["drops/**"]
 relation = "dropped"
 "#
     ))
-    .unwrap()
+    .expect("valid runtime toml")
 }

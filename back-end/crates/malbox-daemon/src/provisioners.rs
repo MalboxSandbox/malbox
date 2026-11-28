@@ -7,7 +7,5 @@
 //! Provisioners are enabled via Cargo features:
 //! - `provisioner-ansible` - Ansible provisioner
 
-#![allow(unused_imports)]
-
 #[cfg(feature = "provisioner-ansible")]
 use malbox_provisioner_ansible as _;

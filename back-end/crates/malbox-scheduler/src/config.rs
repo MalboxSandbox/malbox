@@ -7,17 +7,17 @@ use time::OffsetDateTime;
 use crate::params::SubmissionParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectiveLimits {
-    pub max_depth: u32,
-    pub max_artifacts: u32,
-    pub max_detonations: u32,
-    pub max_total_bytes: u64,
-    pub max_artifact_time_secs: u64,
-    pub deadline_secs: u64,
+pub(crate) struct EffectiveLimits {
+    pub(crate) max_depth: u32,
+    pub(crate) max_artifacts: u32,
+    pub(crate) max_detonations: u32,
+    pub(crate) max_total_bytes: u64,
+    pub(crate) max_artifact_time_secs: u64,
+    pub(crate) deadline_secs: u64,
 }
 
 impl EffectiveLimits {
-    pub fn resolve(settings: &OrchestrationConfig, params: &SubmissionParams) -> Self {
+    pub(crate) fn resolve(settings: &OrchestrationConfig, params: &SubmissionParams) -> Self {
         Self {
             max_depth: params.max_depth.unwrap_or(settings.max_depth),
             max_artifacts: params.max_artifacts.unwrap_or(settings.max_artifacts),
@@ -31,7 +31,7 @@ impl EffectiveLimits {
     }
 
     /// Task deadline for a task (re)started now.
-    pub fn deadline_from_now(&self) -> OffsetDateTime {
+    pub(crate) fn deadline_from_now(&self) -> OffsetDateTime {
         OffsetDateTime::now_utc() + time::Duration::seconds(to_i64(self.deadline_secs))
     }
 }

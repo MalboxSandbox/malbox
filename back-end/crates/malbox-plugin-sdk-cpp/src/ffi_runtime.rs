@@ -12,7 +12,9 @@ use std::ffi::{CStr, c_char};
 
 use malbox_plugin_sdk::meta::{ExecutionContext, PluginMeta, PluginState};
 #[cfg(feature = "guest")]
-use malbox_plugin_sdk::runtime::guest::GuestRuntime;
+use malbox_plugin_sdk::runtime::guest::{
+    AutoCollectRuleRuntime, AutoCollectRuntimeConfig, GuestRuntime, GuestRuntimeConfig,
+};
 #[cfg(feature = "host")]
 use malbox_plugin_sdk::runtime::host::HostRuntime;
 
@@ -21,14 +23,14 @@ use crate::error::set_last_error;
 use crate::ffi_callbacks::VtablePlugin;
 #[cfg(feature = "guest")]
 use crate::ffi_guest_callbacks::GuestVtablePlugin;
-#[cfg(feature = "guest")]
-use crate::ffi_types::MalboxGuestPluginVtable;
-#[cfg(feature = "guest")]
-use crate::ffi_types::MalboxGuestRuntimeConfig;
 #[cfg(feature = "host")]
 use crate::ffi_types::MalboxPluginVtable;
 use crate::ffi_types::{
     MALBOX_ABI_VERSION, MalboxExecutionContext, MalboxPluginMeta, MalboxPluginState,
+};
+#[cfg(feature = "guest")]
+use crate::ffi_types::{
+    MalboxAutoCollectConfig, MalboxGuestPluginVtable, MalboxGuestRuntimeConfig,
 };
 
 /// Convert a `*const c_char` to a `&'static str` by copying the bytes and
@@ -37,10 +39,14 @@ use crate::ffi_types::{
 /// entire process lifetime.
 ///
 /// Returns `Err` if the pointer is null or the string is not valid UTF-8.
+///
+/// # Safety
+/// `ptr`, if non-null, must point to a valid NUL-terminated C string.
 unsafe fn static_str_from_ptr(ptr: *const c_char, field: &str) -> Result<&'static str, String> {
     if ptr.is_null() {
         return Err(format!("meta.{field} is null"));
     }
+    // SAFETY: `ptr` is non-null and the caller guarantees it is NUL-terminated.
     let cstr = unsafe { CStr::from_ptr(ptr) };
     let s = cstr
         .to_str()
@@ -52,10 +58,14 @@ unsafe fn static_str_from_ptr(ptr: *const c_char, field: &str) -> Result<&'stati
 
 /// Convert a non-null `*const c_char` config field to a leaked `&'static str`.
 ///
-/// Sets the last FFI error and returns `Err(())` on failure (null pointer or
-/// invalid UTF-8). Intended for the non-nullable path fields in
-/// [`MalboxGuestRuntimeConfig`].
+/// Sets the last FFI error and returns `Err(())` on failure (invalid UTF-8).
+/// Intended for the non-nullable path fields in [`MalboxGuestRuntimeConfig`].
+///
+/// # Safety
+/// `ptr` must be non-null and point to a valid NUL-terminated C string.
+#[cfg(feature = "guest")]
 unsafe fn leak_cstr_to_static(ptr: *const c_char, field: &str) -> Result<&'static str, ()> {
+    // SAFETY: the caller guarantees `ptr` is non-null and NUL-terminated.
     let cstr = unsafe { CStr::from_ptr(ptr) };
     match cstr.to_str() {
         Ok(s) => Ok(&*Box::leak(s.to_owned().into_boxed_str())),
@@ -71,14 +81,18 @@ unsafe fn leak_cstr_to_static(ptr: *const c_char, field: &str) -> Result<&'stati
 /// # Safety
 /// All non-null pointer fields in `meta` must point to valid, null-terminated
 /// C strings for the duration of this call.
-unsafe fn convert_meta(meta: MalboxPluginMeta) -> Result<PluginMeta, String> {
+unsafe fn convert_meta(meta: &MalboxPluginMeta) -> Result<PluginMeta, String> {
+    // SAFETY: forwarded from this function's caller contract on `meta.name`.
     let name = unsafe { static_str_from_ptr(meta.name, "name") }?.to_string();
+    // SAFETY: forwarded from this function's caller contract on `meta.version`.
     let version = unsafe { static_str_from_ptr(meta.version, "version") }?.to_string();
+    // SAFETY: forwarded from this function's caller contract on `meta.authors`.
     let authors = unsafe { static_str_from_ptr(meta.authors, "authors") }?.to_string();
 
     let description = if meta.description.is_null() {
         String::new()
     } else {
+        // SAFETY: non-null and covered by this function's caller contract.
         unsafe { static_str_from_ptr(meta.description, "description") }?.to_string()
     };
 
@@ -132,7 +146,8 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
         return -1;
     }
 
-    let plugin_meta = match unsafe { convert_meta(meta) } {
+    // SAFETY: forwarded from this function's caller contract on `meta`.
+    let plugin_meta = match unsafe { convert_meta(&meta) } {
         Ok(m) => m,
         Err(e) => {
             set_last_error(&e);
@@ -159,6 +174,182 @@ pub unsafe extern "C" fn malbox_run_host_plugin(
             -1
         }
     }
+}
+
+/// Leak a C array of pattern strings into a `'static` slice (null entries skipped).
+///
+/// # Safety
+/// `ptr`, if non-null, must point to `count` C-string pointers, each of which is
+/// null or a valid NUL-terminated C string.
+#[cfg(feature = "guest")]
+unsafe fn leak_patterns(ptr: *const *const c_char, count: usize) -> &'static [&'static str] {
+    if ptr.is_null() || count == 0 {
+        return &[];
+    }
+    // SAFETY: `ptr` is non-null and the caller guarantees `count` elements.
+    let slice = unsafe { std::slice::from_raw_parts(ptr, count) };
+    let leaked: Vec<&'static str> = slice
+        .iter()
+        .filter(|p| !p.is_null())
+        // SAFETY: `p` is non-null and the caller guarantees it is NUL-terminated.
+        .filter_map(|&p| unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok())
+        .collect();
+    Box::leak(leaked.into_boxed_slice())
+}
+
+/// Convert one C auto-collect rule, validating its relation and analyze flag.
+///
+/// Sets the last FFI error and returns `Err(())` on an invalid value.
+///
+/// # Safety
+/// The `include`/`exclude` arrays in `r` must satisfy [`leak_patterns`]'s contract.
+#[cfg(feature = "guest")]
+unsafe fn convert_auto_collect_rule(
+    r: &crate::ffi_types::MalboxAutoCollectRule,
+) -> Result<AutoCollectRuleRuntime, ()> {
+    use malbox_plugin_sdk::ArtifactRelation;
+
+    let Some((wire, relation)) = u8::try_from(r.relation).ok().and_then(|wire| {
+        ArtifactRelation::try_from(wire)
+            .ok()
+            .filter(|rel| *rel != ArtifactRelation::Root)
+            .map(|rel| (wire, rel))
+    }) else {
+        set_last_error(&format!(
+            "unknown auto-collect rule relation {}",
+            r.relation
+        ));
+        return Err(());
+    };
+    let analyze = match r.analyze {
+        -1 => relation.default_analyze(),
+        0 => false,
+        1 => true,
+        other => {
+            set_last_error(&format!("invalid auto-collect rule analyze {other}"));
+            return Err(());
+        }
+    };
+    Ok(AutoCollectRuleRuntime {
+        // SAFETY: forwarded from this function's caller contract on `r.include`.
+        include: unsafe { leak_patterns(r.include, r.include_count) },
+        // SAFETY: forwarded from this function's caller contract on `r.exclude`.
+        exclude: unsafe { leak_patterns(r.exclude, r.exclude_count) },
+        relation: wire,
+        analyze,
+    })
+}
+
+/// Convert one C auto-collect section, leaking its strings and rules.
+///
+/// # Safety
+/// All pointers in `ac` must be valid for their declared counts.
+#[cfg(feature = "guest")]
+unsafe fn convert_auto_collect(
+    ac: &MalboxAutoCollectConfig,
+) -> Result<AutoCollectRuntimeConfig, ()> {
+    let rules: &'static [AutoCollectRuleRuntime] = if ac.rules.is_null() || ac.rule_count == 0 {
+        &[]
+    } else {
+        // SAFETY: `ac.rules` is non-null and the caller guarantees `rule_count` elements.
+        let c_rules = unsafe { std::slice::from_raw_parts(ac.rules, ac.rule_count) };
+        let mut out = Vec::with_capacity(c_rules.len());
+        for r in c_rules {
+            // SAFETY: each rule's arrays are covered by this function's caller contract.
+            out.push(unsafe { convert_auto_collect_rule(r) }?);
+        }
+        Box::leak(out.into_boxed_slice())
+    };
+    Ok(AutoCollectRuntimeConfig {
+        enabled: ac.enabled,
+        // SAFETY: forwarded from this function's caller contract on `ac.include`.
+        include: unsafe { leak_patterns(ac.include, ac.include_count) },
+        // SAFETY: forwarded from this function's caller contract on `ac.exclude`.
+        exclude: unsafe { leak_patterns(ac.exclude, ac.exclude_count) },
+        max_file_size: ac.max_file_size,
+        rules,
+    })
+}
+
+/// Validate and convert the C guest runtime configuration, leaking its strings.
+///
+/// Sets the last FFI error and returns `Err(())` on a null or non-UTF-8 string
+/// or an invalid auto-collect rule.
+///
+/// # Safety
+/// Every non-null string pointer in `config` must be a valid NUL-terminated C
+/// string, and every auto-collect array must be valid for its declared count.
+#[cfg(feature = "guest")]
+unsafe fn convert_guest_config(
+    config: &MalboxGuestRuntimeConfig,
+) -> Result<GuestRuntimeConfig, ()> {
+    // Null-check all non-nullable path fields and log_filter.
+    for (ptr, name) in [
+        (config.sample_dir, "sample_dir"),
+        (config.artifact_dir, "artifact_dir"),
+        (config.stash_dir, "stash_dir"),
+        (config.log_dir, "log_dir"),
+        (config.external_log_dir, "external_log_dir"),
+        (config.log_filter, "log_filter"),
+    ] {
+        if ptr.is_null() {
+            set_last_error(&format!("config.{name} is null"));
+            return Err(());
+        }
+    }
+
+    // Convert each C string to a leaked `&'static str`.
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let sample_dir = unsafe { leak_cstr_to_static(config.sample_dir, "sample_dir") }?;
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let artifact_dir = unsafe { leak_cstr_to_static(config.artifact_dir, "artifact_dir") }?;
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let stash_dir = unsafe { leak_cstr_to_static(config.stash_dir, "stash_dir") }?;
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let log_dir = unsafe { leak_cstr_to_static(config.log_dir, "log_dir") }?;
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let external_log_dir =
+        unsafe { leak_cstr_to_static(config.external_log_dir, "external_log_dir") }?;
+    // SAFETY: non-null (checked above) and NUL-terminated per the caller contract.
+    let log_filter = unsafe { leak_cstr_to_static(config.log_filter, "log_filter") }?;
+
+    // SAFETY: the auto-collect arrays are covered by this function's caller contract.
+    let auto_collect_artifacts = unsafe { convert_auto_collect(&config.auto_collect_artifacts) }?;
+    // SAFETY: the auto-collect arrays are covered by this function's caller contract.
+    let auto_collect_external_logs =
+        unsafe { convert_auto_collect(&config.auto_collect_external_logs) }?;
+
+    Ok(GuestRuntimeConfig {
+        listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            config.port,
+        )),
+        sample_dir,
+        artifact_dir,
+        stash_dir,
+        log_dir,
+        external_log_dir,
+        stash_threshold_bytes: config.stash_threshold_bytes,
+        stash_ttl_secs: config.stash_ttl_secs,
+        log_filter,
+        analysis_timeout: config.analysis_timeout,
+        auto_collect_artifacts,
+        auto_collect_external_logs,
+    })
+}
+
+/// Render `err` followed by one `caused by:` line per error in its source chain.
+#[cfg(feature = "guest")]
+fn format_error_chain(prefix: &str, err: &dyn std::error::Error) -> String {
+    use std::fmt::Write as _;
+
+    let mut msg = format!("{prefix}: {err}");
+    let mut source = err.source();
+    while let Some(cause) = source {
+        write!(msg, "\n  caused by: {cause}").expect("writing to a String cannot fail");
+        source = cause.source();
+    }
+    msg
 }
 
 /// Start a gRPC-based guest plugin runtime.
@@ -192,145 +383,21 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         return -1;
     }
 
-    let plugin_meta = match unsafe { convert_meta(meta) } {
-        Ok(m) => m,
-        Err(e) => {
-            set_last_error(&e);
-            return -1;
-        }
-    };
-
-    // Null-check all non-nullable path fields and log_filter.
-    for (ptr, name) in [
-        (config.sample_dir, "sample_dir"),
-        (config.artifact_dir, "artifact_dir"),
-        (config.stash_dir, "stash_dir"),
-        (config.log_dir, "log_dir"),
-        (config.external_log_dir, "external_log_dir"),
-        (config.log_filter, "log_filter"),
-    ] {
-        if ptr.is_null() {
-            set_last_error(&format!("config.{name} is null"));
-            return -1;
-        }
-    }
-
-    // Convert each C string to a leaked `&'static str`.
-    let sample_dir = match unsafe { leak_cstr_to_static(config.sample_dir, "sample_dir") } {
-        Ok(s) => s,
-        Err(()) => return -1,
-    };
-    let artifact_dir = match unsafe { leak_cstr_to_static(config.artifact_dir, "artifact_dir") } {
-        Ok(s) => s,
-        Err(()) => return -1,
-    };
-    let stash_dir = match unsafe { leak_cstr_to_static(config.stash_dir, "stash_dir") } {
-        Ok(s) => s,
-        Err(()) => return -1,
-    };
-    let log_dir = match unsafe { leak_cstr_to_static(config.log_dir, "log_dir") } {
-        Ok(s) => s,
-        Err(()) => return -1,
-    };
-    let external_log_dir =
-        match unsafe { leak_cstr_to_static(config.external_log_dir, "external_log_dir") } {
-            Ok(s) => s,
-            Err(()) => return -1,
-        };
-    let log_filter = match unsafe { leak_cstr_to_static(config.log_filter, "log_filter") } {
-        Ok(s) => s,
-        Err(()) => return -1,
-    };
-
-    /// Leak a C array of pattern strings into a `'static` slice (null entries skipped).
-    ///
-    /// # Safety
-    /// `ptr`, if non-null, must point to `count` C-string pointers.
-    unsafe fn leak_patterns(ptr: *const *const c_char, count: usize) -> &'static [&'static str] {
-        if ptr.is_null() || count == 0 {
-            return &[];
-        }
-        let slice = unsafe { std::slice::from_raw_parts(ptr, count) };
-        let leaked: Vec<&'static str> = slice
-            .iter()
-            .filter(|p| !p.is_null())
-            .filter_map(|&p| unsafe { leak_cstr_to_static(p, "auto_collect pattern") }.ok())
-            .collect();
-        Box::leak(leaked.into_boxed_slice())
-    }
-
-    /// Convert one C auto-collect section, leaking its strings and rules.
-    ///
-    /// # Safety
-    /// All pointers in `ac` must be valid for their declared counts.
-    unsafe fn convert_auto_collect(
-        ac: &crate::ffi_types::structs::MalboxAutoCollectConfig,
-    ) -> Result<malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig, ()> {
-        use malbox_plugin_sdk::ArtifactRelation;
-        use malbox_plugin_sdk::runtime::guest::AutoCollectRuleRuntime;
-
-        let rules: &'static [AutoCollectRuleRuntime] = if ac.rules.is_null() || ac.rule_count == 0 {
-            &[]
-        } else {
-            let c_rules = unsafe { std::slice::from_raw_parts(ac.rules, ac.rule_count) };
-            let mut out = Vec::with_capacity(c_rules.len());
-            for r in c_rules {
-                let relation = match u8::try_from(r.relation)
-                    .ok()
-                    .and_then(|v| ArtifactRelation::try_from(v).ok())
-                {
-                    Some(rel) if rel != ArtifactRelation::Root => rel,
-                    _ => {
-                        set_last_error(&format!(
-                            "unknown auto-collect rule relation {}",
-                            r.relation
-                        ));
-                        return Err(());
-                    }
-                };
-                let analyze = match r.analyze {
-                    -1 => relation.default_analyze(),
-                    0 => false,
-                    1 => true,
-                    other => {
-                        set_last_error(&format!("invalid auto-collect rule analyze {other}"));
-                        return Err(());
-                    }
-                };
-                out.push(AutoCollectRuleRuntime {
-                    include: unsafe { leak_patterns(r.include, r.include_count) },
-                    exclude: unsafe { leak_patterns(r.exclude, r.exclude_count) },
-                    relation: relation as u8,
-                    analyze,
-                });
-            }
-            Box::leak(out.into_boxed_slice())
-        };
-        Ok(
-            malbox_plugin_sdk::runtime::guest::AutoCollectRuntimeConfig {
-                enabled: ac.enabled,
-                include: unsafe { leak_patterns(ac.include, ac.include_count) },
-                exclude: unsafe { leak_patterns(ac.exclude, ac.exclude_count) },
-                max_file_size: ac.max_file_size,
-                rules,
-            },
-        )
-    }
-
-    let Ok(auto_collect_artifacts) =
-        (unsafe { convert_auto_collect(&config.auto_collect_artifacts) })
-    else {
+    // The guest runtime takes no metadata; converting it only validates `meta`.
+    // SAFETY: forwarded from this function's caller contract on `meta`.
+    if let Err(e) = unsafe { convert_meta(&meta) } {
+        set_last_error(&e);
         return -1;
-    };
-    let Ok(auto_collect_external_logs) =
-        (unsafe { convert_auto_collect(&config.auto_collect_external_logs) })
-    else {
+    }
+
+    // SAFETY: forwarded from this function's caller contract on `config`.
+    let Ok(rt_config) = (unsafe { convert_guest_config(&config) }) else {
         return -1;
     };
 
     let plugin = GuestVtablePlugin::new(vtable);
 
-    let log_dir_path = std::path::PathBuf::from(log_dir);
+    let log_dir_path = std::path::PathBuf::from(rt_config.log_dir);
     let _ = std::fs::create_dir_all(&log_dir_path);
     malbox_plugin_sdk::runtime::guest::sweep_log_overflow_orphans(&log_dir_path);
     let overflow_path = log_dir_path.join(format!("run-{}.overflow.jsonl", std::process::id()));
@@ -339,42 +406,18 @@ pub unsafe extern "C" fn malbox_run_guest_plugin(
         1024,
         overflow_path,
     ));
-    malbox_plugin_sdk::internal::init_tracing(log_filter, Some(std::sync::Arc::clone(&log_bus)));
+    malbox_plugin_sdk::internal::init_tracing(
+        rt_config.log_filter,
+        Some(std::sync::Arc::clone(&log_bus)),
+    );
     crate::ffi_log::set_global_log_bus(std::sync::Arc::clone(&log_bus));
-
-    let rt_config = malbox_plugin_sdk::runtime::guest::GuestRuntimeConfig {
-        listen_addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
-            std::net::Ipv4Addr::UNSPECIFIED,
-            config.port,
-        )),
-        sample_dir,
-        artifact_dir,
-        stash_dir,
-        log_dir,
-        external_log_dir,
-        stash_threshold_bytes: config.stash_threshold_bytes,
-        stash_ttl_secs: config.stash_ttl_secs,
-        log_filter,
-        analysis_timeout: config.analysis_timeout,
-        auto_collect_artifacts,
-        auto_collect_external_logs,
-    };
-
-    // Keep plugin_meta alive to prevent its `&'static str` strings from being dropped.
-    let _meta_keepalive = plugin_meta;
 
     let runtime = GuestRuntime::with_config(plugin, rt_config).with_log_bus(log_bus);
 
     match runtime.run_blocking() {
         Ok(()) => 0,
         Err(e) => {
-            let mut msg = format!("guest runtime error: {e}");
-            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
-            while let Some(cause) = source {
-                msg.push_str(&format!("\n  caused by: {cause}"));
-                source = std::error::Error::source(cause);
-            }
-            set_last_error(&msg);
+            set_last_error(&format_error_chain("guest runtime error", &e));
             -1
         }
     }
@@ -414,6 +457,8 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
+        // SAFETY: meta strings borrow live CStrings; the ABI mismatch returns
+        // before any callback could run.
         let rc = unsafe { malbox_run_host_plugin(vtable, meta) };
         assert_eq!(rc, -1);
 
@@ -474,6 +519,8 @@ mod tests {
             auto_collect_artifacts: disabled_ac,
             auto_collect_external_logs: disabled_ac,
         };
+        // SAFETY: all strings borrow live CStrings; the ABI mismatch returns
+        // before any callback could run.
         let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
         assert_eq!(rc, -1);
 
@@ -529,6 +576,8 @@ mod tests {
             auto_collect_external_logs: disabled_ac,
         };
 
+        // SAFETY: all non-null strings borrow live CStrings; the null
+        // `sample_dir` is rejected before the runtime starts.
         let rc = unsafe { malbox_run_guest_plugin(vtable, meta, config) };
         assert_eq!(rc, -1);
         let err = crate::error::last_error_string().unwrap();
@@ -556,6 +605,8 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
+        // SAFETY: non-null meta strings borrow live CStrings; the null name is
+        // rejected before the runtime starts.
         let rc = unsafe { malbox_run_host_plugin(vtable, meta) };
         assert_eq!(rc, -1);
 
@@ -586,6 +637,8 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
+        // SAFETY: non-null meta strings borrow live CStrings; the null version
+        // is rejected before the runtime starts.
         let rc = unsafe { malbox_run_host_plugin(vtable, meta) };
         assert_eq!(rc, -1);
 
@@ -613,6 +666,8 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
+        // SAFETY: non-null meta strings borrow live CStrings; the null authors
+        // field is rejected before the runtime starts.
         let rc = unsafe { malbox_run_host_plugin(vtable, meta) };
         assert_eq!(rc, -1);
 
@@ -638,7 +693,8 @@ mod tests {
             execution: MalboxExecutionContext::Unrestricted,
         };
 
-        let result = unsafe { convert_meta(meta) };
+        // SAFETY: all non-null meta strings borrow live CStrings.
+        let result = unsafe { convert_meta(&meta) };
         assert!(result.is_ok());
         let plugin_meta = result.unwrap();
         assert!(plugin_meta.description().is_empty());

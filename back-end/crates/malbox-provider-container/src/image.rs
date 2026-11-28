@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     fn lines(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
+        items.iter().map(ToString::to_string).collect()
     }
 
     #[test]

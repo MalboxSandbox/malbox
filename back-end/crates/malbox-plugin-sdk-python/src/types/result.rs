@@ -10,7 +10,8 @@ use super::report::{PyArtifactRef, PyBlock, PyClassification, PyConfidence, PyIn
 // ─── PluginResult ───────────────────────────────────────────────────────────
 
 #[pyclass(name = "PluginResult", module = "malbox_plugin_sdk", from_py_object)]
-pub struct PyPluginResult {
+#[derive(Debug)]
+pub(crate) struct PyPluginResult {
     pub(crate) inner: PluginResult,
 }
 
@@ -37,10 +38,10 @@ impl Clone for PyPluginResult {
 #[pymethods]
 impl PyPluginResult {
     #[staticmethod]
-    fn json(py: Python<'_>, name: String, data: Py<PyAny>) -> PyResult<Self> {
+    fn json(py: Python<'_>, name: String, data: &Bound<'_, PyAny>) -> PyResult<Self> {
         let json_str = py
             .import("json")?
-            .call_method1("dumps", (data.bind(py),))?
+            .call_method1("dumps", (data,))?
             .extract::<String>()?;
         let json_bytes: Vec<u8> = json_str.into_bytes();
         Ok(Self {
@@ -84,7 +85,8 @@ impl From<PyPluginResult> for PluginResult {
 // ─── ReportBuilder ──────────────────────────────────────────────────────────
 
 #[pyclass(name = "ReportBuilder", module = "malbox_plugin_sdk")]
-pub struct PyReportBuilder {
+#[derive(Debug)]
+pub(crate) struct PyReportBuilder {
     plugin_id: String,
     plugin_version: String,
     display_name: Option<String>,
@@ -169,11 +171,14 @@ impl PyReportBuilder {
         slf
     }
 
-    fn raw(mut slf: PyRefMut<'_, Self>, value: Py<PyAny>) -> PyResult<PyRefMut<'_, Self>> {
+    fn raw<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
         let json_val: serde_json::Value = Python::attach(|py| {
             let json_str = py
                 .import("json")?
-                .call_method1("dumps", (value.bind(py),))?
+                .call_method1("dumps", (value,))?
                 .extract::<String>()?;
             serde_json::from_str(&json_str)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
@@ -183,7 +188,7 @@ impl PyReportBuilder {
     }
 
     fn build(&self) -> PyResult<PyPluginResult> {
-        let report = self.build_report()?;
+        let report = self.build_report();
         let result = report
             .into_plugin_result()
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -192,7 +197,7 @@ impl PyReportBuilder {
 }
 
 impl PyReportBuilder {
-    fn build_report(&self) -> PyResult<Report> {
+    fn build_report(&self) -> Report {
         let mut builder = ReportBuilder::new(&self.plugin_id, &self.plugin_version);
 
         if let Some(ref name) = self.display_name {
@@ -234,14 +239,15 @@ impl PyReportBuilder {
             builder = builder.raw(raw);
         }
 
-        Ok(builder.build())
+        builder.build()
     }
 }
 
 // ─── SectionBuilder (Python convenience, not wrapping Rust SectionBuilder) ──
 
 #[pyclass(name = "SectionBuilder", module = "malbox_plugin_sdk")]
-pub struct PySectionBuilder {
+#[derive(Debug)]
+pub(crate) struct PySectionBuilder {
     pub(crate) blocks: Vec<PyBlock>,
 }
 

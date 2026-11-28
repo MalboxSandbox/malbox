@@ -1,3 +1,5 @@
+//! Tests for soft-dependency checks and extracted plugin validation.
+
 use malbox_plugin_registry::index::Dependency;
 use malbox_plugin_registry::install::{check_soft_deps, validate_extracted_plugin};
 use malbox_plugin_registry::lockfile::Lockfile;

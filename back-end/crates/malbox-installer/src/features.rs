@@ -8,12 +8,16 @@
 
 /// Whether a feature adds a virtualization provider or a machine provisioner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FeatureKind {
+    /// `provider-*` feature adding a virtualization provider.
     Provider,
+    /// `provisioner-*` feature adding a machine provisioner.
     Provisioner,
 }
 
 /// A daemon Cargo feature exposed to users.
+#[derive(Debug)]
 pub struct DaemonFeature {
     /// Human-readable label shown in interactive prompts (prefix stripped).
     pub display: &'static str,

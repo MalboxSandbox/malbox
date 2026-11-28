@@ -5,4 +5,4 @@
 
 mod grpc;
 
-pub use grpc::GrpcClient;
+pub use grpc::{ExecMode, GrpcClient, LogReplay, ShutdownMode};

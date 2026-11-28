@@ -3,12 +3,12 @@ use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
 use malbox_cli_common::types::OutputFormat;
 
-pub mod completion;
-pub mod daemon;
-pub mod image;
-pub mod machine;
-pub mod plugin;
-pub mod task;
+pub(crate) mod completion;
+pub(crate) mod daemon;
+pub(crate) mod image;
+pub(crate) mod machine;
+pub(crate) mod plugin;
+pub(crate) mod task;
 
 #[derive(Parser)]
 #[command(
@@ -18,7 +18,7 @@ pub mod task;
     long_about = "malbox - malware analysis sandbox\n\nSubmit samples, manage analysis tasks, and administer the sandbox.\nUse 'malbox daemon' for host-local daemon management.",
     after_help = "Use 'malbox <command> --help' for more information about a command."
 )]
-pub struct Cli {
+pub(crate) struct Cli {
     #[arg(long, global = true, default_value = "text")]
     pub format: OutputFormat,
 
@@ -36,7 +36,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
-pub enum Commands {
+pub(crate) enum Commands {
     /// Manage analysis tasks
     Task(task::TaskCommand),
     /// Manage VM images
@@ -51,7 +51,7 @@ pub enum Commands {
     Completion(completion::CompletionCommand),
 }
 
-pub use malbox_cli_common::command::Command;
+pub(crate) use malbox_cli_common::command::Command;
 
 impl Command for Cli {
     async fn execute(self, ctx: &Context) -> Result<()> {

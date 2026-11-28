@@ -3,12 +3,20 @@ use crate::index::PluginMetadata;
 use crate::lockfile::{InstallSource, Lockfile};
 use std::path::Path;
 
+/// A registry dependency declared by an installed plugin but absent from the lockfile.
+#[derive(Debug)]
 pub struct MissingDep {
+    /// Installed plugin that declares the dependency.
     pub plugin: String,
+    /// Name of the missing dependency plugin.
     pub dep_name: String,
+    /// Version requirement declared for the dependency.
     pub dep_version: String,
 }
 
+/// List registry dependencies of installed plugins that are not installed, using
+/// only cached metadata; unreadable lockfiles or cache entries are skipped silently.
+#[must_use]
 pub fn check_startup_deps(plugins_dir: &Path, cache_dir: &Path) -> Vec<MissingDep> {
     let mut missing = Vec::new();
 

@@ -19,7 +19,7 @@ use malbox_cli_common::utils::progress::Spinner;
                   malbox machine snapshot list win10-dev\n  \
                   malbox machine snapshot delete win10-dev with-yara"
 )]
-pub struct MachineCommand {
+pub(crate) struct MachineCommand {
     #[command(subcommand)]
     command: MachineCommands,
 }
@@ -208,13 +208,11 @@ async fn snapshot_list(ctx: &Context, args: SnapshotListArgs) -> Result<()> {
         let tags = s
             .tags
             .as_ref()
-            .map(|t| t.join(", "))
-            .unwrap_or_else(|| "-".to_string());
-        let created = s
-            .created_at
-            .as_ref()
-            .map(|v| format::format_time(&display_json(v)))
-            .unwrap_or_else(|| "-".to_string());
+            .map_or_else(|| "-".to_string(), |t| t.join(", "));
+        let created = s.created_at.as_ref().map_or_else(
+            || "-".to_string(),
+            |v| format::format_time(&display_json(v)),
+        );
 
         table.add_row(vec![
             active,
@@ -233,36 +231,35 @@ async fn snapshot_list(ctx: &Context, args: SnapshotListArgs) -> Result<()> {
 async fn snapshot_delete(ctx: &Context, args: SnapshotDeleteArgs) -> Result<()> {
     let machine_id = resolve_machine(ctx, args.machine).await?;
 
-    let snapshot_name = match args.snapshot_name {
-        Some(name) => name,
-        None => {
-            let snaps = ctx.api.list_snapshots(machine_id).await?;
-            if snaps.is_empty() {
-                return Err(CliError::InvalidArgument(
-                    "no snapshots available on this machine".to_string(),
-                ));
-            }
-            let items: Vec<String> = snaps.iter().map(|s| s.name.clone()).collect();
-            let selection =
-                format::fuzzy_select("Select snapshot to delete", &items).ok_or_else(|| {
-                    CliError::InvalidArgument(
-                        "snapshot selection required (not a terminal?)".to_string(),
-                    )
-                })?;
-            items[selection].clone()
+    let snapshot_name = if let Some(name) = args.snapshot_name {
+        name
+    } else {
+        let snaps = ctx.api.list_snapshots(machine_id).await?;
+        if snaps.is_empty() {
+            return Err(CliError::InvalidArgument(
+                "no snapshots available on this machine".to_string(),
+            ));
         }
+        let items: Vec<String> = snaps.iter().map(|s| s.name.clone()).collect();
+        let selection =
+            format::fuzzy_select("Select snapshot to delete", &items).ok_or_else(|| {
+                CliError::InvalidArgument(
+                    "snapshot selection required (not a terminal?)".to_string(),
+                )
+            })?;
+        items[selection].clone()
     };
 
-    let prompt = format!("Delete snapshot '{}'?", snapshot_name);
-    if !format::confirm(&prompt, ctx.yes) {
+    let prompt = format!("Delete snapshot '{snapshot_name}'?");
+    if !ctx.yes && !format::confirm(&prompt) {
         format::empty("Cancelled.");
         return Ok(());
     }
 
-    let spinner = Spinner::start(format!("Deleting snapshot '{}'...", snapshot_name));
+    let spinner = Spinner::start(format!("Deleting snapshot '{snapshot_name}'..."));
     ctx.api.delete_snapshot(machine_id, &snapshot_name).await?;
     drop(spinner);
-    format::success(format!("Snapshot '{}' deleted.", snapshot_name));
+    format::success(format!("Snapshot '{snapshot_name}' deleted."));
     Ok(())
 }
 
@@ -311,7 +308,7 @@ async fn provision(ctx: &Context, args: ProvisionArgs) -> Result<()> {
         .as_deref()
         .map(serde_json::from_str)
         .transpose()
-        .map_err(|e| CliError::InvalidArgument(format!("invalid --config JSON: {}", e)))?;
+        .map_err(|e| CliError::InvalidArgument(format!("invalid --config JSON: {e}")))?;
 
     let request = ProvisionRequest {
         provisioner: args.provisioner,
@@ -361,13 +358,11 @@ async fn provision_history(ctx: &Context, args: ProvisionHistoryArgs) -> Result<
         let snapshot = r
             .snapshot_id
             .as_ref()
-            .map(display_json)
-            .unwrap_or_else(|| "-".to_string());
-        let created = r
-            .created_at
-            .as_ref()
-            .map(|v| format::format_time(&display_json(v)))
-            .unwrap_or_else(|| "-".to_string());
+            .map_or_else(|| "-".to_string(), display_json);
+        let created = r.created_at.as_ref().map_or_else(
+            || "-".to_string(),
+            |v| format::format_time(&display_json(v)),
+        );
 
         table.add_row(vec![
             styled_status(&r.status),

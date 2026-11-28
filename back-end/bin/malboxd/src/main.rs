@@ -1,3 +1,5 @@
+//! `malboxd`: the malbox analysis daemon entry point.
+
 use clap::Parser;
 use color_eyre::Result;
 use malbox_tracing::{init_tracing, parse_log_level};
@@ -8,7 +10,7 @@ use tracing::level_filters::LevelFilter;
 #[derive(Parser)]
 #[command(name = "malboxd", about = "Malbox analysis daemon")]
 struct Args {
-    /// Log level (error | warn | info | debug | trace). Overridden by RUST_LOG.
+    /// Log level (error | warn | info | debug | trace). Overridden by `RUST_LOG`.
     #[arg(long, default_value = "info", value_parser = parse_log_level)]
     log_level: LevelFilter,
 }

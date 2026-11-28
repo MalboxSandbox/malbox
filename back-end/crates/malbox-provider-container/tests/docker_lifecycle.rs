@@ -10,7 +10,7 @@ use std::process::Command;
 use malbox_machinery::provider::TomlValue;
 use malbox_machinery::{
     Allocate, Arch, CreateMachineParams, ExecOptions, GuestAccess, Machine, MachineId, Platform,
-    Snapshot,
+    Snapshot, StopMode,
 };
 use malbox_provider_container::ContainerProvider;
 
@@ -70,7 +70,7 @@ async fn container_lifecycle() {
     let name = format!("lifecycle-{}", std::process::id());
     let _cleanup = Cleanup { name: name.clone() };
 
-    let mut config = TomlValue::Table(Default::default());
+    let mut config = TomlValue::from(std::collections::BTreeMap::<String, TomlValue>::new());
     let table = config.as_table_mut().unwrap();
     table.insert("network".into(), TomlValue::String(NETWORK.into()));
     table.insert("subnet".into(), TomlValue::String("172.31.250.0/24".into()));
@@ -95,10 +95,10 @@ async fn container_lifecycle() {
     assert_eq!(machine.endpoint().unwrap().address, expected_ip);
 
     provider.start(&machine).await.unwrap();
-    provider.stop(&machine, true).await.unwrap();
+    provider.stop(&machine, StopMode::Force).await.unwrap();
     let base = provider.create_snapshot(&machine, "base").await.unwrap();
 
-    let empty = TomlValue::Table(Default::default());
+    let empty = TomlValue::from(std::collections::BTreeMap::<String, TomlValue>::new());
     let session = provider
         .open_session("docker-exec", &machine, &empty)
         .await
@@ -110,7 +110,7 @@ async fn container_lifecycle() {
         .await
         .unwrap();
     assert_eq!(touched.exit_code, Some(0));
-    provider.stop(&machine, true).await.unwrap();
+    provider.stop(&machine, StopMode::Force).await.unwrap();
 
     provider.restore_snapshot(&machine, &base).await.unwrap();
     provider.start(&machine).await.unwrap();

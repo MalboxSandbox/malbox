@@ -27,13 +27,13 @@ pub trait Allocate: Send + Sync {
 
     /// Stop a running machine.
     ///
-    /// With `force: false`, sends a graceful shutdown signal first and falls
-    /// back to force-kill if the guest doesn't respond.
-    /// With `force: true`, kills immediately.
+    /// With [`StopMode::Graceful`], sends a graceful shutdown signal first and
+    /// falls back to force-kill if the guest doesn't respond.
+    /// With [`StopMode::Force`], kills immediately.
     async fn stop(
         &self,
         machine: &Machine,
-        force: bool,
+        mode: StopMode,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// List all machines managed by this provider.
@@ -51,7 +51,7 @@ pub trait Allocate: Send + Sync {
 
     /// How provisioners reach this machine's management interface.
     ///
-    /// Defaults to the platform's network management port (WinRM 5986 on
+    /// Defaults to the platform's network management port (`WinRM` 5986 on
     /// Windows, SSH 22 on Linux). Providers without a guest network service
     /// override this.
     fn management_access(&self, _machine: &Machine, platform: Platform) -> ManagementAccess {
@@ -60,4 +60,14 @@ pub trait Allocate: Send + Sync {
             Platform::Linux => ManagementAccess::Network { port: 22 },
         }
     }
+}
+
+/// How [`Allocate::stop`] shuts a machine down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StopMode {
+    /// Request a guest shutdown, force-killing if it does not comply.
+    Graceful,
+    /// Kill immediately without notifying the guest.
+    Force,
 }

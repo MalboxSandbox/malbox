@@ -58,7 +58,7 @@ impl ContainerSession {
         // existing parents such as `/tmp` keep their mode and ownership.
         let bytes = tokio::fs::read(source).await?;
         let mut header = tar::Header::new_gnu();
-        header.set_size(bytes.len() as u64);
+        header.set_size(u64::try_from(bytes.len()).expect("file size fits in u64"));
         header.set_mode(0o755);
         header.set_cksum();
         let mut builder = tar::Builder::new(Vec::new());
@@ -192,7 +192,7 @@ impl ContainerSession {
         }
 
         Ok(ExecResult {
-            exit_code: inspect.exit_code.map(|c| c as i32),
+            exit_code: inspect.exit_code.and_then(|c| i32::try_from(c).ok()),
             stdout,
             stderr,
         })

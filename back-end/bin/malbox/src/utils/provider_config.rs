@@ -7,7 +7,7 @@ use malbox_cli_common::error::{CliError, Result};
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
-pub struct ProvidersEdit {
+pub(crate) struct ProvidersEdit {
     doc: DocumentMut,
     path: PathBuf,
 }
@@ -15,7 +15,7 @@ pub struct ProvidersEdit {
 impl ProvidersEdit {
     /// Load the config file the daemon would use, mirroring its discovery
     /// order (`MALBOX_CONFIG` override, then user, then system config).
-    pub fn load() -> Result<Self> {
+    pub(crate) fn load() -> Result<Self> {
         let path = malbox_config::config_file_path().ok_or_else(|| {
             CliError::CommandFailed(
                 "no configuration found - run `malbox daemon install` (or `malbox daemon config init`) first"
@@ -31,11 +31,11 @@ impl ProvidersEdit {
         Ok(Self { doc, path })
     }
 
-    pub fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    pub fn enabled(&self) -> Vec<String> {
+    pub(crate) fn enabled(&self) -> Vec<String> {
         self.doc
             .get("providers")
             .and_then(|p| p.get("enabled"))
@@ -48,7 +48,7 @@ impl ProvidersEdit {
             .unwrap_or_default()
     }
 
-    pub fn default_provider(&self) -> Option<String> {
+    pub(crate) fn default_provider(&self) -> Option<String> {
         self.doc
             .get("providers")
             .and_then(|p| p.get("default"))
@@ -58,7 +58,7 @@ impl ProvidersEdit {
 
     /// Enable a provider. Returns `false` when it was already enabled. The
     /// first enabled provider becomes the default.
-    pub fn add(&mut self, name: &str) -> bool {
+    pub(crate) fn add(&mut self, name: &str) -> bool {
         let mut enabled = self.enabled();
         if enabled.iter().any(|p| p == name) {
             return false;
@@ -74,7 +74,7 @@ impl ProvidersEdit {
     /// Disable a provider. Returns `false` when it was not enabled. A
     /// default pointing at the removed provider moves to the first
     /// remaining one (or is dropped).
-    pub fn remove(&mut self, name: &str) -> bool {
+    pub(crate) fn remove(&mut self, name: &str) -> bool {
         let mut enabled = self.enabled();
         let before = enabled.len();
         enabled.retain(|p| p != name);
@@ -90,7 +90,7 @@ impl ProvidersEdit {
 
     /// Replace the enabled set wholesale (used by `upgrade --reconfigure`),
     /// keeping the default valid.
-    pub fn set_enabled(&mut self, providers: &[String]) {
+    pub(crate) fn set_enabled(&mut self, providers: &[String]) {
         self.write_enabled(providers);
         let default_ok = self
             .default_provider()
@@ -100,7 +100,7 @@ impl ProvidersEdit {
         }
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub(crate) fn save(&self) -> Result<()> {
         std::fs::write(&self.path, self.doc.to_string()).map_err(|e| {
             CliError::CommandFailed(format!("failed to write {}: {e}", self.path.display()))
         })

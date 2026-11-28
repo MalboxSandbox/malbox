@@ -42,21 +42,21 @@ impl Ipv4Subnet {
         Ok(subnet)
     }
 
-    fn mask(&self) -> u32 {
+    fn mask(self) -> u32 {
         u32::MAX << (32 - self.prefix)
     }
 
-    fn broadcast(&self) -> u32 {
+    fn broadcast(self) -> u32 {
         u32::from(self.network) | !self.mask()
     }
 
     /// First host address, used as the bridge gateway.
-    pub(crate) fn gateway(&self) -> Ipv4Addr {
+    pub(crate) fn gateway(self) -> Ipv4Addr {
         Ipv4Addr::from(u32::from(self.network) + 1)
     }
 
     /// Assignable machine addresses: after the gateway, before broadcast.
-    pub(crate) fn hosts(&self) -> impl Iterator<Item = Ipv4Addr> {
+    pub(crate) fn hosts(self) -> impl Iterator<Item = Ipv4Addr> {
         (u32::from(self.network) + 2..self.broadcast()).map(Ipv4Addr::from)
     }
 }
@@ -68,7 +68,7 @@ impl fmt::Display for Ipv4Subnet {
 }
 
 /// Lowest host address of `subnet` not in `taken`.
-pub(crate) fn pick_ip(subnet: &Ipv4Subnet, taken: &HashSet<Ipv4Addr>) -> Option<Ipv4Addr> {
+pub(crate) fn pick_ip(subnet: Ipv4Subnet, taken: &HashSet<Ipv4Addr>) -> Option<Ipv4Addr> {
     subnet.hosts().find(|ip| !taken.contains(ip))
 }
 
@@ -143,9 +143,9 @@ mod tests {
     #[test]
     fn pick_ip_takes_lowest_free_host() {
         let subnet = Ipv4Subnet::parse("172.30.0.0/24").unwrap();
-        assert_eq!(pick_ip(&subnet, &HashSet::new()), Some(ip("172.30.0.2")));
+        assert_eq!(pick_ip(subnet, &HashSet::new()), Some(ip("172.30.0.2")));
         let taken = HashSet::from([ip("172.30.0.2"), ip("172.30.0.3")]);
-        assert_eq!(pick_ip(&subnet, &taken), Some(ip("172.30.0.4")));
+        assert_eq!(pick_ip(subnet, &taken), Some(ip("172.30.0.4")));
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
             network: ip("10.0.0.0"),
             prefix: 30,
         };
-        assert_eq!(pick_ip(&subnet, &HashSet::from([ip("10.0.0.2")])), None);
+        assert_eq!(pick_ip(subnet, &HashSet::from([ip("10.0.0.2")])), None);
     }
 
     #[test]

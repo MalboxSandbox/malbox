@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Complete daemon configuration as parsed from `malbox.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -12,22 +13,32 @@ pub struct Config {
     /// XDG-derived paths, so config files may omit the section entirely.
     #[serde(default)]
     pub paths: PathConfig,
+    /// Runtime environment, log level, and debug toggle.
     pub general: GeneralConfig,
+    /// HTTP API listener settings.
     pub http: HttpConfig,
+    /// `PostgreSQL` connection settings.
     pub database: DatabaseConfig,
     #[serde(default)]
+    /// Per-provider configuration tables.
     pub providers: ProvidersConfig,
     #[serde(default)]
+    /// Provider-independent machinery settings.
     pub machinery: MachineryConfig,
     #[serde(default)]
+    /// Managed image store; `None` disables image management.
     pub images: Option<ImagesConfig>,
     #[serde(default)]
+    /// Guest communication settings; `None` disables guest access.
     pub guest_access: Option<GuestAccessConfig>,
     #[serde(default)]
+    /// Plugin directory and registry settings.
     pub plugins: PluginsConfig,
     #[serde(default)]
+    /// Task orchestration limits and detonation profiles.
     pub orchestration: OrchestrationConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Declaratively defined analysis machines.
     pub machines: Vec<MachineConfig>,
 }
 
@@ -69,26 +80,38 @@ impl Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+/// General daemon runtime settings.
 pub struct GeneralConfig {
+    /// Deployment environment the daemon runs in.
     pub environment: Environment,
     #[serde(default = "default_log_level")]
+    /// Minimum log severity; defaults to `info`.
     pub log_level: LogLevel,
     #[serde(default)]
+    /// Enables extra debug behaviour and diagnostics.
     pub debug: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+/// HTTP API listener settings.
 pub struct HttpConfig {
+    /// Address the API binds to.
     pub host: String,
+    /// TCP port the API listens on.
     pub port: u16,
     #[serde(default)]
+    /// Serve HTTPS using `cert_path` and `key_path`.
     pub tls_enabled: bool,
+    /// PEM certificate file used when TLS is enabled.
     pub cert_path: Option<String>,
+    /// PEM private key file used when TLS is enabled.
     pub key_path: Option<String>,
     #[serde(default)]
+    /// Origins allowed by CORS.
     pub cors_origins: Vec<String>,
     #[serde(default)]
+    /// Maximum accepted upload body size, in bytes.
     pub max_upload_size: usize,
     /// Directory of the built front-end SPA to serve (same-origin) alongside
     /// the API. When unset the daemon runs API-only - e.g. in development,
@@ -104,11 +127,13 @@ pub const DATABASE_NAME: &str = "malbox";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+/// `PostgreSQL` connection settings for the daemon database.
 pub struct DatabaseConfig {
-    /// PostgreSQL server hostname or IP address.
+    /// `PostgreSQL` server hostname or IP address.
     #[serde(default = "default_db_host")]
     pub host: String,
     #[serde(default = "default_db_port")]
+    /// `PostgreSQL` server port; defaults to 5432.
     pub port: u16,
     /// Role to connect as. When omitted, resolution matches psql: `PGUSER`
     /// from the environment, then the OS user the daemon runs as.

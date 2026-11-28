@@ -22,6 +22,11 @@ pub trait HostPlugin: Plugin {
     ///
     /// Emit results via [`Context::results().push()`](crate::context::ResultSink::push).
     /// The runtime sends a final marker automatically once this method returns.
+    ///
+    /// # Errors
+    ///
+    /// Return an error to mark the task failed; the runtime reports it to
+    /// the daemon. The default implementation never fails.
     fn on_task(&self, ctx: &Context) -> Result<()> {
         let _ = ctx;
         Ok(())
@@ -29,6 +34,11 @@ pub trait HostPlugin: Plugin {
 
     /// Called once when the plugin process starts. `config` contains any
     /// key-value settings the daemon passes to this plugin.
+    ///
+    /// # Errors
+    ///
+    /// Return an error to abort plugin startup (e.g. invalid config). The
+    /// default implementation never fails.
     fn on_start(&self, config: HashMap<String, String>) -> Result<()> {
         let _ = config;
         Ok(())
@@ -36,6 +46,11 @@ pub trait HostPlugin: Plugin {
 
     /// Called once when the daemon is shutting down this plugin. Use it
     /// to flush buffers, close connections, or clean up resources.
+    ///
+    /// # Errors
+    ///
+    /// An error is logged by the runtime; shutdown proceeds regardless.
+    /// The default implementation never fails.
     fn on_stop(&self) -> Result<()> {
         Ok(())
     }
@@ -46,6 +61,11 @@ pub trait HostPlugin: Plugin {
     /// plugin result availability) are delivered through this single handler.
     /// Use `#[malbox::on_event(...)]` with filters in the macro to route
     /// specific events to specific methods.
+    ///
+    /// # Errors
+    ///
+    /// An error is logged by the runtime and does not stop event delivery.
+    /// The default implementation never fails.
     fn on_event(&self, event: Event) -> Result<()> {
         let _ = event;
         Ok(())

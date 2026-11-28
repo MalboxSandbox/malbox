@@ -1,7 +1,9 @@
+//! Tests for registry index lookup, search and metadata parsing.
+
 use malbox_plugin_registry::index::{PluginMetadata, RegistryIndex};
 
 fn sample_index() -> RegistryIndex {
-    serde_json::from_str(SAMPLE_INDEX_JSON).unwrap()
+    serde_json::from_str(SAMPLE_INDEX_JSON).expect("sample index JSON is valid")
 }
 
 const SAMPLE_INDEX_JSON: &str = r#"{

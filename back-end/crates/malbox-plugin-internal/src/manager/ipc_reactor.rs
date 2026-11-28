@@ -22,12 +22,14 @@ use malbox_plugin_transport::artifact::ArtifactMeta;
 use malbox_plugin_transport::error::TransportError;
 use malbox_plugin_transport::ipc::headers::{
     EventKind, FLAG_HAS_MORE_CHUNKS, FLAG_IS_FINAL, ResponseKind, ResultFormat, TaskRequestHeader,
+    TaskResponseHeader,
 };
 use malbox_plugin_transport::ipc::notify::NotifyKind;
 use malbox_plugin_transport::ipc::{
     CallbackProgression, DaemonEventPublisher, DaemonNotifyListener, IpcService, Node, NodeBuilder,
     PluginEventSubscriber, PluginNotifier, ReactorWaker, ReactorWakeupListener, SignalHandlingMode,
-    TaskClient, TaskPendingResponse, WaitSetBuilder, cleanup_stale_resources, decode_artifact_meta,
+    TaskClient, TaskPendingResponse, TaskResponse, WaitSetBuilder, cleanup_stale_resources,
+    decode_artifact_meta,
 };
 use malbox_plugin_transport::messages::events::Event;
 use malbox_plugin_transport::traits::TransportEmitter;
@@ -48,7 +50,7 @@ struct TaskRequestPayload<'a> {
 }
 
 /// Commands accepted by the reactor thread.
-pub enum IpcCommand {
+pub(crate) enum IpcCommand {
     ExecuteTask {
         plugin_id: PluginId,
         task_id: i32,
@@ -70,7 +72,7 @@ pub enum IpcCommand {
 }
 
 /// Cloneable, `Send + Sync` handle used by the async world.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IpcReactorHandle {
     tx: mpsc::UnboundedSender<IpcCommand>,
     waker: Arc<ReactorWaker>,
@@ -91,6 +93,13 @@ impl IpcReactorHandle {
     }
 
     /// Dispatch a task to a host plugin and await its streamed outputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::ExecutionFailed`] if the reactor is gone or the
+    /// plugin's channels cannot be used, [`ManagerError::Timeout`] if the
+    /// deadline passes, [`ManagerError::Crashed`] if the plugin disconnects,
+    /// or [`ManagerError::Reported`] if the plugin reports a task error.
     pub async fn execute_task(
         &self,
         plugin_id: &PluginId,
@@ -108,7 +117,7 @@ impl IpcReactorHandle {
             timeout,
             reply: reply_tx,
         })
-        .map_err(|_| reactor_gone(plugin_id))?;
+        .map_err(|()| reactor_gone(plugin_id))?;
 
         reply_rx.await.map_err(|_| reactor_gone(plugin_id))?
     }
@@ -140,7 +149,7 @@ impl IpcReactorHandle {
 impl TransportEmitter for IpcReactorHandle {
     fn emit(&self, event: Event) -> malbox_plugin_transport::error::Result<()> {
         self.send(IpcCommand::EmitEvent(event))
-            .map_err(|_| TransportError::NotConnected("IPC reactor unavailable".into()))
+            .map_err(|()| TransportError::NotConnected("IPC reactor unavailable".into()))
     }
 }
 
@@ -148,12 +157,27 @@ fn reactor_gone(plugin_id: &PluginId) -> ManagerError {
     ManagerError::ExecutionFailed(plugin_id.clone(), "IPC reactor unavailable".into())
 }
 
+/// Map a wire `ResultFormat` discriminant to an output format; unknown values are bytes.
+fn output_format(format: u8) -> OutputFormat {
+    match ResultFormat::try_from(format) {
+        Ok(ResultFormat::Json) => OutputFormat::Json,
+        _ => OutputFormat::Bytes,
+    }
+}
+
 /// Spawns and owns the reactor thread.
+#[derive(Debug)]
 pub struct IpcReactor;
 
 impl IpcReactor {
     /// Spawn the reactor thread. Returns once the thread has created its
-    /// node, services, and WaitSet (or propagates the startup error).
+    /// node, services, and `WaitSet` (or propagates the startup error).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::Io`] if the thread cannot be spawned,
+    /// [`ManagerError::Reactor`] if the reactor fails to initialize its IPC
+    /// ports, or [`ManagerError::Transport`] if the wakeup notifier cannot be opened.
     pub fn spawn() -> Result<(IpcReactorHandle, std::thread::JoinHandle<()>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) =
@@ -161,7 +185,7 @@ impl IpcReactor {
 
         let join = std::thread::Builder::new()
             .name("malbox-ipc-reactor".into())
-            .spawn(move || reactor_thread(rx, ready_tx))
+            .spawn(move || reactor_thread(rx, &ready_tx))
             .map_err(ManagerError::Io)?;
 
         ready_rx
@@ -179,7 +203,7 @@ impl IpcReactor {
 /// Thread body: build all `!Send` state, signal readiness, run the loop.
 fn reactor_thread(
     command_rx: mpsc::UnboundedReceiver<IpcCommand>,
-    ready_tx: std::sync::mpsc::SyncSender<std::result::Result<(), String>>,
+    ready_tx: &std::sync::mpsc::SyncSender<std::result::Result<(), String>>,
 ) {
     macro_rules! try_init {
         ($expr:expr, $what:literal) => {
@@ -299,7 +323,7 @@ impl PluginChannels {
     }
 }
 
-/// Accumulator for streamed responses, ported from the old collect_responses.
+/// Accumulator for streamed responses, ported from the old `collect_responses`.
 struct ChunkAccum {
     outputs: Vec<PluginOutput>,
     chunked_name: Option<String>,
@@ -338,7 +362,7 @@ impl ChunkAccum {
 
 enum TaskState {
     /// Request not yet delivered: the (ephemeral) plugin's task server was
-    /// not connected at send time. Resent when PluginStarted arrives.
+    /// not connected at send time. Resent when `PluginStarted` arrives.
     WaitingReady {
         header: TaskRequestHeader,
         payload: Vec<u8>,
@@ -398,7 +422,7 @@ impl Reactor {
                 config,
                 timeout,
                 reply,
-            } => self.handle_execute(plugin_id, task_id, sample_path, config, timeout, reply),
+            } => self.handle_execute(plugin_id, task_id, &sample_path, &config, timeout, reply),
             IpcCommand::EmitEvent(event) => {
                 if let Err(e) = self.emitter.emit(event) {
                     error!(error = %e, "failed to emit daemon event");
@@ -432,8 +456,8 @@ impl Reactor {
         &mut self,
         plugin_id: PluginId,
         task_id: i32,
-        sample_path: String,
-        config: HashMap<String, String>,
+        sample_path: &str,
+        config: &HashMap<String, String>,
         timeout: Duration,
         reply: oneshot::Sender<Result<Vec<PluginOutput>>>,
     ) {
@@ -462,7 +486,7 @@ impl Reactor {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         let payload = match postcard::to_allocvec(&TaskRequestPayload {
-            sample_path: &sample_path,
+            sample_path,
             config: config_vec,
         }) {
             Ok(p) => p,
@@ -478,7 +502,7 @@ impl Reactor {
         let header = TaskRequestHeader {
             task_id,
             request_type: 0,
-            _reserved: [0; 3],
+            reserved: [0; 3],
         };
         let deadline = Instant::now() + timeout;
 
@@ -629,124 +653,10 @@ impl Reactor {
             match pending.try_recv() {
                 Ok(Some(response)) => {
                     *server_connected = true;
-                    let h = &response.header;
-
-                    let kind = ResponseKind::try_from(h.kind).unwrap_or(ResponseKind::Result);
-
-                    // The SDK marks error frames final, so check the kind
-                    // before treating a final frame as success.
-                    match kind {
-                        ResponseKind::Error => {
-                            let msg = String::from_utf8_lossy(&response.payload).into_owned();
-                            return TaskOutcome::Finished(Err(ManagerError::Reported(
-                                plugin_id.clone(),
-                                msg,
-                            )));
-                        }
-                        _ if h.flags & FLAG_IS_FINAL != 0 => {
-                            accum.flush_chunked();
-                            return TaskOutcome::Finished(Ok(std::mem::take(&mut accum.outputs)));
-                        }
-                        ResponseKind::Result => {
-                            let format = match ResultFormat::try_from(h.format) {
-                                Ok(ResultFormat::Json) => OutputFormat::Json,
-                                _ => OutputFormat::Bytes,
-                            };
-
-                            let has_more = h.flags & FLAG_HAS_MORE_CHUNKS != 0;
-
-                            let name_len = h.name_len as usize;
-                            let (result_name, data) = if name_len > 0
-                                && response.payload.len() >= name_len
-                            {
-                                let name = String::from_utf8_lossy(&response.payload[..name_len])
-                                    .into_owned();
-                                let data = response.payload[name_len..].to_vec();
-                                (name, data)
-                            } else {
-                                (String::new(), response.payload)
-                            };
-
-                            if has_more {
-                                if h.chunk_index == 0 {
-                                    accum.flush_chunked();
-                                    accum.chunked_name = Some(result_name);
-                                    accum.chunked_data = data;
-                                    accum.chunked_format = format;
-                                    accum.chunked_meta = accum.pending_meta.take();
-                                    if h.total_size > 0 {
-                                        accum.chunked_data.reserve(h.total_size as usize);
-                                    }
-                                } else {
-                                    accum.chunked_data.extend_from_slice(&data);
-                                }
-                            } else if accum.chunked_name.is_some() {
-                                // Final chunk of an in-progress transfer.
-                                accum.chunked_data.extend_from_slice(&data);
-                                accum.flush_chunked();
-                            } else {
-                                debug!(
-                                    plugin = %plugin_id,
-                                    task_id,
-                                    %result_name,
-                                    data_len = data.len(),
-                                    "received result"
-                                );
-                                accum.outputs.push(PluginOutput {
-                                    result_name,
-                                    data,
-                                    format,
-                                    artifact: accum.pending_meta.take(),
-                                });
-                            }
-                        }
-                        ResponseKind::FileRef => {
-                            let path = String::from_utf8_lossy(&response.payload).to_string();
-                            match std::fs::read(&path) {
-                                Ok(data) => {
-                                    let format = match ResultFormat::try_from(h.format) {
-                                        Ok(ResultFormat::Json) => OutputFormat::Json,
-                                        _ => OutputFormat::Bytes,
-                                    };
-                                    accum.outputs.push(PluginOutput {
-                                        result_name: path
-                                            .rsplit('/')
-                                            .next()
-                                            .unwrap_or(&path)
-                                            .to_string(),
-                                        data,
-                                        format,
-                                        artifact: accum.pending_meta.take(),
-                                    });
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        plugin = %plugin_id,
-                                        task_id,
-                                        path = %path,
-                                        error = %e,
-                                        "failed to read file ref"
-                                    );
-                                }
-                            }
-                        }
-                        ResponseKind::ArtifactMeta => {
-                            match decode_artifact_meta(&response.payload) {
-                                Ok(meta) => accum.pending_meta = Some(meta),
-                                Err(e) => warn!(
-                                    plugin = %plugin_id,
-                                    task_id,
-                                    error = %e,
-                                    "ignoring undecodable artifact metadata frame"
-                                ),
-                            }
-                        }
-                        ResponseKind::Progress => {
-                            debug!(plugin = %plugin_id, task_id, "progress update");
-                        }
-                        ResponseKind::Ready => {
-                            debug!(plugin = %plugin_id, task_id, "plugin ready");
-                        }
+                    if let Some(outcome) =
+                        Self::handle_response(plugin_id, task_id, response, accum)
+                    {
+                        return outcome;
                     }
                 }
                 Ok(None) => {
@@ -769,6 +679,143 @@ impl Reactor {
                         format!("response receive error: {e}"),
                     )));
                 }
+            }
+        }
+    }
+
+    /// Apply one response frame to `accum`. Returns the task outcome when the
+    /// frame ends the task (error or final marker), `None` to keep pumping.
+    fn handle_response(
+        plugin_id: &PluginId,
+        task_id: i32,
+        response: TaskResponse,
+        accum: &mut ChunkAccum,
+    ) -> Option<TaskOutcome> {
+        let TaskResponse { header: h, payload } = response;
+        let kind = ResponseKind::try_from(h.kind).unwrap_or(ResponseKind::Result);
+
+        // The SDK marks error frames final, so check the kind
+        // before treating a final frame as success.
+        match kind {
+            ResponseKind::Error => {
+                let msg = String::from_utf8_lossy(&payload).into_owned();
+                return Some(TaskOutcome::Finished(Err(ManagerError::Reported(
+                    plugin_id.clone(),
+                    msg,
+                ))));
+            }
+            _ if h.flags & FLAG_IS_FINAL != 0 => {
+                accum.flush_chunked();
+                return Some(TaskOutcome::Finished(Ok(std::mem::take(
+                    &mut accum.outputs,
+                ))));
+            }
+            ResponseKind::Result => {
+                Self::handle_result_frame(plugin_id, task_id, &h, payload, accum);
+            }
+            ResponseKind::FileRef => Self::handle_file_ref(plugin_id, task_id, &h, &payload, accum),
+            ResponseKind::ArtifactMeta => match decode_artifact_meta(&payload) {
+                Ok(meta) => accum.pending_meta = Some(meta),
+                Err(e) => warn!(
+                    plugin = %plugin_id,
+                    task_id,
+                    error = %e,
+                    "ignoring undecodable artifact metadata frame"
+                ),
+            },
+            ResponseKind::Progress => {
+                debug!(plugin = %plugin_id, task_id, "progress update");
+            }
+            ResponseKind::Ready => {
+                debug!(plugin = %plugin_id, task_id, "plugin ready");
+            }
+        }
+        None
+    }
+
+    /// Handle a (possibly chunked) inline result frame.
+    fn handle_result_frame(
+        plugin_id: &PluginId,
+        task_id: i32,
+        h: &TaskResponseHeader,
+        payload: Vec<u8>,
+        accum: &mut ChunkAccum,
+    ) {
+        let format = output_format(h.format);
+        let has_more = h.flags & FLAG_HAS_MORE_CHUNKS != 0;
+
+        let name_len = usize::from(h.name_len);
+        let (result_name, data) = if name_len > 0 && payload.len() >= name_len {
+            let name = String::from_utf8_lossy(&payload[..name_len]).into_owned();
+            let data = payload[name_len..].to_vec();
+            (name, data)
+        } else {
+            (String::new(), payload)
+        };
+
+        if has_more {
+            if h.chunk_index == 0 {
+                accum.flush_chunked();
+                accum.chunked_name = Some(result_name);
+                accum.chunked_data = data;
+                accum.chunked_format = format;
+                accum.chunked_meta = accum.pending_meta.take();
+                // The total is only a preallocation hint; skip it if it does not fit.
+                if let Ok(total) = usize::try_from(h.total_size)
+                    && total > 0
+                {
+                    accum.chunked_data.reserve(total);
+                }
+            } else {
+                accum.chunked_data.extend_from_slice(&data);
+            }
+        } else if accum.chunked_name.is_some() {
+            // Final chunk of an in-progress transfer.
+            accum.chunked_data.extend_from_slice(&data);
+            accum.flush_chunked();
+        } else {
+            debug!(
+                plugin = %plugin_id,
+                task_id,
+                %result_name,
+                data_len = data.len(),
+                "received result"
+            );
+            accum.outputs.push(PluginOutput {
+                result_name,
+                data,
+                format,
+                artifact: accum.pending_meta.take(),
+            });
+        }
+    }
+
+    /// Handle a frame whose payload names a file holding the result.
+    fn handle_file_ref(
+        plugin_id: &PluginId,
+        task_id: i32,
+        h: &TaskResponseHeader,
+        payload: &[u8],
+        accum: &mut ChunkAccum,
+    ) {
+        let path = String::from_utf8_lossy(payload).to_string();
+        match std::fs::read(&path) {
+            Ok(data) => {
+                accum.outputs.push(PluginOutput {
+                    result_name: path.rsplit('/').next().unwrap_or(&path).to_string(),
+                    data,
+                    format: output_format(h.format),
+                    artifact: accum.pending_meta.take(),
+                });
+            }
+            Err(e) => {
+                warn!(
+                    plugin = %plugin_id,
+                    task_id,
+                    path = %path,
+                    error = %e,
+                    "failed to read file ref"
+                );
             }
         }
     }

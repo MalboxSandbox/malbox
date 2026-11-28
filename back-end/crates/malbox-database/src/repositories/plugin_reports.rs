@@ -1,3 +1,5 @@
+//! `plugin_reports`: one summarised report per (artifact, plugin), with verdict fields.
+
 use crate::error::{PluginReportError, Result};
 use serde::Serialize;
 use sqlx::{AssertSqlSafe, FromRow, PgConnection, PgPool};
@@ -7,14 +9,24 @@ use time::OffsetDateTime;
 /// `max(classification)` in SQL yields worst-wins aggregation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize)]
 #[sqlx(type_name = "classification", rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `classification` Postgres enum; the variant set is fixed by the schema"
+)]
 pub enum DbClassification {
+    /// No sign of malicious behaviour.
     Clean,
+    /// The plugin could not reach a verdict.
     Unknown,
+    /// Some indicators of malicious behaviour.
     Suspicious,
+    /// Confirmed malicious.
     Malicious,
 }
 
 impl DbClassification {
+    /// Numeric severity, 0 (clean) to 3 (malicious), for worst-wins comparison.
+    #[must_use]
     pub fn severity(self) -> u8 {
         match self {
             Self::Clean => 0,
@@ -24,6 +36,8 @@ impl DbClassification {
         }
     }
 
+    /// Lowercase wire name, matching the Postgres enum label.
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Clean => "clean",
@@ -37,13 +51,22 @@ impl DbClassification {
 /// Mirrors the `confidence` Postgres enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize)]
 #[sqlx(type_name = "confidence", rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `confidence` Postgres enum; the variant set is fixed by the schema"
+)]
 pub enum DbConfidence {
+    /// Weak evidence for the classification.
     Low,
+    /// Moderate evidence for the classification.
     Medium,
+    /// Strong evidence for the classification.
     High,
 }
 
 impl DbConfidence {
+    /// Lowercase wire name, matching the Postgres enum label.
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Low => "low",
@@ -76,48 +99,87 @@ const UPSERT_SET: &str = "task_id = excluded.task_id, job_id = excluded.job_id, 
 /// Row from the `plugin_reports` table.
 #[derive(FromRow, Debug, Clone)]
 pub struct PluginReport {
+    /// Database primary key.
     pub id: i32,
+    /// Task the report was produced in.
     pub task_id: i32,
+    /// Artifact the report describes.
     pub artifact_id: i64,
+    /// Job that produced the report; `None` for reports not tied to a job.
     pub job_id: Option<i64>,
     /// Report JSON path, relative to the data directory.
     pub report_path: String,
+    /// Name of the plugin that produced the report.
     pub plugin_name: String,
+    /// Human-friendly plugin name for display.
     pub display_name: Option<String>,
+    /// Version of the plugin that produced the report.
     pub plugin_version: String,
+    /// Plugin verdict, if it gave one.
     pub classification: Option<DbClassification>,
+    /// Plugin threat score, if it gave one.
     pub score: Option<i16>,
+    /// Plugin confidence in its verdict.
     pub confidence: Option<DbConfidence>,
+    /// Free-form labels attached by the plugin.
     pub labels: Vec<String>,
+    /// Indicators of compromise as a JSON array.
     pub indicators: serde_json::Value,
+    /// Observed attacker techniques as a JSON array.
     pub ttps: serde_json::Value,
+    /// One-line summary written by the plugin.
     pub summary: Option<String>,
+    /// Number of sections in the full report.
     pub section_count: i32,
+    /// Number of artifacts the plugin emitted.
     pub artifact_count: i32,
+    /// When the report was stored or last replaced.
     pub created_on: OffsetDateTime,
 }
 
+/// Column values for [`upsert_plugin_report`]; see [`PluginReport`] for meanings.
+#[derive(Debug)]
 pub struct InsertPluginReport<'a> {
+    /// Task the report was produced in.
     pub task_id: i32,
+    /// Artifact the report describes.
     pub artifact_id: i64,
+    /// Job that produced the report.
     pub job_id: Option<i64>,
+    /// Report JSON path, relative to the data directory.
     pub report_path: &'a str,
+    /// Name of the producing plugin.
     pub plugin_name: &'a str,
+    /// Human-friendly plugin name.
     pub display_name: Option<&'a str>,
+    /// Version of the producing plugin.
     pub plugin_version: &'a str,
+    /// Plugin verdict.
     pub classification: Option<DbClassification>,
+    /// Plugin threat score.
     pub score: Option<i16>,
+    /// Plugin confidence in its verdict.
     pub confidence: Option<DbConfidence>,
+    /// Free-form labels.
     pub labels: &'a [String],
+    /// Indicators of compromise as a JSON array.
     pub indicators: &'a serde_json::Value,
+    /// Observed attacker techniques as a JSON array.
     pub ttps: &'a serde_json::Value,
+    /// One-line summary.
     pub summary: Option<&'a str>,
+    /// Number of sections in the full report.
     pub section_count: i32,
+    /// Number of artifacts the plugin emitted.
     pub artifact_count: i32,
 }
 
 /// Insert a plugin report, replacing an existing row for the same
 /// `(artifact_id, plugin_name)`.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::InsertFailed`] when the upsert fails.
 pub async fn upsert_plugin_report(
     pool: &PgPool,
     params: &InsertPluginReport<'_>,
@@ -161,6 +223,10 @@ pub async fn upsert_plugin_report(
 
 /// Copy the report produced by `from_job_id` onto another artifact/job/task
 /// (cache replay). Returns `None` when the source job produced no report.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::CopyFailed`] when the copy fails.
 pub async fn copy_plugin_report(
     conn: &mut PgConnection,
     from_job_id: i64,
@@ -195,6 +261,11 @@ pub async fn copy_plugin_report(
         })
 }
 
+/// Every report of a task, ordered by artifact then plugin.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchFailed`] when the query fails.
 pub async fn fetch_plugin_reports_for_task(
     pool: &PgPool,
     task_id: i32,
@@ -210,6 +281,11 @@ pub async fn fetch_plugin_reports_for_task(
         .map_err(|e| PluginReportError::FetchFailed { task_id, source: e }.into())
 }
 
+/// Every report of an artifact, ordered by plugin name.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchForArtifactFailed`] when the query fails.
 pub async fn fetch_plugin_reports_for_artifact(
     pool: &PgPool,
     artifact_id: i64,
@@ -230,6 +306,11 @@ pub async fn fetch_plugin_reports_for_artifact(
         })
 }
 
+/// One plugin's report for an artifact, `None` when it produced none.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchForArtifactFailed`] when the query fails.
 pub async fn fetch_plugin_report(
     pool: &PgPool,
     artifact_id: i64,
@@ -259,6 +340,10 @@ pub async fn fetch_plugin_report(
 /// This is the single source of truth for "the sample's current analysis": a
 /// re-run enriches (new plugins appear) and overrides (a re-run plugin replaces
 /// its prior row) at once, while every task's rows remain in the table as history.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchForSampleFailed`] when the query fails.
 pub async fn fetch_latest_plugin_reports_for_sample(
     pool: &PgPool,
     sample_id: i64,
@@ -287,6 +372,10 @@ pub async fn fetch_latest_plugin_reports_for_sample(
 /// Latest report of one plugin for a sample, over every task (running ones
 /// included) in which an artifact with this sample was analysed. Returns the
 /// report and the task it belongs to.
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchForSampleFailed`] when the query fails.
 pub async fn fetch_latest_plugin_report_for_sample(
     pool: &PgPool,
     sample_id: i64,
@@ -316,8 +405,12 @@ pub async fn fetch_latest_plugin_report_for_sample(
 
 /// Count distinct terminal tasks that produced at least one plugin report for
 /// this sample. Used for the `task_count` headline (the latest-wins projection
-/// collapses to one row per plugin, so counting its task_ids would undercount
+/// collapses to one row per plugin, so counting its `task_id`s would undercount
 /// the number of runs).
+///
+/// # Errors
+///
+/// Returns [`PluginReportError::FetchForSampleFailed`] when the query fails.
 pub async fn count_reported_tasks_for_sample(pool: &PgPool, sample_id: i64) -> Result<i64> {
     sqlx::query_scalar::<_, i64>(
         "select count(distinct pr.task_id) from plugin_reports pr \

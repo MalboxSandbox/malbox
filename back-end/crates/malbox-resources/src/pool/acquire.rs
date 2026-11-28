@@ -13,20 +13,38 @@ use uuid::Uuid;
 /// What a detonation needs from a machine and its snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct MachineRequest {
+    /// Required guest platform, or any.
     pub platform: Option<MachinePlatform>,
+    /// Required CPU architecture, or any.
     pub arch: Option<MachineArch>,
+    /// Pin the request to this machine (database ID).
     pub machine_id: Option<i32>,
+    /// Run on this exact snapshot.
     pub snapshot_id: Option<Uuid>,
+    /// Run on the snapshot with this name.
     pub snapshot_name: Option<String>,
+    /// Tags the machine must carry.
     pub tags: Vec<String>,
+    /// Guest plugins the snapshot must have installed.
     pub required_guest_plugins: Vec<String>,
 }
 
-#[allow(clippy::large_enum_variant)] // short-lived; boxing buys nothing
+/// Result of trying to acquire a machine for a task.
+#[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "short-lived return value; boxing buys nothing"
+)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-scheduler to map acquisition results"
+)]
 pub enum AcquireOutcome {
     /// The machine is assigned to the task; `snapshot` is the one to run on.
     Acquired {
+        /// The leased machine row.
         machine: DbMachine,
+        /// Snapshot the task should run on.
         snapshot: MachineSnapshot,
     },
     /// A matching machine exists but none is ready.
@@ -65,10 +83,14 @@ impl MachineRequest {
 
 impl MachinePool {
     /// Assign a ready machine matching `req` to `task_id`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a database query fails while matching or loading the machine.
     pub async fn acquire_for(&self, req: &MachineRequest, task_id: i32) -> Result<AcquireOutcome> {
         let row = machinery::acquire_machine_for(&self.db, &req.to_filter(), task_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         match row {
             AcquireRow::Busy => Ok(AcquireOutcome::Busy),
@@ -100,7 +122,7 @@ impl MachinePool {
     ) -> Result<(DbMachine, MachineSnapshot)> {
         let machine = machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
+            .map_err(ResourceError::Database)?
             .ok_or(ResourceError::MachineNotFound {
                 id: machine_id.to_string(),
             })?;
@@ -111,7 +133,7 @@ impl MachinePool {
         }
         let snapshot = snapshots::fetch_snapshot_by_id(&self.db, snapshot_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
+            .map_err(ResourceError::Database)?
             .ok_or(ResourceError::SnapshotNotFound {
                 id: snapshot_id.to_string(),
             })?;
@@ -123,6 +145,11 @@ impl MachinePool {
     /// The active snapshot is what the machine was reverted to on release,
     /// so it needs no work. Any other snapshot is activated (so the next
     /// revert restores it too) and restored on the provider.
+    ///
+    /// # Errors
+    ///
+    /// Fails if activation fails in the database, the provider lacks snapshot
+    /// support, or the machine cannot be restored at the provider.
     pub async fn prepare_snapshot(
         &self,
         machine: &DbMachine,
@@ -134,7 +161,7 @@ impl MachinePool {
         let machine_id = snapshot.machine_id;
         snapshots::activate_snapshot(&self.db, snapshot.id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let fail = |reason: &str| ResourceError::SnapshotRestoreFailed {
             id: machine_id,
@@ -158,10 +185,14 @@ impl MachinePool {
     }
 
     /// Take a machine out of rotation after an unrecoverable session error.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine cannot be released or marked failed in the database.
     pub async fn mark_failed(&self, machine_id: i32, reason: &str) -> Result<()> {
         machinery::release_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
         machinery::update_machine_status(
             &self.db,
             machine_id,
@@ -169,7 +200,7 @@ impl MachinePool {
             Some(reason),
         )
         .await
-        .map_err(|e| ResourceError::Database(e.into()))?;
+        .map_err(ResourceError::Database)?;
         Ok(())
     }
 }

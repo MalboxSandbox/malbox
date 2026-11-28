@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-pub struct InitArgs {
+pub(crate) struct InitArgs {
     /// Force overwrite existing configuration
     #[arg(short, long)]
     force: bool,

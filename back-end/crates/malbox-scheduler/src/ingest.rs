@@ -19,31 +19,31 @@ use crate::OrchestratorCore;
 use crate::error::{Result, SchedulerError};
 use crate::submission::relative_storage_path;
 
-pub struct IngestContext {
-    pub task: Task,
-    pub job: Job,
+pub(crate) struct IngestContext {
+    pub(crate) task: Task,
+    pub(crate) job: Job,
     /// The job's input artifact.
-    pub artifact: TaskArtifact,
+    pub(crate) artifact: TaskArtifact,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct IngestSummary {
+pub(crate) struct IngestSummary {
     /// Artifacts created, or whose analysis was newly requested.
-    pub new_artifacts: Vec<i64>,
-    pub had_report: bool,
-    pub changed_shared_keys: Vec<String>,
-    pub drop_requested: bool,
+    pub(crate) new_artifacts: Vec<i64>,
+    pub(crate) had_report: bool,
+    pub(crate) changed_shared_keys: Vec<String>,
+    pub(crate) drop_requested: bool,
     /// Artifacts discarded by `max_artifacts_per_job`.
-    pub discarded: u32,
-    pub invalid_report: Option<String>,
+    pub(crate) discarded: u32,
+    pub(crate) invalid_report: Option<String>,
     /// Some artifact was kept without its blob because the task's
     /// `max_total_bytes` was spent: the outputs depend on this task's budget.
-    pub budget_limited: bool,
+    pub(crate) budget_limited: bool,
 }
 
 impl IngestSummary {
     /// Fold another plugin's summary (detonations ingest per plugin).
-    pub fn merge(&mut self, other: IngestSummary) {
+    pub(crate) fn merge(&mut self, other: IngestSummary) {
         for id in other.new_artifacts {
             if !self.new_artifacts.contains(&id) {
                 self.new_artifacts.push(id);
@@ -64,7 +64,7 @@ impl IngestSummary {
     }
 
     /// The job message for discarded artifacts, if any.
-    pub fn discard_message(&self) -> Option<String> {
+    pub(crate) fn discard_message(&self) -> Option<String> {
         (self.discarded > 0).then(|| {
             format!(
                 "{} artifacts discarded: max_artifacts_per_job reached",
@@ -121,7 +121,10 @@ fn edge_name(name: &str) -> String {
 
 /// Merge `update` into `current`: arrays union (insertion order kept),
 /// everything else overwrites. Returns the keys whose value changed.
-pub fn merge_shared(current: &mut Map<String, Value>, update: Map<String, Value>) -> Vec<String> {
+pub(crate) fn merge_shared(
+    current: &mut Map<String, Value>,
+    update: Map<String, Value>,
+) -> Vec<String> {
     let mut changed = Vec::new();
     for (key, value) in update {
         let merged = match (current.get(&key), value) {
@@ -144,14 +147,14 @@ pub fn merge_shared(current: &mut Map<String, Value>, update: Map<String, Value>
     changed
 }
 
-pub async fn ingest_outputs(
+pub(crate) async fn ingest_outputs(
     core: &OrchestratorCore,
     ctx: &IngestContext,
     plugin_name: &str,
     outputs: Vec<PluginOutput>,
 ) -> Result<IngestSummary> {
     let mut summary = IngestSummary::default();
-    let per_job_cap = core.settings.max_artifacts_per_job as usize;
+    let per_job_cap = usize::try_from(core.settings.max_artifacts_per_job).unwrap_or(usize::MAX);
     let artifact_count = outputs
         .iter()
         .filter(|o| is_artifact(o))
@@ -236,8 +239,8 @@ async fn ingest_report(
             indicators: &indicators,
             ttps: &ttps,
             summary: report.summary.as_deref(),
-            section_count: report.sections.len() as i32,
-            artifact_count: artifact_count as i32,
+            section_count: i32::try_from(report.sections.len()).unwrap_or(i32::MAX),
+            artifact_count: i32::try_from(artifact_count).unwrap_or(i32::MAX),
         },
     )
     .await?;
@@ -251,16 +254,13 @@ async fn ingest_shared(
     data: &[u8],
     summary: &mut IngestSummary,
 ) -> Result<()> {
-    let update = match serde_json::from_slice::<Value>(data) {
-        Ok(Value::Object(m)) => m,
-        Ok(_) | Err(_) => {
-            warn!(
-                task_id = ctx.task.id,
-                job_id = ctx.job.id,
-                "malbox.shared is not a JSON object, ignored"
-            );
-            return Ok(());
-        }
+    let Ok(Value::Object(update)) = serde_json::from_slice::<Value>(data) else {
+        warn!(
+            task_id = ctx.task.id,
+            job_id = ctx.job.id,
+            "malbox.shared is not a JSON object, ignored"
+        );
+        return Ok(());
     };
     let mut tx = core.db.begin().await?;
     let mut current =
@@ -295,7 +295,7 @@ async fn ingest_artifact(
     });
     let name = edge_name(&output.result_name);
     let data = output.data;
-    let size = data.len() as i64;
+    let size = i64::try_from(data.len()).unwrap_or(i64::MAX);
 
     let identify = core.identify;
     let id_name = name.clone();
@@ -375,31 +375,31 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn obj(v: Value) -> Map<String, Value> {
+    fn obj(v: &Value) -> Map<String, Value> {
         v.as_object().unwrap().clone()
     }
 
     #[test]
     fn shared_arrays_union_in_order() {
-        let mut cur = obj(json!({"passwords": ["a", "b"]}));
-        let changed = merge_shared(&mut cur, obj(json!({"passwords": ["b", "c"]})));
+        let mut cur = obj(&json!({"passwords": ["a", "b"]}));
+        let changed = merge_shared(&mut cur, obj(&json!({"passwords": ["b", "c"]})));
         assert_eq!(changed, vec!["passwords"]);
         assert_eq!(cur["passwords"], json!(["a", "b", "c"]));
     }
 
     #[test]
     fn shared_unchanged_value_not_reported() {
-        let mut cur = obj(json!({"passwords": ["x"], "k": 1}));
-        let changed = merge_shared(&mut cur, obj(json!({"passwords": ["x"], "k": 1})));
+        let mut cur = obj(&json!({"passwords": ["x"], "k": 1}));
+        let changed = merge_shared(&mut cur, obj(&json!({"passwords": ["x"], "k": 1})));
         assert!(changed.is_empty());
     }
 
     #[test]
     fn shared_scalars_overwrite() {
-        let mut cur = obj(json!({"k": 1, "a": [1]}));
-        let changed = merge_shared(&mut cur, obj(json!({"k": 2, "a": "s", "new": true})));
+        let mut cur = obj(&json!({"k": 1, "a": [1]}));
+        let changed = merge_shared(&mut cur, obj(&json!({"k": 2, "a": "s", "new": true})));
         assert_eq!(changed, vec!["a", "k", "new"]);
-        assert_eq!(cur, obj(json!({"k": 2, "a": "s", "new": true})));
+        assert_eq!(cur, obj(&json!({"k": 2, "a": "s", "new": true})));
     }
 
     #[test]

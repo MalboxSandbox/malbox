@@ -1,3 +1,5 @@
+//! Tests for build system detection and build output parsing.
+
 use malbox_installer::progress::{NullObserver, ProgressObserver};
 use malbox_plugin_registry::source::{
     BuildSystem, check_tool, detect_build_system, parse_cargo_artifact, parse_cmake_progress,

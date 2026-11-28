@@ -40,6 +40,7 @@ pub struct ExecResult {
 
 /// Health status reported by a guest session.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum GuestStatus {
     /// The guest agent / transport is reachable and ready.
     Ready,

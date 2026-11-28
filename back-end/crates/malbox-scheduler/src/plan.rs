@@ -7,32 +7,25 @@ use malbox_plugin_manifest::Stage;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::params::{DetonateMode, SubmissionParams};
+use crate::params::{DetonateMode, DetonationOverrides, SubmissionParams};
 use crate::recursion::DYNAMIC;
 use crate::routing::{DetonationProfile, RoutingTable};
 
-pub use malbox_config::orchestration::{SUBMISSION_PROFILE, UNMATCHED_PROFILE};
+pub(crate) use malbox_config::orchestration::{SUBMISSION_PROFILE, UNMATCHED_PROFILE};
 
+/// Whether a planned job runs on the host or detonates the artifact in a VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JobKindPlan {
+pub(crate) enum JobKindPlan {
     Host,
     Detonation,
 }
 
 impl JobKindPlan {
     /// The `job_kind` label.
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Host => "host",
             Self::Detonation => "detonation",
-        }
-    }
-
-    pub fn from_db(kind: &str) -> Self {
-        if kind == "detonation" {
-            Self::Detonation
-        } else {
-            Self::Host
         }
     }
 }
@@ -40,49 +33,64 @@ impl JobKindPlan {
 /// A resolved detonation, stored in `jobs.detonation`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DetonationRequest {
+    /// Detonation profile name, or a sentinel for submission/unmatched requests.
     pub profile: String,
+    /// Guest operating system the machine must run.
     pub platform: Option<MachinePlatform>,
+    /// CPU architecture the machine must have.
     pub arch: Option<MachineArch>,
+    /// Specific machine requested by the submission.
     pub machine_id: Option<i32>,
+    /// Specific snapshot requested by the submission.
     pub snapshot_id: Option<Uuid>,
+    /// Snapshot to restore, by name.
     pub snapshot_name: Option<String>,
+    /// Tags the machine must carry.
     pub tags: Vec<String>,
+    /// Guest plugins to run inside the VM.
     pub guest_plugins: Vec<String>,
+    /// Detonation time limit, in seconds.
     pub timeout_secs: u64,
+    /// Launch package override (e.g. `exe`, `dll`).
     pub package: Option<String>,
+    /// Export to call when launching a DLL.
     pub dll_function: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TaskSelection {
-    pub selected: Vec<String>,
-    pub excluded: Vec<String>,
+pub(crate) struct TaskSelection {
+    pub(crate) selected: Vec<String>,
+    pub(crate) excluded: Vec<String>,
 }
 
-pub struct PlanInput<'a> {
-    pub artifact_type: &'a str,
-    pub is_root: bool,
-    pub task: &'a TaskSelection,
-    pub params: &'a SubmissionParams,
+#[derive(Debug)]
+pub(crate) struct PlanInput<'a> {
+    pub(crate) artifact_type: &'a str,
+    pub(crate) is_root: bool,
+    pub(crate) task: &'a TaskSelection,
+    pub(crate) params: &'a SubmissionParams,
     /// Categories this artifact may not run (`"dynamic"` = no detonation).
-    pub forbidden: &'a BTreeSet<String>,
+    pub(crate) forbidden: &'a BTreeSet<String>,
     /// Analyzers whose output produced this artifact.
-    pub source_analyzers: &'a BTreeSet<String>,
-    pub routing: &'a RoutingTable,
+    pub(crate) source_analyzers: &'a BTreeSet<String>,
+    pub(crate) routing: &'a RoutingTable,
     /// Explicit root detonation from the submission.
-    pub explicit: Option<&'a DetonationRequest>,
+    pub(crate) explicit: Option<&'a DetonationRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PlannedJob {
-    pub kind: JobKindPlan,
-    pub analyzer: String,
-    pub stage: Stage,
-    pub detonation: Option<DetonationRequest>,
+pub(crate) struct PlannedJob {
+    pub(crate) kind: JobKindPlan,
+    pub(crate) analyzer: String,
+    pub(crate) stage: Stage,
+    pub(crate) detonation: Option<DetonationRequest>,
 }
 
 /// Guest plugins named in the task selection.
-pub fn selected_guest_plugins(selection: &TaskSelection, routing: &RoutingTable) -> Vec<String> {
+pub(crate) fn selected_guest_plugins(
+    selection: &TaskSelection,
+    routing: &RoutingTable,
+) -> Vec<String> {
     selection
         .selected
         .iter()
@@ -91,13 +99,13 @@ pub fn selected_guest_plugins(selection: &TaskSelection, routing: &RoutingTable)
         .collect()
 }
 
-/// A detonation request from a configured profile.
-pub fn request_from_profile(
+/// A detonation request from a configured profile. `root_overrides` carries the
+/// submission's launch overrides and is `Some` only for the root artifact.
+pub(crate) fn request_from_profile(
     profile: &DetonationProfile,
     selection: &TaskSelection,
     routing: &RoutingTable,
-    params: &SubmissionParams,
-    is_root: bool,
+    root_overrides: Option<&DetonationOverrides>,
 ) -> DetonationRequest {
     let selected = selected_guest_plugins(selection, routing);
     let guest_plugins = if selected.is_empty() {
@@ -113,14 +121,9 @@ pub fn request_from_profile(
             .collect();
         if both.is_empty() { selected } else { both }
     };
-    let (package, dll_function) = if is_root {
-        (
-            params.detonation.package.clone(),
-            params.detonation.dll_function.clone(),
-        )
-    } else {
-        (None, None)
-    };
+    let (package, dll_function) = root_overrides.map_or((None, None), |o| {
+        (o.package.clone(), o.dll_function.clone())
+    });
     DetonationRequest {
         profile: profile.name.clone(),
         platform: Some(profile.platform.clone()),
@@ -136,7 +139,7 @@ pub fn request_from_profile(
     }
 }
 
-pub fn plan_artifact(input: &PlanInput) -> Vec<PlannedJob> {
+pub(crate) fn plan_artifact(input: &PlanInput<'_>) -> Vec<PlannedJob> {
     let routing = input.routing;
     let selection = input.task;
     let selects_host = selection
@@ -175,7 +178,7 @@ pub fn plan_artifact(input: &PlanInput) -> Vec<PlannedJob> {
     jobs
 }
 
-fn plan_detonation(input: &PlanInput) -> Option<DetonationRequest> {
+fn plan_detonation(input: &PlanInput<'_>) -> Option<DetonationRequest> {
     let params = input.params;
     if params.detonate == DetonateMode::Never || input.forbidden.contains(DYNAMIC) {
         return None;
@@ -194,8 +197,7 @@ fn plan_detonation(input: &PlanInput) -> Option<DetonationRequest> {
             profile,
             input.task,
             input.routing,
-            params,
-            input.is_root,
+            input.is_root.then_some(&params.detonation),
         ));
     }
     if input.is_root && params.detonate == DetonateMode::Always {
@@ -232,7 +234,7 @@ mod tests {
             accepts: anchored(accepts).unwrap(),
             rejects: None,
             sources_exclude: vec![],
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_mins(1),
             cacheable: true,
             recursion_prevention: vec![],
             uses_indicators: false,
@@ -250,7 +252,7 @@ mod tests {
             snapshot: Some("snap".into()),
             tags: vec![],
             guest_plugins: vec!["mon".into()],
-            timeout: Duration::from_secs(120),
+            timeout: Duration::from_mins(2),
         }
     }
 
@@ -277,6 +279,10 @@ mod tests {
             }
         }
 
+        #[expect(
+            clippy::fn_params_excessive_bools,
+            reason = "test fixture mirrors PlanInput::is_root"
+        )]
         fn plan(
             &self,
             t: &str,
@@ -295,6 +301,10 @@ mod tests {
             })
         }
 
+        #[expect(
+            clippy::fn_params_excessive_bools,
+            reason = "test fixture mirrors PlanInput::is_root"
+        )]
         fn names(&self, t: &str, is_root: bool) -> Vec<String> {
             self.plan(t, is_root, None)
                 .into_iter()

@@ -7,7 +7,7 @@ use malbox_plugin_manifest::parse_manifest;
 use malbox_plugin_registry::lockfile::Lockfile;
 
 #[derive(Parser)]
-pub struct ListCommand;
+pub(crate) struct ListCommand;
 
 impl Command for ListCommand {
     async fn execute(self, _ctx: &Context) -> Result<()> {
@@ -34,9 +34,10 @@ impl Command for ListCommand {
         for (name, plugin) in &lockfile.plugins {
             let manifest_path = plugins_dir.join(name).join("plugin.toml");
             let plugin_type = if manifest_path.exists() {
-                parse_manifest(&manifest_path)
-                    .map(|m| format!("{:?}", m.plugin.plugin_type).to_lowercase())
-                    .unwrap_or_else(|_| "?".into())
+                parse_manifest(&manifest_path).map_or_else(
+                    |_| "?".into(),
+                    |m| format!("{:?}", m.plugin.plugin_type).to_lowercase(),
+                )
             } else {
                 "?".into()
             };
@@ -59,12 +60,13 @@ impl Command for ListCommand {
 
         for name in &untracked {
             let plugin_type = parse_manifest(&plugins_dir.join(name).join("plugin.toml"))
-                .map(|m| format!("{:?}", m.plugin.plugin_type).to_lowercase())
-                .unwrap_or_else(|_| "?".into());
+                .map_or_else(
+                    |_| "?".into(),
+                    |m| format!("{:?}", m.plugin.plugin_type).to_lowercase(),
+                );
 
             let version = parse_manifest(&plugins_dir.join(name).join("plugin.toml"))
-                .map(|m| m.plugin.version)
-                .unwrap_or_else(|_| "?".into());
+                .map_or_else(|_| "?".into(), |m| m.plugin.version);
 
             println!(
                 "  {:<20} {:<22} {:<8} {:<12} \u{2014}",
@@ -73,7 +75,7 @@ impl Command for ListCommand {
         }
 
         let total = lockfile.plugins.len() + untracked.len();
-        println!("\n  {} plugin(s) installed", total);
+        println!("\n  {total} plugin(s) installed");
 
         Ok(())
     }

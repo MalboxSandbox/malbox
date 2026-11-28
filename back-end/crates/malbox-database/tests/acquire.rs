@@ -11,7 +11,7 @@ use malbox_database::repositories::machinery::{
 use sqlx::PgPool;
 
 async fn seed_machine(pool: &PgPool, name: &str, platform: &str, tags: Option<&[&str]>) -> i32 {
-    let tags: Option<Vec<String>> = tags.map(|t| t.iter().map(|s| s.to_string()).collect());
+    let tags: Option<Vec<String>> = tags.map(|t| t.iter().map(ToString::to_string).collect());
     sqlx::query_scalar(
         "insert into machines (name, arch, platform, tags, status) \
          values ($1, 'x64', $2::machine_platform, $3, 'ready') returning id",

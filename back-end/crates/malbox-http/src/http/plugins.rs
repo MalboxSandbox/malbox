@@ -13,7 +13,7 @@ use malbox_plugin_internal::registry::manifest::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/plugins", get(list_plugins))
         .route("/v1/plugins/available", get(available_plugins))
@@ -151,26 +151,26 @@ async fn fetch_provisioned_guest_plugins(
 ) -> std::result::Result<std::collections::HashMap<String, Vec<Uuid>>, sqlx::Error> {
     let rows: Vec<(Uuid, serde_json::Value)> = if let Some(plat) = platform {
         sqlx::query_as(
-            r#"
+            r"
             SELECT ms.id, ms.guest_plugins
             FROM machine_snapshots ms
             JOIN machines m ON ms.machine_id = m.id
             WHERE m.platform::text = $1
               AND ms.guest_plugins IS NOT NULL
               AND ms.guest_plugins != '[]'::jsonb
-            "#,
+            ",
         )
         .bind(plat)
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as(
-            r#"
+            r"
             SELECT id, guest_plugins
             FROM machine_snapshots
             WHERE guest_plugins IS NOT NULL
               AND guest_plugins != '[]'::jsonb
-            "#,
+            ",
         )
         .fetch_all(pool)
         .await?

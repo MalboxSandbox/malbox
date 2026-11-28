@@ -19,7 +19,7 @@ pub enum SdkError {
     #[error("initialization error: {0}")]
     Init(String),
 
-    /// A blocking_send / try_send on a result or event channel failed.
+    /// A `blocking_send` / `try_send` on a result or event channel failed.
     /// Almost always means the receiver was dropped (daemon disconnected).
     #[error("channel send failed: {0}")]
     Channel(String),
@@ -27,7 +27,9 @@ pub enum SdkError {
     /// An operation timed out waiting for an external signal.
     #[error("{operation} timed out after {elapsed:?}")]
     Timeout {
+        /// Short name of the operation that was waiting.
         operation: &'static str,
+        /// How long the operation waited before giving up.
         elapsed: std::time::Duration,
     },
 
@@ -47,7 +49,10 @@ pub enum SdkError {
 
     /// The job's analysed-artifact budget (`malbox.max_artifacts`) is spent.
     #[error("artifact limit reached ({limit})")]
-    ArtifactLimit { limit: u64 },
+    ArtifactLimit {
+        /// Maximum number of analysed artifacts the job may push.
+        limit: u64,
+    },
 
     /// An opaque error returned by plugin handler code.
     #[error("plugin error: {0}")]

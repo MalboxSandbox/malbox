@@ -1,12 +1,13 @@
 //! Internal result message types for the plugin-runtime channel.
 //!
 //! These decouple the shared Context/ResultSink API from the gRPC transport
-//! types (proto::TaskResult, tonic::Status), allowing host plugins to avoid
+//! types (`proto::TaskResult`, `tonic::Status`), allowing host plugins to avoid
 //! pulling in tonic/prost.
 
 /// Wire format hint attached to result data so the receiver knows how to
 /// interpret the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ResultFormat {
     /// The data is valid JSON (UTF-8 encoded).
     Json,
@@ -18,6 +19,7 @@ pub enum ResultFormat {
 
 /// What a [`TaskResultMessage`] represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ResultKind {
     /// A normal inline result.
     Result,
@@ -44,11 +46,11 @@ pub struct TaskResultMessage {
     pub is_final: bool,
     /// What kind of message this is (inline result, stash ref, or progress).
     pub kind: ResultKind,
-    /// For ResultRef: the stash handle. Empty for inline results.
+    /// For `ResultRef`: the stash handle. Empty for inline results.
     pub stash_handle: String,
-    /// For ResultRef: format of the original stashed data.
+    /// For `ResultRef`: format of the original stashed data.
     pub stash_format: ResultFormat,
-    /// For ResultRef: byte size of the stashed data.
+    /// For `ResultRef`: byte size of the stashed data.
     pub stash_size: u64,
     /// Artifact metadata when this result is an artifact push.
     pub artifact: Option<malbox_plugin_transport::artifact::ArtifactMeta>,

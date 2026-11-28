@@ -1,12 +1,13 @@
 //! Provider configuration management.
 //!
-//! This module handles configuration for virtualization providers (libvirt, VMware, VirtualBox, etc.).
+//! This module handles configuration for virtualization providers (libvirt, `VMware`, `VirtualBox`, etc.).
 //! Each provider can have its own configuration schema, which is stored as generic TOML values
 //! and deserialized on-demand when the provider is initialized.
 
 use crate::ConfigError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 /// Configuration for all providers.
 ///
@@ -46,6 +47,12 @@ impl ProvidersConfig {
     /// Get configuration for a specific provider.
     ///
     /// Deserializes the provider's configuration into the requested type.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::ProviderNotConfigured`] when `name` has no section,
+    /// [`ConfigError::Parse`] when the section cannot be re-serialized, and
+    /// [`ConfigError::InvalidProviderConfig`] when it does not match `T`.
     pub fn get_provider_config<T>(&self, name: &str) -> Result<T, ConfigError>
     where
         T: serde::de::DeserializeOwned,
@@ -57,7 +64,7 @@ impl ProvidersConfig {
 
         // Convert the TOML value to a string and deserialize it
         let toml_str = toml::to_string(value).map_err(|e| ConfigError::Parse {
-            file: format!("providers.{}", name),
+            file: format!("providers.{name}"),
             error: e.to_string(),
         })?;
 
@@ -81,11 +88,11 @@ impl ProvidersConfig {
     ///
     /// Returns `true` if the provider was added, `false` if it was already enabled.
     pub fn enable(&mut self, name: String) -> bool {
-        if !self.is_enabled(&name) {
+        if self.is_enabled(&name) {
+            false
+        } else {
             self.enabled.push(name);
             true
-        } else {
-            false
         }
     }
 
@@ -106,6 +113,10 @@ impl ProvidersConfig {
     }
 
     /// Set the default provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::ProviderNotEnabled`] when `name` is not in the enabled list.
     pub fn set_default(&mut self, name: String) -> Result<(), ConfigError> {
         if !self.is_enabled(&name) {
             return Err(ConfigError::ProviderNotEnabled(name));
@@ -115,6 +126,11 @@ impl ProvidersConfig {
     }
 
     /// Validate that enabled providers match what's compiled into the daemon.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::Internal`] with a fix-it message when the enabled set differs
+    /// from `compiled`.
     pub fn validate(&self, compiled: &[String]) -> Result<(), ConfigError> {
         let mut config_sorted = self.enabled.clone();
         config_sorted.sort();
@@ -126,7 +142,7 @@ impl ProvidersConfig {
 
             message.push_str("Providers compiled into daemon:\n");
             for provider in &compiled_sorted {
-                message.push_str(&format!("  - {}\n", provider));
+                writeln!(message, "  - {provider}").expect("writing to a String cannot fail");
             }
 
             message.push_str("\nProviders in config:\n");
@@ -134,7 +150,7 @@ impl ProvidersConfig {
                 message.push_str("  (none)\n");
             } else {
                 for provider in &config_sorted {
-                    message.push_str(&format!("  - {}\n", provider));
+                    writeln!(message, "  - {provider}").expect("writing to a String cannot fail");
                 }
             }
 
@@ -142,7 +158,8 @@ impl ProvidersConfig {
                 "\nTo fix this, add to your config file (~/.config/malbox/malbox.toml):\n\n",
             );
             message.push_str("[providers]\n");
-            message.push_str(&format!("enabled = {:?}\n", compiled_sorted));
+            writeln!(message, "enabled = {compiled_sorted:?}")
+                .expect("writing to a String cannot fail");
 
             return Err(ConfigError::Internal(message));
         }

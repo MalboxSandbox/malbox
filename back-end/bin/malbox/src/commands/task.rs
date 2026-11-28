@@ -7,6 +7,7 @@ use malbox_cli_common::error::{CliError, Result};
 use malbox_cli_common::utils::format::{self, Detail, Table, styled_status};
 use malbox_cli_common::utils::progress::Spinner;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
 
 #[derive(Parser)]
@@ -21,7 +22,7 @@ use std::io::{IsTerminal, Write};
                   malbox task cancel 7\n  \
                   malbox task submit sample.exe --timeout 120"
 )]
-pub struct TaskCommand {
+pub(crate) struct TaskCommand {
     #[command(subcommand)]
     command: TaskCommands,
 }
@@ -267,14 +268,12 @@ async fn print_artifact_content(api: &ApiClient, task_id: i32, artifact_id: i64)
         .find(|a| a.id == artifact_id)
         .ok_or_else(|| {
             CliError::InvalidArgument(format!(
-                "artifact {} not found for task {}",
-                artifact_id, task_id
+                "artifact {artifact_id} not found for task {task_id}"
             ))
         })?;
     if artifact.content_url.is_none() {
         return Err(CliError::InvalidArgument(format!(
-            "artifact {} has no stored content",
-            artifact_id
+            "artifact {artifact_id} has no stored content"
         )));
     }
 
@@ -379,7 +378,7 @@ fn render_tree(tree: &TaskTree) -> Vec<String> {
             line.push_str(&v.classification);
         }
         if let Some(r) = &a.drop_reason {
-            line.push_str(&format!(" ({r})"));
+            let _ = write!(line, " ({r})");
         }
         lines.push(line);
         for j in tree.jobs.iter().filter(|j| j.artifact_id == id) {
@@ -450,7 +449,7 @@ fn parse_param(raw: &str) -> Result<(String, String, serde_json::Value)> {
 async fn submit(api: &ApiClient, args: SubmitArgs) -> Result<()> {
     let params = build_params(&args)?;
     let file_display = args.file.clone();
-    let spinner = Spinner::start(format!("Submitting '{}'...", file_display));
+    let spinner = Spinner::start(format!("Submitting '{file_display}'..."));
 
     let response = api
         .submit_task(SubmitTaskRequest {

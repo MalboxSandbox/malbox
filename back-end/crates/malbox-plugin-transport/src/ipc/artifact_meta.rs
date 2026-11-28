@@ -15,15 +15,26 @@ struct ArtifactMetaWire {
     allow_dynamic_recursion: bool,
 }
 
+/// Serialize artifact metadata into the postcard payload of a metadata frame.
+///
+/// # Errors
+///
+/// Returns [`TransportError::Ipc`] if postcard serialization fails.
 pub fn encode_artifact_meta(meta: &ArtifactMeta) -> Result<Vec<u8>, TransportError> {
     postcard::to_allocvec(&ArtifactMetaWire {
-        relation: meta.relation as u8,
+        relation: u8::from(meta.relation),
         analyze: meta.analyze,
         allow_dynamic_recursion: meta.allow_dynamic_recursion,
     })
     .map_err(|e| TransportError::Ipc(Box::new(e)))
 }
 
+/// Parse the postcard payload of a metadata frame back into [`ArtifactMeta`].
+///
+/// # Errors
+///
+/// Returns [`TransportError::Ipc`] if the payload is malformed, names an
+/// unknown relation, or uses the daemon-reserved `Root` relation.
 pub fn decode_artifact_meta(payload: &[u8]) -> Result<ArtifactMeta, TransportError> {
     let wire: ArtifactMetaWire =
         postcard::from_bytes(payload).map_err(|e| TransportError::Ipc(Box::new(e)))?;
@@ -72,7 +83,7 @@ mod tests {
     #[test]
     fn root_relation_rejected() {
         let bytes = postcard::to_allocvec(&ArtifactMetaWire {
-            relation: ArtifactRelation::Root as u8,
+            relation: u8::from(ArtifactRelation::Root),
             analyze: true,
             allow_dynamic_recursion: false,
         })

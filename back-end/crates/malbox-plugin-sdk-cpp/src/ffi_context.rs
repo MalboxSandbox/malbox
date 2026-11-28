@@ -23,7 +23,7 @@ unsafe fn ctx_ref<'a>(ptr: *const MalboxContext) -> Option<&'a Context> {
     }
     // SAFETY: MalboxContext is an opaque stand-in for Context;
     // the runtime always passes the original *const Context cast to *const MalboxContext.
-    Some(unsafe { &*(ptr as *const Context) })
+    Some(unsafe { &*ptr.cast::<Context>() })
 }
 
 /// Clone a Context, incrementing its internal Arc refcount.
@@ -38,9 +38,11 @@ pub unsafe extern "C" fn malbox_context_clone(ctx: *const MalboxContext) -> *mut
     if ctx.is_null() {
         return std::ptr::null_mut();
     }
-    let context = unsafe { &*(ctx as *const Context) };
+    // SAFETY: `ctx` is non-null and, per the caller contract, points to a live
+    // `Context` disguised as the opaque `MalboxContext`.
+    let context = unsafe { &*ctx.cast::<Context>() };
     let cloned = Box::new(context.clone());
-    Box::into_raw(cloned) as *mut MalboxContext
+    Box::into_raw(cloned).cast::<MalboxContext>()
 }
 
 /// Drop a heap-allocated Context previously returned by [`malbox_context_clone`].
@@ -54,7 +56,29 @@ pub unsafe extern "C" fn malbox_context_drop(ctx: *mut MalboxContext) {
     if ctx.is_null() {
         return;
     }
-    let _ = unsafe { Box::from_raw(ctx as *mut Context) };
+    // SAFETY: the caller guarantees `ctx` came from `Box::into_raw` in
+    // `malbox_context_clone` and has not been dropped yet.
+    drop(unsafe { Box::from_raw(ctx.cast::<Context>()) });
+}
+
+/// Read a nullable NUL-terminated C string as UTF-8, mapping null to `""`.
+///
+/// Sets the last error and returns `None` if the bytes are not valid UTF-8.
+///
+/// # Safety
+/// `ptr`, if non-null, must point to a valid NUL-terminated C string.
+unsafe fn optional_str<'a>(ptr: *const c_char, what: &str) -> Option<&'a str> {
+    if ptr.is_null() {
+        return Some("");
+    }
+    // SAFETY: `ptr` is non-null and the caller guarantees it is NUL-terminated.
+    match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
+        Ok(s) => Some(s),
+        Err(e) => {
+            set_last_error(&format!("{what} is not valid UTF-8: {e}"));
+            None
+        }
+    }
 }
 
 /// Report execution progress (0.0-1.0) with an optional status message.
@@ -75,21 +99,14 @@ pub unsafe extern "C" fn malbox_context_emit_progress(
     progress: f64,
     message: *const c_char,
 ) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
 
-    let msg = if message.is_null() {
-        ""
-    } else {
-        match unsafe { std::ffi::CStr::from_ptr(message) }.to_str() {
-            Ok(s) => s,
-            Err(e) => {
-                set_last_error(&format!("message is not valid UTF-8: {e}"));
-                return -1;
-            }
-        }
+    // SAFETY: forwarded from this function's caller contract on `message`.
+    let Some(msg) = (unsafe { optional_str(message, "message") }) else {
+        return -1;
     };
 
     let (rc, _) = result_to_rc(context.progress(progress, msg));
@@ -111,20 +128,12 @@ pub unsafe extern "C" fn malbox_context_emit_event(
     ctx: *const MalboxContext,
     event: MalboxEvent,
 ) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
 
-    let rust_event = match c_event_to_rust(&event) {
-        Ok(e) => e,
-        Err(()) => {
-            set_last_error("unrecognised event tag");
-            return -1;
-        }
-    };
-
-    let (rc, _) = result_to_rc(context.emit_event(rust_event));
+    let (rc, _) = result_to_rc(context.emit_event(c_event_to_rust(event)));
     rc
 }
 
@@ -144,22 +153,14 @@ pub unsafe extern "C" fn malbox_context_warn(
     ctx: *const MalboxContext,
     message: *const c_char,
 ) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
 
-    if message.is_null() {
-        set_last_error("message must not be null");
+    // SAFETY: forwarded from this function's caller contract on `message`.
+    let Some(msg) = (unsafe { required_str(message, "message") }) else {
         return -1;
-    }
-
-    let msg = match unsafe { std::ffi::CStr::from_ptr(message) }.to_str() {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("message is not valid UTF-8: {e}"));
-            return -1;
-        }
     };
 
     let (rc, _) = result_to_rc(context.warn(msg));
@@ -184,22 +185,14 @@ pub unsafe extern "C" fn malbox_context_mark_collected(
     ctx: *const MalboxContext,
     path: *const c_char,
 ) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
 
-    if path.is_null() {
-        set_last_error("path must not be null");
+    // SAFETY: forwarded from this function's caller contract on `path`.
+    let Some(path_str) = (unsafe { required_str(path, "path") }) else {
         return -1;
-    }
-
-    let path_str = match unsafe { std::ffi::CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(e) => {
-            set_last_error(&format!("path is not valid UTF-8: {e}"));
-            return -1;
-        }
     };
 
     context.mark_collected(std::path::Path::new(path_str));
@@ -207,7 +200,71 @@ pub unsafe extern "C" fn malbox_context_mark_collected(
     0
 }
 
-/// Flush a batch of results to the daemon immediately during on_task.
+/// Build one `PluginResult` from a single entry of the flush arrays.
+///
+/// Sets the last error and returns `None` on a null or non-UTF-8 field.
+///
+/// # Safety
+/// `name_ptr` must be a valid NUL-terminated C string. For `format == 3`,
+/// `data_ptr` (if non-null) must be a NUL-terminated path string; otherwise
+/// `data_ptr` (if non-null) must point to `data_len` readable bytes.
+unsafe fn flush_entry(
+    i: usize,
+    name_ptr: *const c_char,
+    data_ptr: *const u8,
+    data_len: usize,
+    format: i32,
+) -> Option<malbox_plugin_sdk::result::PluginResult> {
+    use malbox_plugin_sdk::result::PluginResult;
+
+    // SAFETY: the caller guarantees `name_ptr` is a valid NUL-terminated string.
+    let name = match unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_str() {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_last_error(&format!("result name at index {i} is not valid UTF-8: {e}"));
+            return None;
+        }
+    };
+
+    if format == 3 {
+        // File format: data is a null-terminated path string
+        if data_ptr.is_null() {
+            set_last_error(&format!("result data at index {i} is null for File format"));
+            return None;
+        }
+        // SAFETY: non-null, and for File format the caller guarantees a
+        // NUL-terminated path string.
+        let path_str = match unsafe { std::ffi::CStr::from_ptr(data_ptr.cast::<c_char>()) }.to_str()
+        {
+            Ok(s) => s,
+            Err(e) => {
+                set_last_error(&format!(
+                    "result file path at index {i} is not valid UTF-8: {e}"
+                ));
+                return None;
+            }
+        };
+        return Some(PluginResult::File {
+            name,
+            path: std::path::PathBuf::from(path_str),
+        });
+    }
+
+    let data = if data_len > 0 && !data_ptr.is_null() {
+        // SAFETY: non-null and the caller guarantees `data_len` readable bytes.
+        unsafe { std::slice::from_raw_parts(data_ptr, data_len) }.to_vec()
+    } else {
+        vec![]
+    };
+
+    Some(if format == 1 {
+        PluginResult::Json { name, data }
+    } else {
+        PluginResult::Bytes { name, data }
+    })
+}
+
+/// Flush a batch of results to the daemon immediately during `on_task`.
 ///
 /// `names`, `datas`, `data_lens`, and `formats` are parallel arrays of length `count`.
 /// Each entry describes one result to flush.
@@ -228,11 +285,9 @@ pub unsafe extern "C" fn malbox_context_flush_results(
     formats: *const i32,
     count: usize,
 ) -> i32 {
-    use malbox_plugin_sdk::result::PluginResult;
-
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
 
     if count == 0 {
@@ -244,53 +299,23 @@ pub unsafe extern "C" fn malbox_context_flush_results(
         return -1;
     }
 
+    // SAFETY: non-null, and the caller guarantees each array has `count` elements.
+    let names = unsafe { std::slice::from_raw_parts(names, count) };
+    // SAFETY: as above.
+    let datas = unsafe { std::slice::from_raw_parts(datas, count) };
+    // SAFETY: as above.
+    let data_lens = unsafe { std::slice::from_raw_parts(data_lens, count) };
+    // SAFETY: as above.
+    let formats = unsafe { std::slice::from_raw_parts(formats, count) };
+
     let mut results = Vec::with_capacity(count);
-    for i in 0..count {
-        let name_ptr = unsafe { *names.add(i) };
-        let name = match unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_str() {
-            Ok(s) => s.to_string(),
-            Err(e) => {
-                set_last_error(&format!("result name at index {i} is not valid UTF-8: {e}"));
-                return -1;
-            }
-        };
-
-        let format = unsafe { *formats.add(i) };
-        let result = if format == 3 {
-            // File format: data is a null-terminated path string
-            let data_ptr = unsafe { *datas.add(i) };
-            if data_ptr.is_null() {
-                set_last_error(&format!("result data at index {i} is null for File format"));
-                return -1;
-            }
-            let path_str =
-                match unsafe { std::ffi::CStr::from_ptr(data_ptr as *const c_char) }.to_str() {
-                    Ok(s) => s,
-                    Err(e) => {
-                        set_last_error(&format!(
-                            "result file path at index {i} is not valid UTF-8: {e}"
-                        ));
-                        return -1;
-                    }
-                };
-            PluginResult::File {
-                name,
-                path: std::path::PathBuf::from(path_str),
-            }
-        } else {
-            let data_ptr = unsafe { *datas.add(i) };
-            let data_len = unsafe { *data_lens.add(i) };
-            let data = if data_len > 0 && !data_ptr.is_null() {
-                unsafe { std::slice::from_raw_parts(data_ptr, data_len) }.to_vec()
-            } else {
-                vec![]
-            };
-
-            if format == 1 {
-                PluginResult::Json { name, data }
-            } else {
-                PluginResult::Bytes { name, data }
-            }
+    for (i, &name_ptr) in names.iter().enumerate() {
+        // SAFETY: entry `i` of the caller's arrays satisfies `flush_entry`'s
+        // contract per this function's safety requirements.
+        let Some(result) =
+            (unsafe { flush_entry(i, name_ptr, datas[i], data_lens[i], formats[i]) })
+        else {
+            return -1;
         };
         results.push(result);
     }
@@ -313,6 +338,7 @@ unsafe fn required_str<'a>(ptr: *const c_char, what: &str) -> Option<&'a str> {
         set_last_error(&format!("{what} must not be null"));
         return None;
     }
+    // SAFETY: `ptr` is non-null and the caller guarantees it is NUL-terminated.
     match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
         Ok(s) => Some(s),
         Err(e) => {
@@ -337,7 +363,6 @@ unsafe fn required_str<'a>(ptr: *const c_char, what: &str) -> Option<&'a str> {
 /// - `ctx` must be valid; `name` must be a NUL-terminated C string.
 /// - `data` must point to `data_len` readable bytes (may be null when `data_len == 0`).
 #[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn malbox_context_push_artifact(
     ctx: *const MalboxContext,
     name: *const c_char,
@@ -350,13 +375,13 @@ pub unsafe extern "C" fn malbox_context_push_artifact(
 ) -> i32 {
     use malbox_plugin_sdk::{ArtifactOpts, ArtifactRelation, ArtifactSource};
 
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
-    let name = match unsafe { required_str(name, "name") } {
-        Some(s) => s,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `name`.
+    let Some(name) = (unsafe { required_str(name, "name") }) else {
+        return -1;
     };
     let bytes: &[u8] = if data_len == 0 {
         &[]
@@ -364,6 +389,7 @@ pub unsafe extern "C" fn malbox_context_push_artifact(
         set_last_error("data must not be null when data_len > 0");
         return -1;
     } else {
+        // SAFETY: non-null and the caller guarantees `data_len` readable bytes.
         unsafe { std::slice::from_raw_parts(data, data_len) }
     };
     let Some(relation) = u8::try_from(relation)
@@ -417,17 +443,17 @@ pub unsafe extern "C" fn malbox_context_shared_put(
     key: *const c_char,
     json_value: *const c_char,
 ) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
-    let key = match unsafe { required_str(key, "key") } {
-        Some(s) => s,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `key`.
+    let Some(key) = (unsafe { required_str(key, "key") }) else {
+        return -1;
     };
-    let raw = match unsafe { required_str(json_value, "json_value") } {
-        Some(s) => s,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `json_value`.
+    let Some(raw) = (unsafe { required_str(json_value, "json_value") }) else {
+        return -1;
     };
     let value: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
@@ -448,9 +474,9 @@ pub unsafe extern "C" fn malbox_context_shared_put(
 /// `ctx` must be a valid context pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_context_drop_artifact(ctx: *const MalboxContext) -> i32 {
-    let context = match unsafe { ctx_ref(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(context) = (unsafe { ctx_ref(ctx) }) else {
+        return -1;
     };
     let (rc, _) = result_to_rc(context.drop_artifact());
     rc
@@ -470,7 +496,7 @@ mod tests {
     }
 
     fn make_ctx_ptr(ctx: &Context) -> *const MalboxContext {
-        (ctx as *const Context) as *const MalboxContext
+        std::ptr::from_ref(ctx).cast::<MalboxContext>()
     }
 
     #[test]
@@ -486,6 +512,8 @@ mod tests {
         );
         let name = CString::new("dropped.exe").unwrap();
         let data = b"MZ";
+        // SAFETY: the context pointer, `name` and `data` all borrow locals that
+        // outlive the call; `data.len()` matches the buffer.
         let rc = unsafe {
             malbox_context_push_artifact(
                 make_ctx_ptr(&ctx),
@@ -493,7 +521,7 @@ mod tests {
                 data.as_ptr(),
                 data.len(),
                 1,
-                ArtifactRelation::Dropped as i32,
+                2, // ArtifactRelation::Dropped wire value
                 -1,
                 0,
             )
@@ -515,6 +543,8 @@ mod tests {
     fn push_artifact_rejects_root_relation() {
         let ctx = Context::test_new(noop_emitter());
         let name = CString::new("x").unwrap();
+        // SAFETY: the context pointer and `name` borrow live locals; `data` is
+        // null with `data_len == 0`, which the function accepts.
         let rc = unsafe {
             malbox_context_push_artifact(
                 make_ctx_ptr(&ctx),
@@ -535,6 +565,7 @@ mod tests {
         let ctx = Context::test_new(noop_emitter());
         let key = CString::new("k").unwrap();
         let value = CString::new("{nope").unwrap();
+        // SAFETY: context, key and value pointers borrow live locals.
         let rc =
             unsafe { malbox_context_shared_put(make_ctx_ptr(&ctx), key.as_ptr(), value.as_ptr()) };
         assert_eq!(rc, -1);
@@ -544,6 +575,7 @@ mod tests {
     fn emit_progress_succeeds() {
         let ctx = Context::test_new(noop_emitter());
         let msg = CString::new("halfway").unwrap();
+        // SAFETY: context and message pointers borrow live locals.
         let rc = unsafe { malbox_context_emit_progress(make_ctx_ptr(&ctx), 0.5, msg.as_ptr()) };
         assert_eq!(rc, 0);
     }
@@ -551,12 +583,14 @@ mod tests {
     #[test]
     fn emit_progress_null_message_succeeds() {
         let ctx = Context::test_new(noop_emitter());
+        // SAFETY: the context pointer borrows a live local; a null message is allowed.
         let rc = unsafe { malbox_context_emit_progress(make_ctx_ptr(&ctx), 0.0, std::ptr::null()) };
         assert_eq!(rc, 0);
     }
 
     #[test]
     fn emit_progress_null_context_returns_minus_one() {
+        // SAFETY: null pointers are rejected before any dereference.
         let rc = unsafe { malbox_context_emit_progress(std::ptr::null(), 0.5, std::ptr::null()) };
         assert_eq!(rc, -1);
     }
@@ -568,6 +602,7 @@ mod tests {
             tag: MalboxEventTag::TaskCreated,
             id: 1,
         };
+        // SAFETY: the context pointer borrows a live local.
         let rc = unsafe { malbox_context_emit_event(make_ctx_ptr(&ctx), event) };
         assert_eq!(rc, 0);
     }
@@ -579,6 +614,7 @@ mod tests {
             tag: MalboxEventTag::DaemonShutdown,
             id: 0,
         };
+        // SAFETY: the context pointer borrows a live local.
         let rc = unsafe { malbox_context_emit_event(make_ctx_ptr(&ctx), event) };
         assert_eq!(rc, 0);
     }
@@ -589,6 +625,7 @@ mod tests {
             tag: MalboxEventTag::TaskCreated,
             id: 0,
         };
+        // SAFETY: a null context is rejected before any dereference.
         let rc = unsafe { malbox_context_emit_event(std::ptr::null(), event) };
         assert_eq!(rc, -1);
     }
@@ -597,6 +634,7 @@ mod tests {
     fn warn_succeeds() {
         let ctx = Context::test_new(noop_emitter());
         let msg = CString::new("watch out").unwrap();
+        // SAFETY: context and message pointers borrow live locals.
         let rc = unsafe { malbox_context_warn(make_ctx_ptr(&ctx), msg.as_ptr()) };
         assert_eq!(rc, 0);
     }
@@ -604,6 +642,7 @@ mod tests {
     #[test]
     fn warn_null_context_returns_minus_one() {
         let msg = CString::new("x").unwrap();
+        // SAFETY: a null context is rejected before any dereference.
         let rc = unsafe { malbox_context_warn(std::ptr::null(), msg.as_ptr()) };
         assert_eq!(rc, -1);
     }
@@ -611,6 +650,7 @@ mod tests {
     #[test]
     fn warn_null_message_returns_minus_one() {
         let ctx = Context::test_new(noop_emitter());
+        // SAFETY: the context pointer borrows a live local; null message is rejected.
         let rc = unsafe { malbox_context_warn(make_ctx_ptr(&ctx), std::ptr::null()) };
         assert_eq!(rc, -1);
     }

@@ -10,7 +10,7 @@ use syn::{self, ItemStruct};
 /// from `[runtime]`. Generates a `__MALBOX_META` constant, a `Default` impl
 /// (for non-unit structs), and a `fn main()` that bootstraps the appropriate
 /// runtime.
-pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenStream> {
+pub(crate) fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenStream> {
     let input: ItemStruct = syn::parse2(item)?;
 
     let manifest = read_manifest(&input)?;
@@ -44,9 +44,8 @@ pub fn expand_plugin(item: TokenStream, kind: PluginKind) -> syn::Result<TokenSt
         }
     };
 
-    let is_unit_struct = matches!(input.fields, syn::Fields::Unit);
     let default_impl = generate_default_impl(struct_name, &input.fields);
-    let main_fn = codegen::generate_main(struct_name, kind, is_unit_struct);
+    let main_fn = codegen::generate_main(struct_name, kind, &input.fields);
 
     // Runtime-config codegen (guest plugins only - host uses a fixed default).
     let runtime_const = match kind {
@@ -126,13 +125,13 @@ fn generate_runtime_const(
 
     let ac_art = &resolved.auto_collect_artifacts;
     let ac_art_enabled = ac_art.enabled;
-    let ac_art_include: Vec<&str> = ac_art.include.iter().map(|s| s.as_str()).collect();
-    let ac_art_exclude: Vec<&str> = ac_art.exclude.iter().map(|s| s.as_str()).collect();
+    let ac_art_include: Vec<&str> = ac_art.include.iter().map(String::as_str).collect();
+    let ac_art_exclude: Vec<&str> = ac_art.exclude.iter().map(String::as_str).collect();
     let ac_art_max = ac_art.max_file_size;
     let ac_art_rules = ac_art.rules.iter().map(|r| {
         let include = r.include.iter().map(String::as_str);
         let exclude = r.exclude.iter().map(String::as_str);
-        let relation = r.relation as u8;
+        let relation = u8::from(r.relation);
         let analyze = r.analyze;
         quote::quote! {
             malbox_plugin_sdk::runtime::guest::AutoCollectRuleRuntime {
@@ -146,8 +145,8 @@ fn generate_runtime_const(
 
     let ac_ext = &resolved.auto_collect_external_logs;
     let ac_ext_enabled = ac_ext.enabled;
-    let ac_ext_include: Vec<&str> = ac_ext.include.iter().map(|s| s.as_str()).collect();
-    let ac_ext_exclude: Vec<&str> = ac_ext.exclude.iter().map(|s| s.as_str()).collect();
+    let ac_ext_include: Vec<&str> = ac_ext.include.iter().map(String::as_str).collect();
+    let ac_ext_exclude: Vec<&str> = ac_ext.exclude.iter().map(String::as_str).collect();
     let ac_ext_max = ac_ext.max_file_size;
 
     Ok(quote::quote! {

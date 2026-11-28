@@ -1,3 +1,5 @@
+//! Typed HTTP client for the malbox daemon REST API.
+
 pub mod images;
 pub mod machines;
 pub mod plugins;
@@ -7,6 +9,8 @@ use crate::error::{CliError, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
+/// Client for the daemon's `/v1` HTTP API rooted at a base URL.
+#[derive(Debug)]
 pub struct ApiClient {
     client: Client,
     base_url: String,
@@ -19,6 +23,8 @@ struct ApiErrorBody {
 }
 
 impl ApiClient {
+    /// Creates a client for the daemon at `base_url`; a trailing `/` is ignored.
+    #[must_use]
     pub fn new(base_url: &str) -> Self {
         Self {
             client: Client::new(),
@@ -43,7 +49,7 @@ impl ApiClient {
         if let Ok(err_body) = serde_json::from_str::<ApiErrorBody>(&body) {
             Err(CliError::Api(format!("{}: {}", status, err_body.error)))
         } else {
-            Err(CliError::Api(format!("{}: {}", status, body)))
+            Err(CliError::Api(format!("{status}: {body}")))
         }
     }
 }

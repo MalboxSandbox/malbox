@@ -14,8 +14,8 @@ use malbox_plugin_sdk::report::{
     eq,
     eq_int
 )]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PyClassification {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PyClassification {
     Clean = 0,
     Suspicious = 1,
     Malicious = 2,
@@ -40,8 +40,8 @@ impl From<PyClassification> for Classification {
     eq,
     eq_int
 )]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PyConfidence {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PyConfidence {
     Low = 0,
     Medium = 1,
     High = 2,
@@ -60,8 +60,8 @@ impl From<PyConfidence> for Confidence {
 // ─── Indicator ───────────────────────────────────────────────────────────────
 
 #[pyclass(name = "Indicator", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyIndicator {
+#[derive(Debug, Clone)]
+pub(crate) struct PyIndicator {
     pub(crate) inner: Indicator,
 }
 
@@ -115,8 +115,8 @@ impl From<PyIndicator> for Indicator {
 // ─── Ttp ─────────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "Ttp", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyTtp {
+#[derive(Debug, Clone)]
+pub(crate) struct PyTtp {
     pub(crate) inner: Ttp,
 }
 
@@ -155,8 +155,8 @@ impl From<PyTtp> for Ttp {
 // ─── ArtifactRef ─────────────────────────────────────────────────────────────
 
 #[pyclass(name = "ArtifactRef", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyArtifactRef {
+#[derive(Debug, Clone)]
+pub(crate) struct PyArtifactRef {
     pub(crate) inner: ArtifactRef,
 }
 
@@ -199,8 +199,8 @@ impl From<PyArtifactRef> for ArtifactRef {
 // ─── KvPair ──────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "KvPair", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyKvPair {
+#[derive(Debug, Clone)]
+pub(crate) struct PyKvPair {
     pub(crate) inner: KvPair,
 }
 
@@ -208,6 +208,10 @@ pub struct PyKvPair {
 impl PyKvPair {
     #[new]
     #[pyo3(signature = (key, value, mono=false))]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the Python keyword argument `mono`"
+    )]
     fn new(key: String, value: String, mono: bool) -> Self {
         Self {
             inner: KvPair { key, value, mono },
@@ -239,8 +243,8 @@ impl From<PyKvPair> for KvPair {
 // ─── Column ──────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "Column", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyColumn {
+#[derive(Debug, Clone)]
+pub(crate) struct PyColumn {
     pub(crate) inner: Column,
 }
 
@@ -279,8 +283,8 @@ impl From<PyColumn> for Column {
 // ─── TreeNode ────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "TreeNode", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyTreeNode {
+#[derive(Debug, Clone)]
+pub(crate) struct PyTreeNode {
     pub(crate) inner: TreeNode,
 }
 
@@ -336,8 +340,8 @@ impl From<PyTreeNode> for TreeNode {
 // ─── TimelineEvent ───────────────────────────────────────────────────────────
 
 #[pyclass(name = "TimelineEvent", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyTimelineEvent {
+#[derive(Debug, Clone)]
+pub(crate) struct PyTimelineEvent {
     pub(crate) inner: TimelineEvent,
 }
 
@@ -396,8 +400,8 @@ impl From<PyTimelineEvent> for TimelineEvent {
 // ─── GraphNode ───────────────────────────────────────────────────────────────
 
 #[pyclass(name = "GraphNode", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyGraphNode {
+#[derive(Debug, Clone)]
+pub(crate) struct PyGraphNode {
     pub(crate) inner: GraphNode,
 }
 
@@ -444,8 +448,8 @@ impl From<PyGraphNode> for GraphNode {
 // ─── GraphEdge ───────────────────────────────────────────────────────────────
 
 #[pyclass(name = "GraphEdge", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyGraphEdge {
+#[derive(Debug, Clone)]
+pub(crate) struct PyGraphEdge {
     pub(crate) inner: GraphEdge,
 }
 
@@ -464,7 +468,10 @@ impl PyGraphEdge {
     }
 
     #[getter]
-    #[allow(clippy::wrong_self_convention)]
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "Python getter name mirrors the `from_node` constructor argument"
+    )]
     fn from_node(&self) -> &str {
         &self.inner.from
     }
@@ -489,8 +496,8 @@ impl From<PyGraphEdge> for GraphEdge {
 // ─── Block ───────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "Block", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyBlock {
+#[derive(Debug, Clone)]
+pub(crate) struct PyBlock {
     pub(crate) inner: Block,
 }
 
@@ -512,8 +519,7 @@ impl PyBlock {
             "error" => CalloutLevel::Error,
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid callout level '{}'. Must be one of: info, success, warn, error",
-                    level
+                    "Invalid callout level '{level}'. Must be one of: info, success, warn, error"
                 )));
             }
         };
@@ -552,16 +558,20 @@ impl PyBlock {
 
     #[staticmethod]
     #[pyo3(signature = (columns, rows, sortable=true, searchable=false))]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the Python keyword arguments `sortable` and `searchable`"
+    )]
     fn table(
         py: Python<'_>,
         columns: Vec<PyColumn>,
-        rows: Py<PyAny>,
+        rows: &Bound<'_, PyAny>,
         sortable: bool,
         searchable: bool,
     ) -> PyResult<Self> {
         let json_mod = py.import("json")?;
         let json_str = json_mod
-            .call_method1("dumps", (rows.bind(py),))?
+            .call_method1("dumps", (rows,))?
             .extract::<String>()?;
         let rows_value: Vec<serde_json::Value> = serde_json::from_str(&json_str)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
@@ -584,10 +594,14 @@ impl PyBlock {
 
     #[staticmethod]
     #[pyo3(signature = (data, collapsed=true))]
-    fn json(py: Python<'_>, data: Py<PyAny>, collapsed: bool) -> PyResult<Self> {
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the Python keyword argument `collapsed`"
+    )]
+    fn json(py: Python<'_>, data: &Bound<'_, PyAny>, collapsed: bool) -> PyResult<Self> {
         let json_mod = py.import("json")?;
         let json_str = json_mod
-            .call_method1("dumps", (data.bind(py),))?
+            .call_method1("dumps", (data,))?
             .extract::<String>()?;
         let json_value: serde_json::Value = serde_json::from_str(&json_str)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
@@ -677,7 +691,7 @@ impl From<PyBlock> for Block {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Convert a Python object to a serde_json::Value via Python's json module.
+/// Convert a Python object to a `serde_json::Value` via Python's json module.
 fn py_obj_to_json_value(py: Python<'_>, obj: &Py<PyAny>) -> PyResult<serde_json::Value> {
     let json_mod = py.import("json")?;
     let json_str = json_mod
@@ -687,7 +701,7 @@ fn py_obj_to_json_value(py: Python<'_>, obj: &Py<PyAny>) -> PyResult<serde_json:
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
-/// Convert a serde_json::Value back to a Python object via Python's json module.
+/// Convert a `serde_json::Value` back to a Python object via Python's json module.
 fn json_value_to_py_obj(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
     let json_str = serde_json::to_string(value)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;

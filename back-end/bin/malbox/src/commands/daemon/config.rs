@@ -4,16 +4,16 @@ use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
 
 mod init;
-pub use init::InitArgs;
+pub(crate) use init::InitArgs;
 
 #[derive(Parser)]
-pub struct ConfigCommand {
+pub(crate) struct ConfigCommand {
     #[command(subcommand)]
     command: ConfigCommands,
 }
 
 #[derive(Subcommand)]
-pub enum ConfigCommands {
+pub(crate) enum ConfigCommands {
     /// Initialize a new configuration file with defaults
     Init(InitArgs),
 }

@@ -17,6 +17,11 @@ pub trait TransportEmitter {
     ///
     /// The implementation is responsible for serializing the event and
     /// delivering it to the other side.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TransportError`](crate::error::TransportError) if the event
+    /// cannot be serialized or delivered.
     fn emit(&self, event: Event) -> Result<()>;
 }
 
@@ -29,17 +34,32 @@ pub trait TransportReceiver {
     ///
     /// Returns the event if one is received within the timeout,
     /// or `None` if the timeout expires.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TransportError`](crate::error::TransportError) if the
+    /// underlying channel fails or cannot receive.
     fn wait(&self, timeout: Duration) -> Result<Option<Event>>;
 
     /// Block until an event is received.
     ///
     /// Returns the event when one arrives.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TransportError`](crate::error::TransportError) if the
+    /// underlying channel fails or does not support blocking receives.
     fn wait_blocking(&self) -> Result<Event>;
 
     /// Try to receive an event without blocking.
     ///
     /// Returns immediately with the event if available,
     /// or `None` if no event is pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TransportError`](crate::error::TransportError) if the
+    /// underlying channel fails.
     fn try_recv(&self) -> Result<Option<Event>>;
 }
 

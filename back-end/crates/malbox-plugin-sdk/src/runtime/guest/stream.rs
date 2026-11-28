@@ -182,7 +182,7 @@ fn launch_sample<P: GuestPlugin>(plugin: &P, sample_path: &Path) -> bool {
 /// READY is sent first in plugin mode, and after `on_start` returns in
 /// daemon mode so the daemon launches only once every observer is set up.
 #[instrument(skip_all, fields(task_id = exec.task_id))]
-pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecution) {
+pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: &P, exec: TaskExecution) {
     let TaskExecution {
         task_id,
         sample_path,
@@ -200,8 +200,7 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecut
 
     let launch_owner = config
         .get(job_config::LAUNCH_OWNER)
-        .map(String::as_str)
-        .unwrap_or("plugin");
+        .map_or("plugin", String::as_str);
     let daemon_launch = launch_owner == "daemon";
 
     if !daemon_launch && !send_ready(task_id, &proto_tx) {
@@ -236,7 +235,7 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecut
         return;
     }
 
-    let launched = daemon_launch || launch_sample(plugin.as_ref(), &sample_path);
+    let launched = daemon_launch || launch_sample(plugin, &sample_path);
 
     if launched {
         let timeout = config
@@ -288,7 +287,7 @@ pub(super) fn guest_linear_task<P: GuestPlugin>(plugin: Arc<P>, exec: TaskExecut
 pub(super) fn log_entry_to_proto(entry: LogEntry) -> proto::LogEntry {
     proto::LogEntry {
         timestamp_ns: entry.timestamp_ns,
-        level: entry.level as i32,
+        level: i32::from(entry.level),
         target: entry.target,
         message: entry.message,
         fields: entry.fields,

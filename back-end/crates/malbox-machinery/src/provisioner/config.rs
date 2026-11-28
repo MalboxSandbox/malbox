@@ -4,6 +4,10 @@
 ///
 /// Allows provisioner crates to deserialize their config without
 /// depending on the toml crate directly.
+///
+/// # Errors
+///
+/// Fails if `config` cannot be re-serialized or does not match the shape of `T`.
 pub fn deserialize<T>(config: &toml::Value) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
 where
     T: serde::de::DeserializeOwned,

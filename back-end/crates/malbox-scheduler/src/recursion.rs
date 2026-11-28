@@ -5,24 +5,36 @@ use std::collections::BTreeSet;
 use crate::params::ChildDetonation;
 
 /// The category that stands for detonations.
-pub const DYNAMIC: &str = "dynamic";
+pub(crate) const DYNAMIC: &str = "dynamic";
 
 #[derive(Debug, Clone, Default)]
-pub struct ParentContext {
+pub(crate) struct ParentContext {
     /// Categories forbidden for the parent itself.
-    pub forbidden: BTreeSet<String>,
+    pub(crate) forbidden: BTreeSet<String>,
     /// `recursion_prevention` of every analyzer with a job on the parent,
     /// plus `"dynamic"` when the parent was detonated in `extracted` mode.
-    pub prevention_from_jobs: BTreeSet<String>,
+    pub(crate) prevention_from_jobs: BTreeSet<String>,
 }
 
-pub fn forbidden_for_child(
+/// Switches that relax recursion prevention for one child.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RecursionOverrides {
+    /// The submission disabled recursion prevention entirely.
+    pub(crate) ignore_prevention: bool,
+    /// The child was explicitly requested for detonation despite inheritance.
+    pub(crate) dynamic_bypass: bool,
+}
+
+pub(crate) fn forbidden_for_child(
     parents: &[ParentContext],
     mode: ChildDetonation,
-    ignore_recursion_prevention: bool,
-    bypass: bool,
+    overrides: RecursionOverrides,
 ) -> BTreeSet<String> {
-    let mut out: BTreeSet<String> = if ignore_recursion_prevention {
+    let RecursionOverrides {
+        ignore_prevention,
+        dynamic_bypass: bypass,
+    } = overrides;
+    let mut out: BTreeSet<String> = if ignore_prevention {
         BTreeSet::new()
     } else {
         parents
@@ -52,7 +64,7 @@ mod tests {
     use super::*;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
+        items.iter().map(ToString::to_string).collect()
     }
 
     fn detonated_parent() -> ParentContext {
@@ -62,50 +74,48 @@ mod tests {
         }
     }
 
+    const NONE: RecursionOverrides = RecursionOverrides {
+        ignore_prevention: false,
+        dynamic_bypass: false,
+    };
+    const BYPASS: RecursionOverrides = RecursionOverrides {
+        ignore_prevention: false,
+        dynamic_bypass: true,
+    };
+    const IGNORE: RecursionOverrides = RecursionOverrides {
+        ignore_prevention: true,
+        dynamic_bypass: false,
+    };
+
     #[test]
     fn extracted_inherits_parent_prevention() {
-        let f = forbidden_for_child(
-            &[detonated_parent()],
-            ChildDetonation::Extracted,
-            false,
-            false,
-        );
+        let f = forbidden_for_child(&[detonated_parent()], ChildDetonation::Extracted, NONE);
         assert_eq!(f, set(&["dynamic", "extract"]));
     }
 
     #[test]
     fn bypass_allows_dynamic() {
-        let f = forbidden_for_child(
-            &[detonated_parent()],
-            ChildDetonation::Extracted,
-            false,
-            true,
-        );
+        let f = forbidden_for_child(&[detonated_parent()], ChildDetonation::Extracted, BYPASS);
         assert_eq!(f, set(&["extract"]));
     }
 
     #[test]
     fn none_mode_always_forbids_dynamic() {
-        let f = forbidden_for_child(&[], ChildDetonation::None, false, true);
+        let f = forbidden_for_child(&[], ChildDetonation::None, BYPASS);
         assert_eq!(f, set(&["dynamic"]));
-        let f = forbidden_for_child(&[], ChildDetonation::None, true, false);
+        let f = forbidden_for_child(&[], ChildDetonation::None, IGNORE);
         assert_eq!(f, set(&["dynamic"]));
     }
 
     #[test]
     fn all_mode_never_forbids_dynamic() {
-        let f = forbidden_for_child(&[detonated_parent()], ChildDetonation::All, false, false);
+        let f = forbidden_for_child(&[detonated_parent()], ChildDetonation::All, NONE);
         assert_eq!(f, set(&["extract"]));
     }
 
     #[test]
     fn ignore_recursion_prevention_clears() {
-        let f = forbidden_for_child(
-            &[detonated_parent()],
-            ChildDetonation::Extracted,
-            true,
-            false,
-        );
+        let f = forbidden_for_child(&[detonated_parent()], ChildDetonation::Extracted, IGNORE);
         assert!(f.is_empty());
     }
 
@@ -119,7 +129,7 @@ mod tests {
             forbidden: BTreeSet::new(),
             prevention_from_jobs: set(&["b"]),
         };
-        let f = forbidden_for_child(&[a, b], ChildDetonation::Extracted, false, false);
+        let f = forbidden_for_child(&[a, b], ChildDetonation::Extracted, NONE);
         assert_eq!(f, set(&["a", "b"]));
     }
 }

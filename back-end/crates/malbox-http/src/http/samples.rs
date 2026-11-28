@@ -23,7 +23,7 @@ use crate::http::report_service::{
 };
 use crate::http::{Result, error::Error};
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/samples", get(list_samples))
         .route("/v1/samples/{sha256}", get(get_sample_overview))
@@ -66,7 +66,7 @@ impl From<Task> for TaskSummary {
             status: t.status.as_str().to_string(),
             platform: t
                 .platform
-                .map(|p| format!("{:?}", p).to_lowercase())
+                .map(|p| format!("{p:?}").to_lowercase())
                 .unwrap_or_default(),
             plugins: t.plugins,
             timeout: t.timeout,
@@ -176,7 +176,9 @@ async fn get_sample_overview(
     let aggregate = match verdict {
         Some(v) => SampleVerdictView {
             worst_verdict: v.classification.map(|c| c.label().to_string()),
-            worst_score: v.score.map(|s| s as u8),
+            worst_score: v.score.map(|s| {
+                u8::try_from(s.clamp(0, i16::from(u8::MAX))).expect("clamped into u8 range")
+            }),
             indicator_count: v.indicator_count,
             ttp_count: v.ttp_count,
             plugin_names: v.plugin_names,
@@ -220,7 +222,7 @@ async fn get_sample_report(
         })
         .collect();
 
-    let plugin_count = plugins.len() as u32;
+    let plugin_count = u32::try_from(plugins.len()).unwrap_or(u32::MAX);
     let aggregate = aggregate_plugin_reports(reports, plugin_count);
 
     Ok(Json(SampleReportResponse {

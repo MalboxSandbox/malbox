@@ -1,3 +1,5 @@
+//! Tests for lockfile serialization, loading and pin labels.
+
 use malbox_plugin_registry::lockfile::{
     InstallMethod, InstallSource, LockedPlugin, Lockfile, PinKind,
 };

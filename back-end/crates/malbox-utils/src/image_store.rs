@@ -1,3 +1,5 @@
+//! Watches the VM image directory and keeps the `images` table in sync.
+
 use malbox_database::PgPool;
 use malbox_database::repositories::images;
 use notify::{Event, EventKind, RecursiveMode, Watcher, recommended_watcher};
@@ -51,7 +53,7 @@ pub fn spawn_image_watcher(store_path: PathBuf, db: PgPool, token: CancellationT
                         None => break,
                     }
                 }
-                _ = token.cancelled() => {
+                () = token.cancelled() => {
                     debug!("Image store consumer received shutdown");
                     break;
                 }

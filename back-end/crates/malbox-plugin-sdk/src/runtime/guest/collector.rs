@@ -116,9 +116,8 @@ pub(crate) fn auto_collect(
     };
 
     for file_path in entries {
-        let relative = match file_path.strip_prefix(dir) {
-            Ok(r) => r,
-            Err(_) => continue,
+        let Ok(relative) = file_path.strip_prefix(dir) else {
+            continue;
         };
 
         let rel_str = relative.to_string_lossy().into_owned();
@@ -157,7 +156,7 @@ pub(crate) fn auto_collect(
         }
 
         let result_name = if result_prefix.is_empty() {
-            rel_str.to_string()
+            rel_str.clone()
         } else {
             format!("{result_prefix}/{rel_str}")
         };

@@ -1,3 +1,5 @@
+//! Tests for plugin removal and lockfile cleanup.
+
 use malbox_plugin_registry::lockfile::{
     InstallMethod, InstallSource, LockedPlugin, Lockfile, PinKind,
 };
@@ -9,9 +11,9 @@ use tempfile::TempDir;
 fn remove_tracked_plugin() {
     let tmp = TempDir::new().unwrap();
     let plugins_dir = tmp.path().join("plugins");
-    let plugin_dir = plugins_dir.join("test-plugin");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
-    std::fs::write(plugin_dir.join("plugin.toml"), "dummy").unwrap();
+    let target_dir = plugins_dir.join("test-plugin");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(target_dir.join("plugin.toml"), "dummy").unwrap();
 
     let lockfile_path = Lockfile::lockfile_path(&plugins_dir);
     let mut plugins = HashMap::new();
@@ -38,7 +40,7 @@ fn remove_tracked_plugin() {
 
     remove_plugin("test-plugin", &plugins_dir).unwrap();
 
-    assert!(!plugin_dir.exists());
+    assert!(!target_dir.exists());
     let updated = Lockfile::load(&lockfile_path).unwrap();
     assert!(!updated.plugins.contains_key("test-plugin"));
 }
@@ -47,15 +49,15 @@ fn remove_tracked_plugin() {
 fn remove_untracked_plugin() {
     let tmp = TempDir::new().unwrap();
     let plugins_dir = tmp.path().join("plugins");
-    let plugin_dir = plugins_dir.join("untracked");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
-    std::fs::write(plugin_dir.join("plugin.toml"), "dummy").unwrap();
+    let target_dir = plugins_dir.join("untracked");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(target_dir.join("plugin.toml"), "dummy").unwrap();
 
     let lockfile_path = Lockfile::lockfile_path(&plugins_dir);
     Lockfile::empty().write(&lockfile_path).unwrap();
 
     remove_plugin("untracked", &plugins_dir).unwrap();
-    assert!(!plugin_dir.exists());
+    assert!(!target_dir.exists());
 }
 
 #[test]

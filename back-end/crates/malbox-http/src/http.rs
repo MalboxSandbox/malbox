@@ -25,6 +25,7 @@ mod tasks;
 mod transforms;
 
 pub use error::Error;
+/// Result alias for HTTP handlers, defaulting to the API [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Clone)]
@@ -37,6 +38,14 @@ struct AppState {
     plugin_registry: Arc<PluginRegistry>,
 }
 
+/// Run the HTTP API server until `shutdown_token` is cancelled.
+///
+/// Also serves the front-end SPA when `http.web_dir` is configured.
+///
+/// # Errors
+///
+/// Fails if the listener cannot bind to the configured host and port, or if
+/// the server itself errors while running.
 pub async fn serve(
     conf: MalboxConfig,
     db: PgPool,
@@ -93,17 +102,17 @@ pub async fn serve(
     let host = shared_state.config.http.host;
     let port = shared_state.config.http.port;
 
-    let address = format!("{}:{}", host, port);
+    let address = format!("{host}:{port}");
     let listener = TcpListener::bind(&address)
         .await
-        .map_err(|e| format!("error binding TcpListener: {}", e))?;
+        .map_err(|e| format!("error binding TcpListener: {e}"))?;
 
     info!(address = %address, "HTTP server listening");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async move { shutdown_token.cancelled().await })
         .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        .map_err(Into::into)
 }
 
 fn api_router() -> Router<AppState> {

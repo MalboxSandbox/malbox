@@ -14,58 +14,90 @@ use crate::routing::{AnalyzerSpec, RoutingTable};
 /// Whether the submitted sample is detonated.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DetonateMode {
     /// Detonate when a profile matches.
     #[default]
     Auto,
     /// Always try; an unmatched root fails as unserviceable.
     Always,
+    /// Never detonate the submitted sample.
     Never,
 }
 
 /// Which children may be detonated.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum ChildDetonation {
     /// Children of artifacts that were not themselves detonated.
     #[default]
     Extracted,
+    /// No child is detonated.
     None,
+    /// Every child with a matching profile is detonated.
     All,
 }
 
+/// Data handed to plugins before analysis starts.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct InitialData {
+    /// Candidate passwords for encrypted archives and documents.
     pub passwords: Vec<String>,
 }
 
+/// Per-submission overrides of how the root sample is detonated.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub struct DetonationOverrides {
+    /// Name of the detonation profile to use instead of the matched one.
     pub profile: Option<String>,
+    /// Launch package (e.g. `exe`, `dll`, `shell`) instead of the type default.
     pub package: Option<String>,
+    /// Export to call when the sample is launched as a DLL.
     pub dll_function: Option<String>,
 }
 
+/// Analysis options chosen at submission time; unset limits fall back to the configured caps.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the JSON submission schema, where each flag is an independent switch"
+)]
 pub struct SubmissionParams {
+    /// Whether the submitted sample is detonated.
     pub detonate: DetonateMode,
+    /// Which extracted children may be detonated.
     pub detonate_children: ChildDetonation,
+    /// Maximum artifact depth below the root.
     pub max_depth: Option<u32>,
+    /// Maximum number of analysed artifacts in the task.
     pub max_artifacts: Option<u32>,
+    /// Maximum number of detonations in the task.
     pub max_detonations: Option<u32>,
+    /// Maximum total bytes of stored artifacts in the task.
     pub max_total_bytes: Option<u64>,
+    /// Per-artifact analysis time limit, in seconds.
     pub max_artifact_time_secs: Option<u64>,
+    /// Whole-task deadline, in seconds.
     pub deadline_secs: Option<u64>,
+    /// Ask plugins for slower, more thorough analysis.
     pub deep_scan: bool,
+    /// Run every job even when a cached result exists.
     pub ignore_cache: bool,
+    /// Disable plugins' recursion-prevention rules.
     pub ignore_recursion_prevention: bool,
+    /// Analyse artifacts that filtering would otherwise skip.
     pub ignore_filtering: bool,
+    /// Analyse artifacts above the configured size limit.
     pub ignore_size: bool,
+    /// Parameters per plugin name, validated against each manifest.
     pub plugin_params: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Data handed to plugins before analysis starts.
     pub initial_data: InitialData,
+    /// Overrides for detonating the root sample.
     pub detonation: DetonationOverrides,
 }
 
@@ -101,6 +133,11 @@ impl SubmissionParams {
 
     /// Check overrides against the configured caps and plugin parameters
     /// against the manifests. Returns `(field, message)` pairs.
+    ///
+    /// # Errors
+    ///
+    /// Returns every `(field, message)` problem found: overrides above their
+    /// caps, unknown packages or profiles, and unknown or mistyped plugin parameters.
     pub fn validate(
         &self,
         settings: &OrchestrationConfig,
@@ -236,7 +273,7 @@ mod tests {
                 accepts: anchored("archive/zip").unwrap(),
                 rejects: None,
                 sources_exclude: vec![],
-                timeout: Duration::from_secs(60),
+                timeout: Duration::from_mins(1),
                 cacheable: true,
                 recursion_prevention: vec![],
                 uses_indicators: false,
@@ -252,7 +289,7 @@ mod tests {
                 snapshot: None,
                 tags: vec![],
                 guest_plugins: vec![],
-                timeout: Duration::from_secs(60),
+                timeout: Duration::from_mins(1),
             }],
         )
     }

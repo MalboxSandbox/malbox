@@ -2,20 +2,28 @@ use crate::error::{RegistryError, Result};
 use crate::lockfile::Lockfile;
 use std::path::Path;
 
+/// Delete an installed plugin's directory and drop its lockfile entry.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::InvalidSpecifier`] for an unsafe name,
+/// [`RegistryError::NotInstalled`] if the directory is missing,
+/// [`RegistryError::InvalidPlugin`] if it resolves outside `plugins_dir`, and
+/// I/O or lockfile errors from deletion and the lockfile update.
 pub fn remove_plugin(name: &str, plugins_dir: &Path) -> Result<()> {
     crate::error::validate_plugin_name(name)?;
 
-    let plugin_dir = plugins_dir.join(name);
+    let target_dir = plugins_dir.join(name);
 
-    if !plugin_dir.exists() {
+    if !target_dir.exists() {
         return Err(RegistryError::NotInstalled(name.to_string()));
     }
 
-    let canonical = plugin_dir.canonicalize()?;
+    let canonical = target_dir.canonicalize()?;
     let base = plugins_dir.canonicalize()?;
     if !canonical.starts_with(&base) || canonical == base {
         return Err(RegistryError::InvalidPlugin {
-            path: plugin_dir,
+            path: target_dir,
             reason: "path traversal detected".into(),
         });
     }

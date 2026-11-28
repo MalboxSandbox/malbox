@@ -10,7 +10,7 @@ use malbox_cli_common::utils::format::{self, Table, styled_status};
     about = "View analysis plugins",
     after_help = "Examples:\n  malbox plugin list\n  malbox plugin list --type guest"
 )]
-pub struct PluginCommand {
+pub(crate) struct PluginCommand {
     #[command(subcommand)]
     command: PluginCommands,
 }

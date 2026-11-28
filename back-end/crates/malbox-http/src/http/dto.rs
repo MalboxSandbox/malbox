@@ -18,7 +18,7 @@ use crate::http::report_service::ArtifactLink;
 /// `SampleInfo` omitted it; unifying on the superset is harmless to the FE).
 /// `Clone` so the task-list batch loader can attach one sample to several tasks.
 #[derive(Serialize, Clone)]
-pub struct SampleDto {
+pub(crate) struct SampleDto {
     pub id: i64,
     pub file_size: i64,
     pub file_type: String,
@@ -49,7 +49,7 @@ impl From<SampleEntity> for SampleDto {
 /// A task as returned by the read endpoints. `sample` is attached by the
 /// handler (batch-loaded), not by `From<Task>`.
 #[derive(Serialize)]
-pub struct TaskDto {
+pub(crate) struct TaskDto {
     pub id: i32,
     pub status: String,
     pub target: String,
@@ -80,7 +80,7 @@ pub struct TaskDto {
 
 /// The task's tree verdict (worst classification over every plugin report).
 #[derive(Serialize)]
-pub struct VerdictDto {
+pub(crate) struct VerdictDto {
     pub classification: String,
     pub score: Option<i16>,
     pub artifact_id: Option<i64>,
@@ -94,7 +94,7 @@ impl From<Task> for TaskDto {
             target: t.target,
             platform: t
                 .platform
-                .map(|p| format!("{:?}", p).to_lowercase())
+                .map(|p| format!("{p:?}").to_lowercase())
                 .unwrap_or_default(),
             timeout: t.timeout,
             priority: t.priority,
@@ -127,7 +127,7 @@ impl From<Task> for TaskDto {
 
 /// Cross-plugin rollup. Identical wire shape to the FE `AggregateView`.
 #[derive(Serialize, Default)]
-pub struct Aggregate {
+pub(crate) struct Aggregate {
     pub verdict: Option<String>,
     pub score: Option<u8>,
     pub classifications: BTreeMap<String, u32>,
@@ -141,7 +141,7 @@ pub struct Aggregate {
 /// sample rollup (which task produced this plugin's current result); omitted on
 /// the per-task report.
 #[derive(Serialize)]
-pub struct PluginReportView {
+pub(crate) struct PluginReportView {
     pub plugin_name: String,
     pub report: Option<serde_json::Value>,
     pub synthesized: bool,
@@ -153,20 +153,20 @@ pub struct PluginReportView {
 
 /// The shared report body, flattened under a subject key by the wrappers below.
 #[derive(Serialize)]
-pub struct ReportBody {
+pub(crate) struct ReportBody {
     pub aggregate: Aggregate,
     pub plugins: Vec<PluginReportView>,
 }
 
 #[derive(Serialize)]
-pub struct TaskReportResponse {
+pub(crate) struct TaskReportResponse {
     pub task: TaskDto,
     #[serde(flatten)]
     pub body: ReportBody,
 }
 
 #[derive(Serialize)]
-pub struct SampleReportResponse {
+pub(crate) struct SampleReportResponse {
     pub sample: SampleDto,
     #[serde(flatten)]
     pub body: ReportBody,
@@ -176,7 +176,7 @@ pub struct SampleReportResponse {
 /// `task_id` is always present (on the task surface it equals the path id; on
 /// the sample surface it is the latest task that ran the plugin).
 #[derive(Serialize)]
-pub struct SinglePluginReportResponse {
+pub(crate) struct SinglePluginReportResponse {
     pub plugin_name: String,
     pub task_id: i32,
     pub report: Option<serde_json::Value>,
@@ -185,8 +185,8 @@ pub struct SinglePluginReportResponse {
     pub artifacts: Vec<ArtifactLink>,
 }
 
-/// Build a TaskDto for a single task, attaching its sample and root artifact.
-pub async fn attach_one_task(pool: &PgPool, task: Task) -> TaskDto {
+/// Build a `TaskDto` for a single task, attaching its sample and root artifact.
+pub(crate) async fn attach_one_task(pool: &PgPool, task: Task) -> TaskDto {
     let sample_id = task.sample_id;
     let task_id = task.id;
     let mut dto = TaskDto::from(task);

@@ -1,4 +1,6 @@
-use malbox_plugin_internal::transport::daemon::GrpcClient;
+//! Integration tests for the daemon gRPC client against an in-process guest plugin server.
+
+use malbox_plugin_internal::transport::daemon::{GrpcClient, LogReplay};
 use malbox_plugin_internal::transport::grpc::proto;
 use malbox_plugin_internal::transport::plugin::{
     FileChunkStream, GuestPluginService, GuestPluginServiceServer, LogEntryStream,
@@ -11,7 +13,7 @@ use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 struct TestHandler {
-    /// Simple in-memory stash for pull_result integration tests.
+    /// Simple in-memory stash for `pull_result` integration tests.
     stash: Mutex<HashMap<String, Vec<u8>>>,
 }
 
@@ -96,14 +98,14 @@ impl GuestPluginService for TestHandler {
             let big_payload = vec![0xAAu8; 5 * 1024 * 1024];
             self.stash
                 .lock()
-                .unwrap()
+                .expect("stash mutex poisoned")
                 .insert(handle.clone(), big_payload);
 
             let ref_msg = proto::ResultRef {
                 handle,
                 result_name: "big".to_string(),
                 format: proto::ResultFormat::Bytes.into(),
-                size_bytes: (5 * 1024 * 1024) as u64,
+                size_bytes: 5 * 1024 * 1024,
                 artifact: None,
             };
 
@@ -210,7 +212,7 @@ impl GuestPluginService for TestHandler {
             for i in 0..10_000u64 {
                 yield Ok(proto::LogEntry {
                     timestamp_ns: i,
-                    level: proto::LogLevel::Info as i32,
+                    level: i32::from(proto::LogLevel::Info),
                     target: "test".to_string(),
                     message: format!("msg-{i}"),
                     fields: HashMap::new(),
@@ -225,7 +227,11 @@ impl GuestPluginService for TestHandler {
         request: Request<proto::PullResultRequest>,
     ) -> Result<Response<Self::PullResultStream>, Status> {
         let handle = request.into_inner().handle;
-        let data = self.stash.lock().unwrap().remove(&handle);
+        let data = self
+            .stash
+            .lock()
+            .expect("stash mutex poisoned")
+            .remove(&handle);
 
         match data {
             None => Err(Status::not_found(format!("unknown handle: {handle}"))),
@@ -253,9 +259,11 @@ impl GuestPluginService for TestHandler {
 }
 
 async fn setup() -> GrpcClient {
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    let bound_addr = listener.local_addr().unwrap();
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid socket address");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind ephemeral port");
+    let bound_addr = listener.local_addr().expect("listener has a local address");
 
     // Drop the listener so the port is free for the server
     drop(listener);
@@ -266,13 +274,13 @@ async fn setup() -> GrpcClient {
             .add_service(server)
             .serve(bound_addr)
             .await
-            .unwrap();
+            .expect("test gRPC server failed");
     });
 
     // Give the server time to start listening
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let url = format!("http://{}", bound_addr);
+    let url = format!("http://{bound_addr}");
     GrpcClient::connect(url)
         .await
         .expect("client should connect")
@@ -391,10 +399,10 @@ async fn test_pull_result_streams_large_payload() {
         .await
         .expect("reading first message should succeed")
         .expect("first message should be Some");
-    assert_eq!(ref_result.kind, proto::ResultKind::ResultRef as i32);
+    assert_eq!(ref_result.kind, i32::from(proto::ResultKind::ResultRef));
 
-    use prost::Message;
-    let ref_msg = proto::ResultRef::decode(ref_result.data.as_slice()).expect("decode ResultRef");
+    let ref_msg = <proto::ResultRef as prost::Message>::decode(ref_result.data.as_slice())
+        .expect("decode ResultRef");
     assert_eq!(ref_msg.result_name, "big");
     assert_eq!(ref_msg.size_bytes, 5 * 1024 * 1024);
 
@@ -431,7 +439,7 @@ async fn test_stream_logs_receives_all_entries_in_order() {
     let mut client = setup().await;
 
     let mut stream = client
-        .stream_logs(true)
+        .stream_logs(LogReplay::IncludeBuffered)
         .await
         .expect("stream_logs RPC should succeed");
 
@@ -444,7 +452,7 @@ async fn test_stream_logs_receives_all_entries_in_order() {
     }
 
     assert_eq!(received.len(), 10_000);
-    for (i, ts) in received.iter().enumerate() {
-        assert_eq!(*ts, i as u64, "entries must arrive in order with no gaps");
+    for (ts, expected) in received.iter().zip(0u64..) {
+        assert_eq!(*ts, expected, "entries must arrive in order with no gaps");
     }
 }

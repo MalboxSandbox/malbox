@@ -18,18 +18,25 @@ pub const SUBMISSION_PROFILE: &str = "submission";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct OrchestrationConfig {
+    /// Maximum artifact derivation depth below the submitted sample.
     pub max_depth: u32,
     /// Analysed artifacts per task.
     pub max_artifacts: u32,
     /// Artifacts (any kind) one job may emit.
     pub max_artifacts_per_job: u32,
+    /// Detonations (VM runs) allowed per task.
     pub max_detonations: u32,
+    /// Total bytes of artifacts stored per task.
     pub max_total_bytes: u64,
     /// Larger artifacts are kept but not analysed.
     pub max_file_size: u64,
+    /// Wall-clock budget for a whole task, in seconds.
     pub task_deadline_secs: u64,
+    /// Wall-clock budget for analysing one artifact, in seconds.
     pub max_artifact_time_secs: u64,
+    /// Interval between checks for stalled jobs, in seconds.
     pub stall_check_secs: u64,
+    /// Attempts per job before it is marked failed.
     pub max_attempts: u32,
     /// Multiplied by the attempt number.
     pub retry_backoff_secs: u64,
@@ -37,11 +44,17 @@ pub struct OrchestrationConfig {
     pub max_reruns: u32,
     /// Concurrently running host jobs, daemon-wide.
     pub host_concurrency: u32,
+    /// Concurrently running jobs within a single task.
     pub max_running_jobs_per_task: u32,
+    /// VMs that may boot at the same time, daemon-wide.
     pub max_concurrent_vm_boots: u32,
+    /// How long to collect static results before deciding on detonation, in seconds.
     pub detonation_decision_window_secs: u64,
+    /// Lifetime of cached analysis results, in seconds.
     pub cache_ttl_secs: u64,
+    /// Lifetime of cached empty analysis results, in seconds.
     pub empty_result_cache_ttl_secs: u64,
+    /// Rules mapping artifact types to detonation environments.
     pub detonation_profiles: Vec<DetonationProfileConfig>,
 }
 
@@ -71,17 +84,21 @@ impl Default for OrchestrationConfig {
     }
 }
 
+/// Rule selecting the environment an artifact type is detonated in.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DetonationProfileConfig {
+    /// Unique profile name; `unmatched` and `submission` are reserved.
     pub name: String,
-    /// Regex over artifact_type, anchored as `^(?:expr)$`.
+    /// Regex over `artifact_type`, anchored as `^(?:expr)$`.
     pub accepts: String,
+    /// Guest platform the detonation runs on.
     pub platform: Platform,
     /// Snapshot name; `None` = the machine's active snapshot.
     #[serde(default)]
     pub snapshot: Option<String>,
     #[serde(default)]
+    /// Required machine architecture; `None` accepts any.
     pub arch: Option<Arch>,
     /// All must be present on the machine.
     #[serde(default)]
@@ -90,6 +107,7 @@ pub struct DetonationProfileConfig {
     #[serde(default)]
     pub guest_plugins: Vec<String>,
     #[serde(default = "default_profile_timeout")]
+    /// Detonation time limit in seconds; defaults to 300.
     pub timeout_secs: u64,
 }
 
@@ -104,6 +122,12 @@ fn invalid(field: impl Into<String>, message: impl Into<String>) -> ConfigError 
     }
 }
 
+/// Checks orchestration limits and detonation profiles for consistency.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::InvalidValue`] when a concurrency/attempt limit is zero, a
+/// profile uses a reserved or duplicate name, has a zero timeout, or an invalid regex.
 pub fn validate_orchestration(cfg: &OrchestrationConfig) -> Result<(), ConfigError> {
     for (field, value) in [
         ("orchestration.max_attempts", cfg.max_attempts),

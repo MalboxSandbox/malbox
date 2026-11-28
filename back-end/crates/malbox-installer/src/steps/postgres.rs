@@ -28,14 +28,17 @@ fn os_user() -> Option<String> {
         .find_map(|var| std::env::var(var).ok().filter(|user| !user.is_empty()))
 }
 
+/// Outcome of the database step.
+#[derive(Debug)]
 pub struct PostgresResult {
+    /// Connection URL of the server the daemon will use.
     pub url: String,
     /// Data directory of the managed instance, when `Setup` ran. The systemd
     /// step uses it to generate a unit that owns the instance across reboots.
     pub pgdata: Option<PathBuf>,
 }
 
-/// Best-effort check that PostgreSQL *client tools* are installed. Says
+/// Best-effort check that `PostgreSQL` *client tools* are installed. Says
 /// nothing about a server actually running - prompts should be worded
 /// accordingly.
 pub fn detect_postgres_tools() -> bool {
@@ -56,6 +59,13 @@ pub fn detect_setup_tools() -> bool {
             .is_ok_and(|o| o.status.success())
 }
 
+/// Connects to an existing server or initializes a managed local instance, and ensures
+/// the daemon database exists.
+///
+/// # Errors
+///
+/// Returns [`InstallError::StepFailed`] when required tools are missing, cluster setup
+/// fails, the server rejects connections, or the database cannot be created.
 pub async fn execute(
     strategy: &PostgresStrategy,
     data_dir: &Path,
@@ -94,11 +104,16 @@ pub async fn execute(
     Ok(result)
 }
 
-/// Verify a PostgreSQL server accepts connections. The check targets the
+/// Verify a `PostgreSQL` server accepts connections. The check targets the
 /// `postgres` maintenance database (present in every cluster) so it works
 /// before the daemon's database has been provisioned. Public so the install
 /// wizard can validate user-entered URLs at prompt time instead of failing
 /// minutes later.
+///
+/// # Errors
+///
+/// Returns [`InstallError::StepFailed`] when the URL is invalid, `psql` cannot run, or
+/// the connection fails.
 pub async fn test_connection(url: &str) -> crate::Result<()> {
     let output = tokio::process::Command::new("psql")
         .arg(maintenance_url(url)?)
@@ -206,7 +221,7 @@ pub(crate) async fn stop_instance(pgdata: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-/// Initialize (idempotently) and start a user-owned PostgreSQL instance.
+/// Initialize (idempotently) and start a user-owned `PostgreSQL` instance.
 async fn setup_postgres(pgdata: &Path) -> crate::Result<()> {
     crate::steps::ensure_tool(
         "initdb",

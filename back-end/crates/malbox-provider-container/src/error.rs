@@ -3,6 +3,7 @@ use thiserror::Error;
 
 /// Error type for container provider operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ContainerError {
     /// Error returned by the container engine API.
     #[error("Container engine error: {0}")]
@@ -28,7 +29,9 @@ pub enum ContainerError {
     /// Timeout error.
     #[error("Operation `{operation}` timed out after {duration:?}")]
     Timeout {
+        /// Name of the operation that timed out.
         operation: String,
+        /// How long the operation was allowed to run.
         duration: Duration,
     },
 }

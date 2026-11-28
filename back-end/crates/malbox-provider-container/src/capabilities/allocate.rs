@@ -10,7 +10,7 @@ use bollard::query_parameters::{
 };
 use malbox_machinery::{
     Allocate, CreateMachineParams, Machine, MachineEndpoint, MachineId, MachineState,
-    ManagementAccess, Platform,
+    ManagementAccess, Platform, StopMode,
 };
 use tracing::{debug, info, warn};
 
@@ -103,7 +103,7 @@ impl ContainerProvider {
             .filter_map(|labels| read_spec(labels).ok())
             .map(|spec| spec.ip)
             .collect();
-        let ip = pick_ip(&self.subnet, &taken)
+        let ip = pick_ip(self.subnet, &taken)
             .ok_or_else(|| ContainerError::Config("subnet exhausted".to_string()))?;
 
         let spec = ContainerSpec {
@@ -176,10 +176,10 @@ impl ContainerProvider {
         Ok(())
     }
 
-    async fn stop_machine(&self, machine: &Machine, force: bool) -> Result<(), ContainerError> {
+    async fn stop_machine(&self, machine: &Machine, mode: StopMode) -> Result<(), ContainerError> {
         let docker = self.docker().await?;
         let cname = container_name(machine.id());
-        if force {
+        if mode == StopMode::Force {
             tolerate(docker.kill_container(&cname, None).await, &[304, 409])?;
         } else {
             tolerate(
@@ -271,9 +271,9 @@ impl Allocate for ContainerProvider {
     async fn stop(
         &self,
         machine: &Machine,
-        force: bool,
+        mode: StopMode,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(self.stop_machine(machine, force).await?)
+        Ok(self.stop_machine(machine, mode).await?)
     }
 
     async fn list(&self) -> Result<Vec<Machine>, Box<dyn Error + Send + Sync>> {

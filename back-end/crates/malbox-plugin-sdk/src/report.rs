@@ -75,6 +75,11 @@ pub struct Report {
 impl Report {
     /// Serialize this report into a [`PluginResult::Json`] with the
     /// well-known [`REPORT_RESULT_NAME`] name, ready for `ctx.push_result`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Serialization`](crate::SdkError) if the report
+    /// cannot be encoded as JSON (e.g. `raw` holds a non-string map key).
     pub fn into_plugin_result(self) -> Result<PluginResult> {
         PluginResult::json(REPORT_RESULT_NAME, &self)
     }
@@ -85,7 +90,7 @@ impl Report {
 pub struct PluginInfo {
     /// Unique plugin identifier (usually the crate name).
     pub id: String,
-    /// SemVer version of the plugin binary.
+    /// `SemVer` version of the plugin binary.
     pub version: String,
     /// Optional human-friendly name shown in the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +119,10 @@ pub struct Verdict {
 /// using [`Classification::severity`] - worst wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-scheduler (DB mapping) and plugin examples"
+)]
 pub enum Classification {
     /// The sample appears safe.
     Clean,
@@ -140,6 +149,10 @@ impl Classification {
 /// How confident a plugin is in its [`Classification`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-scheduler (DB mapping)"
+)]
 pub enum Confidence {
     /// The classification is speculative or based on weak signals.
     Low,
@@ -211,59 +224,110 @@ pub struct Section {
 /// are rendered as a JSON tree so additions are non-breaking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Block {
     /// Rendered markdown text.
-    Markdown { text: String },
+    Markdown {
+        /// Markdown source.
+        text: String,
+    },
     /// Highlighted message box (info, success, warning, or error).
-    Callout { level: CalloutLevel, text: String },
+    Callout {
+        /// Severity controlling the box's color and icon.
+        level: CalloutLevel,
+        /// Message body.
+        text: String,
+    },
     /// Section heading. `level` maps to HTML heading levels (1-6).
-    Heading { level: u8, text: String },
+    Heading {
+        /// HTML heading level, 1 (largest) to 6.
+        level: u8,
+        /// Heading text.
+        text: String,
+    },
     /// Horizontal rule separating content.
     Divider,
     /// Key-value pairs displayed as a definition list.
-    Kv { pairs: Vec<KvPair> },
+    Kv {
+        /// Pairs in display order.
+        pairs: Vec<KvPair>,
+    },
     /// Tabular data with typed columns and JSON rows.
     Table {
+        /// Column definitions in display order.
         columns: Vec<Column>,
+        /// Row objects keyed by [`Column::key`].
         rows: Vec<serde_json::Value>,
+        /// Let the viewer sort rows by clicking column headers.
         #[serde(default)]
         sortable: bool,
+        /// Show a filter box above the table.
         #[serde(default)]
         searchable: bool,
     },
     /// Syntax-highlighted source code.
-    Code { language: String, text: String },
+    Code {
+        /// Highlighter language name (e.g. `"python"`, `"yara"`).
+        language: String,
+        /// Source code to display.
+        text: String,
+    },
     /// Interactive JSON tree viewer.
     Json {
+        /// JSON document to display.
         data: serde_json::Value,
+        /// Start with the tree collapsed.
         #[serde(default)]
         collapsed: bool,
     },
     /// Hex dump of binary data. `bytes_b64` is base64-encoded.
     Hex {
+        /// Base64-encoded bytes to dump.
         bytes_b64: String,
+        /// Address shown for the first byte.
         #[serde(default)]
         offset: u64,
     },
     /// Inline image resolved from a sibling artifact result.
     Image {
+        /// Name of the sibling result holding the image bytes.
         artifact: String,
+        /// Optional caption rendered under the image.
         #[serde(skip_serializing_if = "Option::is_none")]
         caption: Option<String>,
     },
     /// Download link resolved from a sibling artifact result.
-    Download { artifact: String, label: String },
+    Download {
+        /// Name of the sibling result to download.
+        artifact: String,
+        /// Link text.
+        label: String,
+    },
     /// Formatted list of indicators of compromise.
-    Iocs { items: Vec<Indicator> },
+    Iocs {
+        /// Indicators in display order.
+        items: Vec<Indicator>,
+    },
     /// Formatted list of MITRE ATT&CK techniques.
-    Ttps { items: Vec<Ttp> },
+    Ttps {
+        /// Techniques in display order.
+        items: Vec<Ttp>,
+    },
     /// Collapsible tree structure (e.g. process trees, file hierarchies).
-    Tree { nodes: Vec<TreeNode> },
+    Tree {
+        /// Root nodes of the tree.
+        nodes: Vec<TreeNode>,
+    },
     /// Chronological event timeline.
-    Timeline { events: Vec<TimelineEvent> },
+    Timeline {
+        /// Events in display order.
+        events: Vec<TimelineEvent>,
+    },
     /// Node-and-edge graph (e.g. network connections, call graphs).
     Graph {
+        /// Graph vertices.
         nodes: Vec<GraphNode>,
+        /// Connections between nodes, referencing [`GraphNode::id`].
         edges: Vec<GraphEdge>,
     },
 }
@@ -271,6 +335,7 @@ pub enum Block {
 /// Severity level for a [`Block::Callout`], controlling its color and icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum CalloutLevel {
     /// Neutral informational message.
     Info,

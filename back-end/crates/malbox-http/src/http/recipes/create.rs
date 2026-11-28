@@ -3,7 +3,7 @@ use axum::{Json, Router, extract::State, http::StatusCode, response::IntoRespons
 use malbox_database::repositories::recipes::{NewRecipe, RecipeScope, insert_recipe};
 use serde::Deserialize;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/recipes", post(create_recipe))
 }
 
@@ -54,7 +54,7 @@ async fn create_recipe(
 
     let recipe = insert_recipe(&state.pool, new_recipe)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to insert recipe: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to insert recipe: {e}")))?;
 
     Ok((StatusCode::CREATED, Json(recipe)))
 }

@@ -6,7 +6,7 @@ use malbox_cli_common::error::{CliError, Result};
 use malbox_plugin_registry::client::RegistryClient;
 
 #[derive(Parser)]
-pub struct SearchCommand {
+pub(crate) struct SearchCommand {
     /// Search query (matches name, description, and categories)
     query: String,
 }

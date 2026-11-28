@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 use crate::admission::{Admission, AdmissionInput, admit};
-use crate::cache::{cache_key, is_cacheable};
+use crate::cache::{ScanFlags, cache_key, is_cacheable};
 use crate::config::{EffectiveLimits, to_i64};
 use crate::coordinator::Command;
 use crate::error::{Result, SchedulerError};
@@ -26,10 +26,11 @@ use crate::ingest::IngestSummary;
 use crate::interest::{Candidate, order_candidates};
 use crate::params::{ChildDetonation, SubmissionParams, resolve_plugin_params};
 use crate::plan::{JobKindPlan, PlanInput, TaskSelection, plan_artifact};
-use crate::recursion::{DYNAMIC, ParentContext, forbidden_for_child};
+use crate::recursion::{DYNAMIC, ParentContext, RecursionOverrides, forbidden_for_child};
+use crate::routing::AnalyzerSpec;
 use crate::submission::{ensure_sample_for_artifact, explicit_detonation, task_params};
 use crate::verdict::{recompute_sample_verdict, task_verdict};
-use crate::{ControlError, DescendantPolicy, Shared};
+use crate::{CacheUse, ControlError, DescendantPolicy, OrchestratorCore, PriorityScope, Shared};
 
 const TICK: Duration = Duration::from_secs(5);
 /// Back-off before retrying a task whose state could not be loaded.
@@ -71,7 +72,7 @@ pub(crate) enum ErrorClass {
 }
 
 impl ErrorClass {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Nonrecoverable => "nonrecoverable",
             Self::Recoverable => "recoverable",
@@ -93,12 +94,12 @@ pub(crate) enum ControlCmd {
     Rescan {
         artifact_id: i64,
         plugins: Vec<String>,
-        ignore_cache: bool,
+        cache: CacheUse,
     },
     SetPriority {
         artifact_id: i64,
         priority: i64,
-        subtree: bool,
+        scope: PriorityScope,
     },
 }
 
@@ -150,7 +151,7 @@ pub(crate) async fn run_actor(
     mut rx: mpsc::UnboundedReceiver<ActorEvent>,
 ) {
     let mut actor = loop {
-        match TaskActor::load(shared.clone(), task_id).await {
+        match TaskActor::load(Arc::clone(&shared), task_id).await {
             Ok(Some(a)) => break a,
             Ok(None) => {
                 warn!(task_id, "task disappeared, actor exiting");
@@ -160,8 +161,8 @@ pub(crate) async fn run_actor(
             Err(e) => {
                 error!(task_id, error = %e, "failed to load task state, retrying");
                 tokio::select! {
-                    _ = shared.token.cancelled() => return,
-                    _ = tokio::time::sleep(LOAD_RETRY) => {}
+                    () = shared.token.cancelled() => return,
+                    () = tokio::time::sleep(LOAD_RETRY) => {}
                 }
             }
         }
@@ -176,7 +177,7 @@ pub(crate) async fn run_actor(
     loop {
         let event = tokio::select! {
             biased;
-            _ = shared.token.cancelled() => return,
+            () = shared.token.cancelled() => return,
             ev = rx.recv() => match ev {
                 Some(ev) => ev,
                 None => return,
@@ -274,13 +275,14 @@ impl TaskActor {
         for j in all_jobs {
             self.put_job(j);
         }
-        self.detonations_used = self
+        let detonations = self
             .jobs
             .values()
             .filter(|j| {
                 j.kind == "detonation" && !matches!(j.state.as_str(), "blocked" | "skipped")
             })
-            .count() as i64;
+            .count();
+        self.detonations_used = i64::try_from(detonations).unwrap_or(i64::MAX);
         self.candidates.clear();
         self.dirty.clear();
         self.admissions.clear();
@@ -532,8 +534,10 @@ impl TaskActor {
             forbidden_for_child(
                 &parents,
                 self.params.detonate_children,
-                self.params.ignore_recursion_prevention,
-                art.dynamic_recursion_bypass,
+                RecursionOverrides {
+                    ignore_prevention: self.params.ignore_recursion_prevention,
+                    dynamic_bypass: art.dynamic_recursion_bypass,
+                },
             )
         };
         visiting.remove(&id);
@@ -569,7 +573,7 @@ impl TaskActor {
             selected: selected.unwrap_or_else(|| self.task.plugins.clone()),
             excluded: self.task.excluded_plugins.clone(),
         };
-        let routing = self.shared.routing.clone();
+        let routing = Arc::clone(&self.shared.routing);
         let explicit = if is_root {
             explicit_detonation(&self.task, &self.params, &routing)
         } else {
@@ -592,19 +596,7 @@ impl TaskActor {
         let mut tx = self.shared.core.db.begin().await?;
         let mut inserted = Vec::new();
         for p in planned.iter().filter(|p| !existing.contains(&p.analyzer)) {
-            let key = match (p.kind, routing.analyzer(&p.analyzer)) {
-                (JobKindPlan::Host, Some(spec)) if is_cacheable(spec, &self.params) => {
-                    Some(cache_key(
-                        &art.sha256,
-                        &spec.name,
-                        &spec.version,
-                        &resolve_plugin_params(spec, &self.params),
-                        self.params.deep_scan,
-                        self.params.ignore_filtering,
-                    ))
-                }
-                _ => None,
-            };
+            let key = self.job_cache_key(&art.sha256, p.kind, routing.analyzer(&p.analyzer));
             let detonation = p
                 .detonation
                 .as_ref()
@@ -662,6 +654,28 @@ impl TaskActor {
             recompute_sample_verdict(&self.shared.core, sample_id, self.task.id).await;
         }
         Ok(())
+    }
+
+    /// Result-cache key for a planned job, or `None` when its result must not be cached.
+    fn job_cache_key(
+        &self,
+        sha256: &str,
+        kind: JobKindPlan,
+        spec: Option<&AnalyzerSpec>,
+    ) -> Option<String> {
+        match (kind, spec) {
+            (JobKindPlan::Host, Some(spec)) if is_cacheable(spec, &self.params) => Some(cache_key(
+                sha256,
+                &spec.name,
+                &spec.version,
+                &resolve_plugin_params(spec, &self.params),
+                ScanFlags {
+                    deep_scan: self.params.deep_scan,
+                    ignore_filtering: self.params.ignore_filtering,
+                },
+            )),
+            _ => None,
+        }
     }
 
     async fn admit_artifact(&mut self, id: i64, parent_depth: i32) -> Result<()> {
@@ -780,7 +794,7 @@ impl TaskActor {
 
     /// Replay a cached host job. `Ok(false)` when there is no usable entry.
     async fn try_replay(&mut self, job: &Job, key: &str) -> Result<bool> {
-        let core = self.shared.core.clone();
+        let core = Arc::clone(&self.shared.core);
         let db = &core.db;
         let Some((source_id, _empty)) = result_cache::lookup(db, key).await? else {
             return Ok(false);
@@ -802,17 +816,9 @@ impl TaskActor {
             return Ok(false);
         }
         let children = artifacts::fetch_edges_from_job(db, source.id).await?;
-        let mut new_bytes: i64 = 0;
-        for (_, child) in &children {
-            // A blobless child means the source run was cut short by its
-            // task's byte budget; its result does not apply to this task.
-            if child.storage_path.is_none() || !core.sample_store.exists(&child.sha256).await? {
-                return Ok(false);
-            }
-            if !self.artifacts.values().any(|a| a.sha256 == child.sha256) {
-                new_bytes = new_bytes.saturating_add(child.size_bytes);
-            }
-        }
+        let Some(new_bytes) = self.replay_new_bytes(&core, &children).await? else {
+            return Ok(false);
+        };
         let Some(art) = self.artifacts.get(&job.artifact_id).cloned() else {
             return Ok(false);
         };
@@ -885,6 +891,27 @@ impl TaskActor {
         self.absorb_job_edges(job.id).await?;
         self.after_outputs(job.id, &replayed, &[]).await?;
         Ok(true)
+    }
+
+    /// Bytes a cache replay would add to this task, or `None` when a child blob is missing
+    /// (the source run was cut short, so its result does not apply).
+    async fn replay_new_bytes(
+        &self,
+        core: &OrchestratorCore,
+        children: &[(ArtifactEdge, TaskArtifact)],
+    ) -> Result<Option<i64>> {
+        let mut new_bytes: i64 = 0;
+        for (_, child) in children {
+            // A blobless child means the source run was cut short by its
+            // task's byte budget; its result does not apply to this task.
+            if child.storage_path.is_none() || !core.sample_store.exists(&child.sha256).await? {
+                return Ok(None);
+            }
+            if !self.artifacts.values().any(|a| a.sha256 == child.sha256) {
+                new_bytes = new_bytes.saturating_add(child.size_bytes);
+            }
+        }
+        Ok(Some(new_bytes))
     }
 
     /// Release the next stage of an artifact once the previous one is done.
@@ -1213,13 +1240,13 @@ impl TaskActor {
             ControlCmd::Rescan {
                 artifact_id,
                 plugins,
-                ignore_cache,
-            } => self.rescan(artifact_id, plugins, ignore_cache).await,
+                cache,
+            } => self.rescan(artifact_id, plugins, cache).await,
             ControlCmd::SetPriority {
                 artifact_id,
                 priority,
-                subtree,
-            } => self.set_priority(artifact_id, priority, subtree).await,
+                scope,
+            } => self.set_priority(artifact_id, priority, scope).await,
         }
     }
 
@@ -1321,7 +1348,7 @@ impl TaskActor {
         &mut self,
         id: i64,
         plugins: Vec<String>,
-        ignore_cache: bool,
+        cache: CacheUse,
     ) -> Result<(), ControlError> {
         let art = self
             .artifacts
@@ -1364,7 +1391,7 @@ impl TaskActor {
         // progression (or recovery) still handles the reset jobs.
         self.reopen_artifact(id).await.map_err(internal)?;
         for j in &targets {
-            jobs::reset_job_for_rescan(&db, j.id, ignore_cache)
+            jobs::reset_job_for_rescan(&db, j.id, cache == CacheUse::Bypass)
                 .await
                 .map_err(|e| internal(e.into()))?;
             if j.kind == "detonation" && !matches!(j.state.as_str(), "blocked" | "skipped") {
@@ -1380,13 +1407,13 @@ impl TaskActor {
         &mut self,
         id: i64,
         priority: i64,
-        subtree: bool,
+        scope: PriorityScope,
     ) -> Result<(), ControlError> {
         if !self.artifacts.contains_key(&id) {
             return Err(ControlError::ArtifactNotFound);
         }
         let mut ids = vec![id];
-        if subtree {
+        if scope == PriorityScope::Subtree {
             let mut seen = HashSet::from([id]);
             let mut i = 0;
             while i < ids.len() {

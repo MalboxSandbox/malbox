@@ -10,7 +10,7 @@ use malbox_database::repositories::recipes::{RecipeScope, RecipeUpdate, update_r
 use serde::Deserialize;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/recipes/{id}", put(update_recipe_handler))
 }
 
@@ -50,7 +50,7 @@ async fn update_recipe_handler(
 
     let recipe = update_recipe(&state.pool, id, update)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to update recipe: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to update recipe: {e}")))?;
 
     match recipe {
         Some(r) => Ok(Json(r).into_response()),

@@ -13,7 +13,7 @@ use malbox_config::{PluginsConfig, RegistryConfig};
 
 #[derive(Parser)]
 #[command(about = "Manage installed plugins on this host")]
-pub struct PluginCommand {
+pub(crate) struct PluginCommand {
     #[command(subcommand)]
     command: PluginCommands,
 }
@@ -49,13 +49,10 @@ impl Command for PluginCommand {
 
 /// Interactive yes/no for reinstalling something already present. Unlike the
 /// shared `format::confirm`, a non-interactive terminal defaults to No so a
-/// scripted run never silently rebuilds. Pass `skip = true` (from `--force`/`-y`)
-/// to proceed without asking.
-pub(crate) fn confirm_reinstall(prompt: &str, skip: bool) -> bool {
+/// scripted run never silently rebuilds. Callers skip this when `--force`/`-y`
+/// was given.
+pub(crate) fn confirm_reinstall(prompt: &str) -> bool {
     use std::io::IsTerminal;
-    if skip {
-        return true;
-    }
     if !std::io::stderr().is_terminal() {
         return false;
     }

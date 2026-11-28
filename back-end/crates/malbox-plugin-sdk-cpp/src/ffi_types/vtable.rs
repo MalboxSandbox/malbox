@@ -17,6 +17,8 @@ pub const MALBOX_ABI_VERSION: u32 = 8;
 /// C/C++ code must only access a `MalboxContext` through the
 /// `malbox_context_*` functions; it must never dereference the pointer
 /// directly.
+#[derive(Debug)]
+#[non_exhaustive]
 pub enum MalboxContext {}
 
 /// Opaque handle representing a `ResultBuilder` (defined in `ffi_result`).
@@ -24,6 +26,8 @@ pub enum MalboxContext {}
 /// C/C++ code must only interact with a `MalboxResultBuilder` through the
 /// `malbox_result_builder_*` functions; it must never dereference the pointer
 /// directly.
+#[derive(Debug)]
+#[non_exhaustive]
 pub enum MalboxResultBuilder {}
 
 /// Function-pointer table filled in by a C++ plugin and passed to a runtime
@@ -40,6 +44,7 @@ pub enum MalboxResultBuilder {}
 /// [`set_last_error`](crate::error::malbox_last_error) (or the equivalent C
 /// macro) so that the error message can be retrieved by the runtime.
 #[repr(C)]
+#[derive(Debug)]
 pub struct MalboxPluginVtable {
     /// Must equal [`MALBOX_ABI_VERSION`]; the runtime rejects mismatches.
     pub abi_version: u32,
@@ -98,14 +103,28 @@ impl Default for MalboxPluginVtable {
     }
 }
 
-/// Function-pointer table for a C++ guest plugin.
+/// Function-pointer table filled in by a C++ guest plugin and passed to
+/// [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
+///
+/// A `None` callback opts out: lifecycle hooks become successful no-ops,
+/// `execute_sample` falls back to the default launcher and `health_check`
+/// reports ready.
 #[repr(C)]
+#[derive(Debug)]
 pub struct MalboxGuestPluginVtable {
+    /// Must equal [`MALBOX_ABI_VERSION`]; the runtime rejects mismatches.
     pub abi_version: u32,
+    /// Opaque pointer passed as the first argument to every callback (typically
+    /// the C++ plugin object pointer).
     pub plugin_ptr: *mut std::ffi::c_void,
+    /// Called once when the guest runtime starts, with the runtime context.
     pub on_start: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxContext) -> i32>,
+    /// Called once when the guest runtime shuts down, with the runtime context.
     pub on_stop: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const MalboxContext) -> i32>,
+    /// Launches the sample at the given NUL-terminated path: return `0` to use
+    /// the default launcher, `1` if the plugin launched it, anything else on error.
     pub execute_sample: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const c_char) -> i32>,
+    /// Called periodically to fill in a [`MalboxHealthStatus`].
     pub health_check:
         Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut MalboxHealthStatus) -> i32>,
 }

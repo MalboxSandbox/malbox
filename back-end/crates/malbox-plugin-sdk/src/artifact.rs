@@ -9,6 +9,7 @@ pub use malbox_plugin_transport::artifact::{
 
 /// Where the artifact's bytes come from.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ArtifactSource {
     /// In-memory content.
     Bytes(Vec<u8>),
@@ -41,6 +42,11 @@ impl ArtifactOpts {
     }
 
     /// Override whether the daemon analyses the artifact.
+    #[must_use]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "builder setter for a bool field; callers forward runtime flags from FFI, Python and config"
+    )]
     pub fn analyze(self, v: bool) -> Self {
         Self {
             analyze: Some(v),
@@ -49,6 +55,11 @@ impl ArtifactOpts {
     }
 
     /// Set whether the artifact may be detonated despite recursion prevention.
+    #[must_use]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "builder setter for a bool field; callers forward runtime flags from FFI, Python and config"
+    )]
     pub fn allow_dynamic_recursion(self, v: bool) -> Self {
         Self {
             allow_dynamic_recursion: v,

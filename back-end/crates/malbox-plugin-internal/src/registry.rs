@@ -1,9 +1,9 @@
 pub mod error;
 pub mod manifest;
-pub mod scanner;
+mod scanner;
 pub mod snapshot;
 pub mod types;
-pub mod watcher;
+mod watcher;
 
 use arc_swap::ArcSwap;
 use std::path::PathBuf;
@@ -19,13 +19,18 @@ use watcher::{PendingChange, Watcher};
 /// Tracks what changed during an `apply_pending()` call.
 #[derive(Debug, Default)]
 pub struct RegistryDiff {
+    /// Plugins discovered for the first time.
     pub added: Vec<PluginId>,
+    /// Already-known plugins whose directory changed and was rescanned.
     pub updated: Vec<PluginId>,
+    /// Plugins whose directory disappeared.
     pub removed: Vec<PluginId>,
+    /// Plugin directories that failed to rescan, with the error message.
     pub errors: Vec<(PathBuf, String)>,
 }
 
 impl RegistryDiff {
+    /// Whether the pass changed nothing and hit no errors.
     pub fn is_empty(&self) -> bool {
         self.added.is_empty()
             && self.updated.is_empty()
@@ -41,10 +46,26 @@ pub struct PluginRegistry {
     current: ArcSwap<PluginSnapshotInner>,
 }
 
+impl std::fmt::Debug for PluginRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginRegistry")
+            .field("plugin_dir", &self.scanner.plugin_dir())
+            .field("plugins", &self.current.load().plugins.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl PluginRegistry {
     /// Create the registry, scan for existing plugins, and start watching for changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::Scan`] if the plugin directory is missing or
+    /// unreadable, or [`RegistryError::Watcher`] if the filesystem watcher
+    /// cannot be started.
     pub fn new(plugin_dir: PathBuf) -> Result<Self, RegistryError> {
-        let scanner = Scanner::new(plugin_dir.clone());
+        let scanner = Scanner::new(plugin_dir);
+        let plugin_dir = scanner.plugin_dir();
         let entries = scanner.scan_all()?;
 
         info!(
@@ -59,7 +80,7 @@ impl PluginRegistry {
             .collect();
         let snapshot = PluginSnapshotInner::new(plugins);
 
-        let watcher = Watcher::start(&plugin_dir)?;
+        let watcher = Watcher::start(plugin_dir)?;
 
         Ok(Self {
             scanner,
@@ -86,7 +107,7 @@ impl PluginRegistry {
         for change in changes {
             match change {
                 PendingChange::Added(path) | PendingChange::Modified(path) => {
-                    match self.scanner.scan_one(&path) {
+                    match Scanner::scan_one(&path) {
                         Ok(entry) => {
                             let id = entry.id.clone();
                             if plugins.contains_key(&id) {

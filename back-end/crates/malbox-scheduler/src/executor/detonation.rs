@@ -28,7 +28,7 @@ pub(crate) async fn run(
 ) {
     let mut inflight = JoinSet::new();
     let mut interval = tokio::time::interval(POLL_INTERVAL);
-    let notify = shared.executors.detonation_notify().clone();
+    let notify = Arc::clone(shared.executors.detonation_notify());
 
     loop {
         let machine_freed = async {
@@ -38,9 +38,9 @@ pub(crate) async fn run(
             }
         };
         tokio::select! {
-            _ = shared.token.cancelled() => break,
-            _ = notify.notified() => {}
-            _ = machine_freed => {}
+            () = shared.token.cancelled() => break,
+            () = notify.notified() => {}
+            () = machine_freed => {}
             _ = interval.tick() => {}
             Some(_) = inflight.join_next() => {}
         }
@@ -94,8 +94,8 @@ pub(crate) async fn run(
                                 "detonation started"
                             );
                             inflight.spawn(run_one(
-                                shared.clone(),
-                                runner.clone(),
+                                Arc::clone(&shared),
+                                Arc::clone(&runner),
                                 lease,
                                 job,
                                 request,

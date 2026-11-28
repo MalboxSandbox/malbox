@@ -1,3 +1,5 @@
+//! Tests for the registry response cache.
+
 use malbox_plugin_registry::client::Cache;
 use tempfile::TempDir;
 

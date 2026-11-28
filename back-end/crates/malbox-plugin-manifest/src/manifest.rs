@@ -1,3 +1,5 @@
+//! `plugin.toml` schema types and structural validation.
+
 use crate::error::ManifestError;
 use crate::runtime::RuntimeConfig;
 
@@ -8,14 +10,20 @@ use std::path::Path;
 /// Top-level manifest structure parsed from `plugin.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginManifest {
+    /// Core identity and type metadata from the `[plugin]` table.
     pub plugin: PluginInfo,
     #[serde(default)]
+    /// Scope restrictions; required when the plugin state is `scoped`.
     pub scope: Option<ScopeConfig>,
     #[serde(default)]
+    /// Result keys the plugin may emit, keyed by result name.
     pub results: HashMap<String, ResultConfig>,
+    /// Runtime lifecycle, execution and path settings.
     pub runtime: RuntimeConfig,
     #[serde(default)]
+    /// Host plugin routing rules; must stay default for guest plugins.
     pub routing: RoutingConfig,
+    /// User-tunable parameters with typed defaults, keyed by parameter name.
     #[serde(default)]
     pub parameters: BTreeMap<String, ParameterConfig>,
 }
@@ -23,12 +31,17 @@ pub struct PluginManifest {
 /// Core plugin metadata.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginInfo {
+    /// Unique plugin name; alphanumeric, `-` and `_` only.
     pub name: String,
+    /// Semver version string of the plugin.
     pub version: String,
+    /// Optional human-readable description.
     #[serde(default)]
     pub description: Option<String>,
+    /// Plugin authors as free-form strings.
     #[serde(default)]
     pub authors: Vec<String>,
+    /// Whether the plugin runs on the host or inside a guest VM.
     #[serde(rename = "type")]
     pub plugin_type: PluginTypeConfig,
     /// Optional explicit binary name (defaults to directory name).
@@ -36,46 +49,78 @@ pub struct PluginInfo {
     pub binary: Option<String>,
 }
 
+/// Where a plugin executes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-scheduler routing"
+)]
 pub enum PluginTypeConfig {
+    /// Runs as a process on the analysis host.
     Host,
+    /// Runs inside a guest analysis VM.
     Guest,
 }
 
+/// Plugin process lifetime policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "lifecycle state matched exhaustively by malbox-plugin-internal and malbox-plugin-macros"
+)]
 pub enum PluginStateConfig {
+    /// One long-lived process serves all tasks.
     Persistent,
+    /// A fresh process is spawned per task.
     Ephemeral,
+    /// Process lifetime is bound to the `[scope]` section.
     Scoped,
 }
 
+/// Concurrency policy for tasks dispatched to a plugin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-plugin-macros codegen"
+)]
 pub enum ExecutionContextConfig {
+    /// No other plugin runs while this one runs.
     Exclusive,
+    /// Tasks for this plugin run one at a time.
     Sequential,
+    /// Tasks may run concurrently alongside other parallel plugins.
     Parallel,
+    /// No concurrency restrictions at all.
     Unrestricted,
 }
 
+/// Restricts which plugins and task types a scoped plugin is bound to.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScopeConfig {
+    /// Plugin names sharing this plugin's scope.
     #[serde(default)]
     pub plugins: Vec<String>,
+    /// Task types this plugin is scoped to.
     #[serde(default)]
     pub task_types: Vec<String>,
 }
 
+/// Presentation metadata for one result key a plugin emits.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResultConfig {
+    /// Human-readable explanation of the result.
     #[serde(default)]
     pub description: Option<String>,
+    /// Whether the result is shown to users; `None` uses the front-end default.
     #[serde(default)]
     pub user_visible: Option<bool>,
+    /// Label shown in the UI instead of the raw key.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// Renderer hint for the front-end.
     #[serde(default)]
     pub render: Option<String>,
 }
@@ -83,16 +128,24 @@ pub struct ResultConfig {
 /// Analysis stage, in release order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Stage {
+    /// Early triage that can drop artifacts.
     Filter,
+    /// Unpacking and extraction of embedded content.
     Extract,
+    /// Static analysis of artifact contents.
     Static,
+    /// Detonation in a VM; reserved, not selectable by plugins.
     Dynamic,
+    /// Post-processing of earlier results.
     Post,
+    /// Final review and scoring.
     Review,
 }
 
 impl Stage {
+    /// Every stage in execution order.
     pub const ALL: [Stage; 6] = [
         Stage::Filter,
         Stage::Extract,
@@ -102,6 +155,8 @@ impl Stage {
         Stage::Review,
     ];
 
+    /// Lowercase name as used in manifests and as the default category.
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Stage::Filter => "filter",
@@ -130,29 +185,34 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutingConfig {
+    /// Stage the plugin runs in.
     #[serde(default = "default_stage")]
     pub stage: Stage,
-    /// `None` means the stage name.
+    /// Routing category; `None` means the stage name.
     #[serde(default)]
     pub category: Option<String>,
+    /// Regex over artifact types the plugin runs on, anchored on both ends.
     #[serde(default = "default_accepts")]
     pub accepts: String,
-    /// Empty rejects nothing.
+    /// Regex over artifact types to skip; empty rejects nothing.
     #[serde(default)]
     pub rejects: String,
     /// Plugin names whose outputs this plugin skips.
     #[serde(default)]
     pub sources_exclude: Vec<String>,
-    /// `None` means `runtime.analysis_timeout` or 300.
+    /// Per-task timeout in seconds; `None` means `runtime.analysis_timeout` or 300.
     #[serde(default)]
     pub timeout: Option<u64>,
+    /// Whether results may be reused for identical inputs.
     #[serde(default = "default_true")]
     pub cacheable: bool,
     /// Categories forbidden for descendants; `"dynamic"` means detonations.
     #[serde(default)]
     pub recursion_prevention: Vec<String>,
+    /// Whether the plugin consumes indicators produced by other plugins.
     #[serde(default)]
     pub uses_indicators: bool,
+    /// Result keys whose changes retrigger this plugin.
     #[serde(default)]
     pub monitored_keys: Vec<String>,
 }
@@ -175,37 +235,51 @@ impl Default for RoutingConfig {
 }
 
 impl RoutingConfig {
+    /// Effective category: the explicit one, else the stage name.
+    #[must_use]
     pub fn category(&self) -> &str {
         self.category.as_deref().unwrap_or(self.stage.as_str())
     }
 }
 
+/// Declaration of one user-tunable plugin parameter.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParameterConfig {
+    /// Value type the parameter accepts.
     #[serde(rename = "type")]
     pub kind: ParameterKind,
+    /// Default value; must match `kind`.
     pub default: toml::Value,
+    /// Optional human-readable explanation.
     #[serde(default)]
     pub description: Option<String>,
 }
 
-/// `List` is a list of strings.
+/// Value type of a plugin parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-scheduler parameter validation"
+)]
 pub enum ParameterKind {
+    /// Boolean value.
     Bool,
+    /// Signed integer value.
     Int,
+    /// String value.
     String,
+    /// List of strings.
     List,
 }
 
 impl ParameterKind {
     fn matches(self, v: &toml::Value) -> bool {
         match (self, v) {
-            (ParameterKind::Bool, toml::Value::Boolean(_)) => true,
-            (ParameterKind::Int, toml::Value::Integer(_)) => true,
-            (ParameterKind::String, toml::Value::String(_)) => true,
+            (ParameterKind::Bool, toml::Value::Boolean(_))
+            | (ParameterKind::Int, toml::Value::Integer(_))
+            | (ParameterKind::String, toml::Value::String(_)) => true,
             (ParameterKind::List, toml::Value::Array(items)) => {
                 items.iter().all(|i| matches!(i, toml::Value::String(_)))
             }
@@ -223,6 +297,12 @@ fn check_routing_regex(field: &str, expr: &str) -> Result<(), ManifestError> {
 /// Validate structural correctness of a parsed manifest: name/version/scope.
 ///
 /// Called by `parse_manifest` after TOML deserialization succeeds.
+///
+/// # Errors
+///
+/// Returns [`ManifestError::Invalid`] for an empty or malformed name, a non-semver
+/// version, a scoped plugin without `[scope]`, invalid routing (dynamic stage,
+/// routing on a guest, bad regex), or a badly named or mistyped parameter.
 pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), ManifestError> {
     if manifest.plugin.name.is_empty() {
         return Err(ManifestError::Invalid(
@@ -290,6 +370,11 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), ManifestError>
 }
 
 /// Parse a `plugin.toml` file into a `PluginManifest`.
+///
+/// # Errors
+///
+/// Returns [`ManifestError::Io`] if the file cannot be read, [`ManifestError::Parse`]
+/// on invalid TOML, and [`ManifestError::Invalid`] if validation fails.
 pub fn parse_manifest(path: &Path) -> Result<PluginManifest, ManifestError> {
     let contents = std::fs::read_to_string(path).map_err(|source| ManifestError::Io {
         path: path.to_path_buf(),

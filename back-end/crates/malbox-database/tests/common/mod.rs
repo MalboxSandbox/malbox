@@ -3,14 +3,21 @@
 use malbox_database::connect_and_migrate;
 use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool};
 
-pub struct TestDb {
+/// A freshly created, migrated database that is dropped by [`TestDb::drop`].
+pub(crate) struct TestDb {
     admin_url: String,
     name: String,
-    pub pool: PgPool,
+    pub(crate) pool: PgPool,
 }
 
 impl TestDb {
-    pub async fn create() -> Option<Self> {
+    /// Create and migrate a uniquely named database, or `None` (skipping the
+    /// test) when `MALBOX_TEST_DATABASE_URL` is unset.
+    #[expect(
+        clippy::print_stdout,
+        reason = "tells the test runner output why the test was skipped"
+    )]
+    pub(crate) async fn create() -> Option<Self> {
         let Ok(admin_url) = std::env::var("MALBOX_TEST_DATABASE_URL") else {
             println!("skipping: MALBOX_TEST_DATABASE_URL not set");
             return None;
@@ -36,7 +43,8 @@ impl TestDb {
         })
     }
 
-    pub async fn drop(self) {
+    /// Close the pool and drop the database.
+    pub(crate) async fn drop(self) {
         self.pool.close().await;
         let mut admin = PgConnection::connect(&self.admin_url)
             .await

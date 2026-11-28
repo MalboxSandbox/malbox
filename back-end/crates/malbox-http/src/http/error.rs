@@ -8,36 +8,48 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use tracing::error;
 
+/// API error, rendered as a JSON body with the matching HTTP status.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
+    /// 401: the request lacks valid credentials.
     #[error("Authentication required")]
     Unauthorized,
 
+    /// 403: the caller is not allowed to perform the action.
     #[error("User may not perform that action")]
     Forbidden,
 
+    /// 404: the requested resource does not exist.
     #[error("Request path not found")]
     NotFound,
 
+    /// 409: the request conflicts with current state; holds the reason.
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    /// 400: the request is malformed; holds the reason.
     #[error("Bad request: {0}")]
     BadRequest(String),
 
+    /// 422: field-level validation failures.
     #[error("Error in the request body")]
     UnprocessableEntity {
+        /// Validation messages keyed by field name.
         errors: HashMap<Cow<'static, str>, Vec<Cow<'static, str>>>,
     },
 
+    /// 501: the feature is not implemented; holds a description.
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 
+    /// 500: unexpected server failure; the details are logged, not returned.
     #[error("An internal server error occurred: {0}")]
     Internal(String),
 }
 
 impl Error {
+    /// Build an [`Error::UnprocessableEntity`] with one message per field.
     pub fn unprocessable_entity<K, V>(errors: impl IntoIterator<Item = (K, V)>) -> Self
     where
         K: Into<Cow<'static, str>>,

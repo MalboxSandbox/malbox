@@ -9,7 +9,7 @@ use axum::{
 use malbox_database::repositories::recipes::delete_recipe;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/recipes/{id}", delete(delete_recipe_handler))
 }
 
@@ -19,7 +19,7 @@ async fn delete_recipe_handler(
 ) -> Result<impl IntoResponse> {
     let recipe = delete_recipe(&state.pool, id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to delete recipe: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to delete recipe: {e}")))?;
 
     match recipe {
         Some(_) => Ok(StatusCode::NO_CONTENT.into_response()),

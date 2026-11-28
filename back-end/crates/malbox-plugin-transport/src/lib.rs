@@ -1,3 +1,9 @@
+//! Transport layer between the malbox daemon and its plugins.
+//!
+//! Provides the IPC (iceoryx2) backend for host plugins, the gRPC backend for
+//! guest plugins running in VMs, and the shared event, artifact, and job-config
+//! types both sides agree on.
+
 pub mod artifact;
 #[cfg(feature = "grpc")]
 pub mod daemon;

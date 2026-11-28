@@ -2,10 +2,15 @@ use crate::error::{InstallError, Step};
 use crate::github::{GitHubClient, Release};
 use crate::progress::ProgressObserver;
 
+/// Writes the default daemon configuration.
 pub mod config;
+/// Installs the daemon and CLI binaries, prebuilt or from source.
 pub mod daemon;
+/// Installs the front-end bundle, prebuilt or from source.
 pub mod frontend;
+/// Connects to or provisions the `PostgreSQL` database.
 pub mod postgres;
+/// Installs and enables systemd user services.
 pub mod systemd;
 
 pub(crate) async fn ensure_tool(tool: &str, hint: &str, step: Step) -> crate::Result<()> {

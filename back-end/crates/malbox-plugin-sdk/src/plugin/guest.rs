@@ -80,6 +80,7 @@ pub fn default_launch(sample_path: &Path) -> LaunchResult {
 /// Tells the SDK whether the plugin handled sample launch itself or
 /// wants the SDK to use the platform default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LaunchResult {
     /// The plugin did not launch the sample. The SDK should use [`default_launch`].
     UseDefault,
@@ -99,16 +100,31 @@ pub trait GuestPlugin: Plugin {
     /// (ETW sessions, decoders, sinks, etc.) and return when ready to capture.
     ///
     /// The SDK guarantees `execute_sample` will not be called until this returns.
+    ///
+    /// # Errors
+    ///
+    /// Return an error if monitoring cannot be set up; the SDK logs it,
+    /// skips launching the sample, calls `on_stop`, and ends the task.
     fn on_start(&self, ctx: &Context) -> Result<()>;
 
     /// Called when the analysis timeout expires or the daemon signals shutdown.
     /// Flush all buffered results via [`Context::results().push()`] and tear down.
+    ///
+    /// # Errors
+    ///
+    /// Return an error if results could not be flushed; the SDK logs it and
+    /// still runs auto-collection and finishes the task.
     fn on_stop(&self, ctx: &Context) -> Result<()>;
 
     /// Launch the sample at the given path. Called by the SDK after `on_start`.
     ///
     /// The default implementation uses the platform's process creation API.
     /// Override for non-EXE scenarios (DLL loading, COM dispatch, etc.).
+    ///
+    /// # Errors
+    ///
+    /// Return an error if the sample could not be launched; the SDK logs it
+    /// and skips the observation window. The default never fails.
     fn execute_sample(&self, sample_path: &Path) -> Result<LaunchResult> {
         Ok(default_launch(sample_path))
     }
@@ -139,6 +155,6 @@ mod tests {
     #[test]
     fn execute_sample_has_default_impl() {
         let plugin = MinimalGuestPlugin;
-        let _ = &plugin as &dyn GuestPlugin;
+        let _: &dyn GuestPlugin = &plugin;
     }
 }

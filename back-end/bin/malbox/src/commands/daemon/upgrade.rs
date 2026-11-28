@@ -18,7 +18,7 @@ const GITHUB_REPO: &str = malbox_installer::GITHUB_REPO;
 
 #[derive(Parser)]
 #[command(about = "Upgrade Malbox to the latest version")]
-pub struct UpgradeCommand {
+pub(crate) struct UpgradeCommand {
     /// Force reinstall even if already up to date
     #[arg(long)]
     force: bool,
@@ -38,31 +38,7 @@ impl Command for UpgradeCommand {
         let manifest_path = Manifest::default_path();
 
         if self.rollback {
-            let renderer = InstallRenderer::new("Rolling back Malbox");
-            renderer.add_pending_steps(&[
-                "Rolling back malbox binaries",
-                "Rolling back front-end assets",
-                "Starting rolled-back daemon",
-            ]);
-            renderer.add_recovery_hints(
-                "Rolling back malbox binaries",
-                &["Re-run `malbox daemon upgrade --rollback` to retry"],
-            );
-            renderer.add_recovery_hints(
-                "Rolling back front-end assets",
-                &["Re-run `malbox daemon upgrade --rollback` to retry"],
-            );
-            renderer.add_recovery_hints(
-                "Starting rolled-back daemon",
-                &["Start manually: systemctl --user start malbox"],
-            );
-
-            malbox_installer::upgrade::rollback(&manifest_path, &renderer)
-                .await
-                .map_err(|e| CliError::CommandFailed(e.to_string()))?;
-
-            renderer.finish_line("Rollback complete");
-            return Ok(());
+            return rollback(&manifest_path).await;
         }
 
         let github = GitHubClient::new(GITHUB_OWNER, GITHUB_REPO)
@@ -84,38 +60,11 @@ impl Command for UpgradeCommand {
             format::section_divider("Reconfiguration");
         }
 
-        let renderer = InstallRenderer::new(if self.reconfigure {
+        let renderer = upgrade_renderer(if self.reconfigure {
             "Reconfiguring Malbox"
         } else {
             "Upgrading Malbox"
         });
-        renderer.add_pending_steps(&[
-            "Stopping daemon",
-            "Installing malbox binaries",
-            "Installing front-end assets",
-            "Setting up PostgreSQL",
-            "Starting upgraded daemon",
-        ]);
-        renderer.add_recovery_hints(
-            "Stopping daemon",
-            &["Force stop: systemctl --user stop malbox"],
-        );
-        renderer.add_recovery_hints(
-            "Installing malbox binaries",
-            &["Re-run `malbox daemon upgrade` to retry"],
-        );
-        renderer.add_recovery_hints(
-            "Installing front-end assets",
-            &["Re-run `malbox daemon upgrade` to retry"],
-        );
-        renderer.add_recovery_hints(
-            "Setting up PostgreSQL",
-            &["Re-run `malbox daemon upgrade` to retry"],
-        );
-        renderer.add_recovery_hints(
-            "Starting upgraded daemon",
-            &["Start manually: systemctl --user start malbox"],
-        );
 
         match malbox_installer::upgrade::run(&upgrade_config, &github, &manifest_path, &renderer)
             .await
@@ -152,6 +101,55 @@ impl Command for UpgradeCommand {
 
         Ok(())
     }
+}
+
+/// Restores the previous installed version recorded in the manifest.
+async fn rollback(manifest_path: &std::path::Path) -> Result<()> {
+    const RETRY_HINT: &str = "Re-run `malbox daemon upgrade --rollback` to retry";
+    let renderer = InstallRenderer::new("Rolling back Malbox");
+    renderer.add_pending_steps(&[
+        "Rolling back malbox binaries",
+        "Rolling back front-end assets",
+        "Starting rolled-back daemon",
+    ]);
+    renderer.add_recovery_hints("Rolling back malbox binaries", &[RETRY_HINT]);
+    renderer.add_recovery_hints("Rolling back front-end assets", &[RETRY_HINT]);
+    renderer.add_recovery_hints(
+        "Starting rolled-back daemon",
+        &["Start manually: systemctl --user start malbox"],
+    );
+
+    malbox_installer::upgrade::rollback(manifest_path, &renderer)
+        .await
+        .map_err(|e| CliError::CommandFailed(e.to_string()))?;
+
+    renderer.finish_line("Rollback complete");
+    Ok(())
+}
+
+/// Progress renderer pre-listing the upgrade steps and their recovery hints.
+fn upgrade_renderer(header: &str) -> InstallRenderer {
+    const RETRY_HINT: &str = "Re-run `malbox daemon upgrade` to retry";
+    let renderer = InstallRenderer::new(header);
+    renderer.add_pending_steps(&[
+        "Stopping daemon",
+        "Installing malbox binaries",
+        "Installing front-end assets",
+        "Setting up PostgreSQL",
+        "Starting upgraded daemon",
+    ]);
+    renderer.add_recovery_hints(
+        "Stopping daemon",
+        &["Force stop: systemctl --user stop malbox"],
+    );
+    renderer.add_recovery_hints("Installing malbox binaries", &[RETRY_HINT]);
+    renderer.add_recovery_hints("Installing front-end assets", &[RETRY_HINT]);
+    renderer.add_recovery_hints("Setting up PostgreSQL", &[RETRY_HINT]);
+    renderer.add_recovery_hints(
+        "Starting upgraded daemon",
+        &["Start manually: systemctl --user start malbox"],
+    );
+    renderer
 }
 
 /// Re-prompt the build-related installation choices. Postgres and systemd

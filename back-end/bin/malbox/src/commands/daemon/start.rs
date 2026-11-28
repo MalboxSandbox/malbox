@@ -8,7 +8,7 @@ use malbox_cli_common::error::{CliError, Result};
 /// Convenience wrapper that launches the malboxd binary.
 /// For production, start via systemd: systemctl --user start malbox
 #[derive(Parser)]
-pub struct StartArgs {
+pub(crate) struct StartArgs {
     /// Log level passed to malboxd (error | warn | info | debug | trace)
     #[arg(long, default_value = "info")]
     pub log_level: String,

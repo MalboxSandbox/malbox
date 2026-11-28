@@ -9,7 +9,7 @@ use axum::{
 use malbox_database::repositories::custom_transforms::delete_transform;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/transforms/{id}", delete(delete_transform_handler))
 }
 
@@ -19,7 +19,7 @@ async fn delete_transform_handler(
 ) -> Result<impl IntoResponse> {
     let transform = delete_transform(&state.pool, id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to delete transform: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to delete transform: {e}")))?;
 
     match transform {
         Some(_) => Ok(StatusCode::NO_CONTENT.into_response()),

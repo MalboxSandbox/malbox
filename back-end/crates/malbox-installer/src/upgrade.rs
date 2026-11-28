@@ -1,3 +1,4 @@
+use crate::config::InstallConfig;
 use crate::config::{DaemonSource, FrontendSource, UpgradeConfig};
 use crate::error::{InstallError, Step};
 use crate::github::GitHubClient;
@@ -6,6 +7,16 @@ use crate::progress::{ProgressObserver, observe};
 use crate::steps::daemon::release_arch;
 use std::path::Path;
 
+/// Upgrades the installation to the newest release on its (or the reconfigured) channel.
+///
+/// Backs up the current binary for rollback, reinstalls daemon and front end, checks
+/// database connectivity, and restarts a systemd-managed daemon.
+///
+/// # Errors
+///
+/// Returns [`InstallError::AlreadyUpToDate`] when no newer release exists (unless forced or
+/// reconfiguring), manifest/GitHub/network errors, and [`InstallError::StepFailed`] when an
+/// install step fails.
 pub async fn run(
     upgrade_config: &UpgradeConfig,
     github: &GitHubClient,
@@ -19,8 +30,7 @@ pub async fn run(
     let channel = upgrade_config
         .reconfigure
         .as_ref()
-        .map(|r| r.channel)
-        .unwrap_or(manifest.channel);
+        .map_or(manifest.channel, |r| r.channel);
     let release = github.latest_release(channel).await?;
     let new_version = release.version();
 
@@ -52,45 +62,8 @@ pub async fn run(
         manifest.save(manifest_path)?;
     }
 
-    // Determine sources - reconfigure wins, otherwise replay from the manifest.
     let (daemon_source, features, frontend_source) =
-        if let Some(reconfig) = &upgrade_config.reconfigure {
-            (
-                reconfig.daemon.clone(),
-                reconfig.features.clone(),
-                reconfig.frontend.clone(),
-            )
-        } else {
-            let prebuilt_asset = (manifest.daemon.source == "prebuilt")
-                .then(release_arch)
-                .flatten()
-                .and_then(|arch| release.find_daemon_asset(arch));
-
-            let daemon_source = match prebuilt_asset {
-                Some(asset) => DaemonSource::Prebuilt {
-                    url: asset.browser_download_url.clone(),
-                },
-                None => DaemonSource::Compile,
-            };
-
-            // Replay the exact cargo feature set recorded at install time.
-            // Manifests that predate feature recording fall back to the
-            // default set.
-            let features = if manifest.daemon.features.is_empty() {
-                crate::features::default_features()
-            } else {
-                manifest.daemon.features.clone()
-            };
-
-            let frontend_source = match release.find_web_asset() {
-                Some(asset) => FrontendSource::Prebuilt {
-                    url: asset.browser_download_url.clone(),
-                },
-                None => FrontendSource::Compile,
-            };
-
-            (daemon_source, features, frontend_source)
-        };
+        resolve_sources(upgrade_config.reconfigure.as_ref(), &manifest, &release);
 
     // Upgrade binaries
     let bin_dir = manifest.daemon.path.parent().unwrap_or(Path::new("."));
@@ -149,18 +122,7 @@ pub async fn run(
     // predate feature recording).
     manifest.daemon.features = features.clone();
     if let Some(reconfig) = &upgrade_config.reconfigure {
-        manifest.daemon.providers = reconfig.providers.clone();
-        manifest.daemon.provisioners = reconfig.provisioners.clone();
-        manifest.daemon.source = match &daemon_source {
-            DaemonSource::Prebuilt { .. } => "prebuilt",
-            DaemonSource::Compile => "compiled",
-        }
-        .to_string();
-        manifest.frontend.source = match &frontend_source {
-            FrontendSource::Prebuilt { .. } => "prebuilt",
-            FrontendSource::Compile => "compiled",
-        }
-        .to_string();
+        apply_reconfigure(&mut manifest, reconfig, &daemon_source, &frontend_source);
     }
 
     // Restart daemon if systemd is configured
@@ -176,6 +138,75 @@ pub async fn run(
     Ok(manifest)
 }
 
+/// Determine sources - reconfigure wins, otherwise replay from the manifest.
+fn resolve_sources(
+    reconfigure: Option<&InstallConfig>,
+    manifest: &Manifest,
+    release: &crate::github::Release,
+) -> (DaemonSource, Vec<String>, FrontendSource) {
+    if let Some(reconfig) = reconfigure {
+        return (
+            reconfig.daemon.clone(),
+            reconfig.features.clone(),
+            reconfig.frontend.clone(),
+        );
+    }
+
+    let prebuilt_asset = (manifest.daemon.source == "prebuilt")
+        .then(release_arch)
+        .flatten()
+        .and_then(|arch| release.find_daemon_asset(arch));
+
+    let daemon_source = match prebuilt_asset {
+        Some(asset) => DaemonSource::Prebuilt {
+            url: asset.browser_download_url.clone(),
+        },
+        None => DaemonSource::Compile,
+    };
+
+    // Replay the exact cargo feature set recorded at install time.
+    // Manifests that predate feature recording fall back to the
+    // default set.
+    let features = if manifest.daemon.features.is_empty() {
+        crate::features::default_features()
+    } else {
+        manifest.daemon.features.clone()
+    };
+
+    let frontend_source = match release.find_web_asset() {
+        Some(asset) => FrontendSource::Prebuilt {
+            url: asset.browser_download_url.clone(),
+        },
+        None => FrontendSource::Compile,
+    };
+
+    (daemon_source, features, frontend_source)
+}
+
+/// Record the reconfigured installation choices in the manifest.
+fn apply_reconfigure(
+    manifest: &mut Manifest,
+    reconfig: &InstallConfig,
+    daemon_source: &DaemonSource,
+    frontend_source: &FrontendSource,
+) {
+    manifest.daemon.providers.clone_from(&reconfig.providers);
+    manifest
+        .daemon
+        .provisioners
+        .clone_from(&reconfig.provisioners);
+    manifest.daemon.source = match daemon_source {
+        DaemonSource::Prebuilt { .. } => "prebuilt",
+        DaemonSource::Compile => "compiled",
+    }
+    .to_string();
+    manifest.frontend.source = match frontend_source {
+        FrontendSource::Prebuilt { .. } => "prebuilt",
+        FrontendSource::Compile => "compiled",
+    }
+    .to_string();
+}
+
 /// True when `remote` is strictly newer than `local`. Falls back to plain
 /// inequality when either side is not valid semver (custom tags), matching
 /// the historical behavior.
@@ -189,6 +220,13 @@ fn is_upgrade(local: &str, remote: &str) -> bool {
     }
 }
 
+/// Restores the binaries and front-end bundle backed up by the last upgrade or rebuild.
+///
+/// # Errors
+///
+/// Returns [`InstallError::Manifest`] when no backup is recorded or it no longer exists,
+/// [`InstallError::Io`] when files cannot be moved or the manifest saved, and step errors
+/// when the systemd service cannot be restarted.
 pub async fn rollback(manifest_path: &Path, observer: &dyn ProgressObserver) -> crate::Result<()> {
     let mut manifest = Manifest::load(manifest_path)?;
 

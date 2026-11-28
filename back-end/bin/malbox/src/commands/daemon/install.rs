@@ -19,9 +19,9 @@ use malbox_installer::{GITHUB_OWNER, GITHUB_REPO};
 
 #[derive(Parser)]
 #[command(about = "Install and set up Malbox")]
-pub struct InstallCommand {
+pub(crate) struct InstallCommand {
     /// Skip prompts and install with defaults (nightly channel, default
-    /// features, prebuilt binaries when available, managed PostgreSQL,
+    /// features, prebuilt binaries when available, managed `PostgreSQL`,
     /// systemd unit)
     #[arg(long)]
     yes: bool,
@@ -29,54 +29,11 @@ pub struct InstallCommand {
 
 impl Command for InstallCommand {
     async fn execute(self, _ctx: &Context) -> Result<()> {
-        let accent = Brand::accent();
-        for line in [
-            r"            _ _",
-            r" _ __  __ _| | |__  _____ __",
-            r"| '  \/ _` | | '_ \/ _ \ \ /",
-            r"|_|_|_\__,_|_|_.__/\___/_\_\",
-        ] {
-            println!("  {}", accent.apply_to(line));
-        }
-        println!();
+        print_banner();
 
         let manifest_path = Manifest::default_path();
-        if manifest_path.exists()
-            && let Ok(existing) = Manifest::load(&manifest_path)
-        {
-            let theme = format::malbox_theme();
-            match existing.last_completed_step {
-                None => {
-                    if self.yes {
-                        println!("  Reinstalling over existing installation.");
-                    } else if !Confirm::with_theme(&theme)
-                        .with_prompt("Malbox is already installed. Reinstall?")
-                        .default(false)
-                        .interact()?
-                    {
-                        println!("  Installation cancelled.");
-                        return Ok(());
-                    }
-                }
-                Some(last_completed) => {
-                    println!(
-                        "  {} Incomplete installation of v{} (stopped after {} step)",
-                        Brand::warning().apply_to("!"),
-                        existing.version,
-                        last_completed
-                    );
-                    let resume = self.yes
-                        || Select::with_theme(&theme)
-                            .with_prompt("Resume or start fresh?")
-                            .items(["Resume installation", "Start fresh"])
-                            .default(0)
-                            .interact()?
-                            == 0;
-                    if resume {
-                        return resume_install(&manifest_path).await;
-                    }
-                }
-            }
+        if self.handle_existing_install(&manifest_path).await? {
+            return Ok(());
         }
 
         if !self.yes {
@@ -130,40 +87,7 @@ impl Command for InstallCommand {
         // Run installation
         format::section_divider("Installation");
 
-        let renderer = InstallRenderer::new("Installing Malbox");
-        renderer.add_pending_steps(&[
-            "Installing malbox binaries",
-            "Installing front-end assets",
-            "Setting up PostgreSQL",
-            "Generating default configuration",
-            "Configuring systemd user services",
-        ]);
-        renderer.add_recovery_hints(
-            "Installing malbox binaries",
-            &["Re-run `malbox daemon install` to resume from this step"],
-        );
-        renderer.add_recovery_hints(
-            "Installing front-end assets",
-            &["Re-run `malbox daemon install` to resume from this step"],
-        );
-        renderer.add_recovery_hints(
-            "Setting up PostgreSQL",
-            &[
-                "Ensure PostgreSQL tools are installed: psql --version",
-                "Re-run `malbox daemon install` to resume from this step",
-            ],
-        );
-        renderer.add_recovery_hints(
-            "Generating default configuration",
-            &["Re-run `malbox daemon install` to resume from this step"],
-        );
-        renderer.add_recovery_hints(
-            "Configuring systemd user services",
-            &[
-                "Verify systemd user session: systemctl --user status",
-                "Re-run `malbox daemon install` to resume from this step",
-            ],
-        );
+        let renderer = install_renderer();
 
         let manifest = malbox_installer::install::run(
             &install_config,
@@ -182,6 +106,48 @@ impl Command for InstallCommand {
 }
 
 impl InstallCommand {
+    /// Deals with a manifest from a previous run: confirms reinstall or offers
+    /// to resume. Returns `true` when the command is finished (cancelled or
+    /// resumed) and a fresh install must not proceed.
+    async fn handle_existing_install(&self, manifest_path: &std::path::Path) -> Result<bool> {
+        if !manifest_path.exists() {
+            return Ok(false);
+        }
+        let Ok(existing) = Manifest::load(manifest_path) else {
+            return Ok(false);
+        };
+        let theme = format::malbox_theme();
+        if let Some(last_completed) = existing.last_completed_step {
+            println!(
+                "  {} Incomplete installation of v{} (stopped after {} step)",
+                Brand::warning().apply_to("!"),
+                existing.version,
+                last_completed
+            );
+            let resume = self.yes
+                || Select::with_theme(&theme)
+                    .with_prompt("Resume or start fresh?")
+                    .items(["Resume installation", "Start fresh"])
+                    .default(0)
+                    .interact()?
+                    == 0;
+            if resume {
+                resume_install(manifest_path).await?;
+                return Ok(true);
+            }
+        } else if self.yes {
+            println!("  Reinstalling over existing installation.");
+        } else if !Confirm::with_theme(&theme)
+            .with_prompt("Malbox is already installed. Reinstall?")
+            .default(false)
+            .interact()?
+        {
+            println!("  Installation cancelled.");
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     async fn select_postgres(&self) -> Result<PostgresStrategy> {
         if self.yes {
             // Fail here, before the download steps, when the managed
@@ -204,14 +170,13 @@ impl InstallCommand {
                 .items(["Use existing server", "Set up new instance"])
                 .default(0)
                 .interact()?;
-            match choice {
-                0 => PostgresStrategy::Existing {
+            if choice == 0 {
+                PostgresStrategy::Existing {
                     url: prompt_postgres_url(Some("postgres://postgres@localhost:5432")).await?,
-                },
-                _ => {
-                    ensure_setup_tools()?;
-                    PostgresStrategy::Setup
                 }
+            } else {
+                ensure_setup_tools()?;
+                PostgresStrategy::Setup
             }
         } else {
             println!(
@@ -236,6 +201,51 @@ impl InstallCommand {
 
         Ok(strategy)
     }
+}
+
+fn print_banner() {
+    let accent = Brand::accent();
+    for line in [
+        r"            _ _",
+        r" _ __  __ _| | |__  _____ __",
+        r"| '  \/ _` | | '_ \/ _ \ \ /",
+        r"|_|_|_\__,_|_|_.__/\___/_\_\",
+    ] {
+        println!("  {}", accent.apply_to(line));
+    }
+    println!();
+}
+
+/// Builds the progress renderer with every install step pre-listed and its
+/// recovery hints attached.
+fn install_renderer() -> InstallRenderer {
+    const RESUME_HINT: &str = "Re-run `malbox daemon install` to resume from this step";
+    let renderer = InstallRenderer::new("Installing Malbox");
+    renderer.add_pending_steps(&[
+        "Installing malbox binaries",
+        "Installing front-end assets",
+        "Setting up PostgreSQL",
+        "Generating default configuration",
+        "Configuring systemd user services",
+    ]);
+    renderer.add_recovery_hints("Installing malbox binaries", &[RESUME_HINT]);
+    renderer.add_recovery_hints("Installing front-end assets", &[RESUME_HINT]);
+    renderer.add_recovery_hints(
+        "Setting up PostgreSQL",
+        &[
+            "Ensure PostgreSQL tools are installed: psql --version",
+            RESUME_HINT,
+        ],
+    );
+    renderer.add_recovery_hints("Generating default configuration", &[RESUME_HINT]);
+    renderer.add_recovery_hints(
+        "Configuring systemd user services",
+        &[
+            "Verify systemd user session: systemctl --user status",
+            RESUME_HINT,
+        ],
+    );
+    renderer
 }
 
 /// Complete an interrupted installation from where it stopped.
@@ -301,7 +311,7 @@ fn ensure_setup_tools() -> Result<()> {
     }
 }
 
-/// Prompt for a PostgreSQL URL and validate it immediately, so a typo
+/// Prompt for a `PostgreSQL` URL and validate it immediately, so a typo
 /// surfaces here instead of minutes later after the download steps.
 async fn prompt_postgres_url(default: Option<&str>) -> Result<String> {
     loop {
@@ -350,7 +360,7 @@ fn print_summary(manifest: &Manifest, manifest_path: &std::path::Path) {
     for (label, path) in paths {
         println!(
             "  {}  {}",
-            dim.apply_to(format!("{:<width$}", label, width = max_label)),
+            dim.apply_to(format!("{label:<max_label$}")),
             path,
         );
     }

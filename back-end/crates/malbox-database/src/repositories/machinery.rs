@@ -1,3 +1,5 @@
+//! `machines`: analysis VMs, their resource specs, and their lifecycle status.
+
 use crate::error::{MachineError, Result};
 use malbox_config::types::Platform as MachinePlatformConfig;
 use serde::{Deserialize, Serialize};
@@ -5,21 +7,36 @@ use sqlx::{AssertSqlSafe, PgPool};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Guest CPU architecture (`machine_arch` Postgres enum).
 #[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[sqlx(type_name = "machine_arch", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `machine_arch` Postgres enum; matched exhaustively by malbox-resources"
+)]
 pub enum MachineArch {
+    /// 32-bit x86.
     X86,
+    /// 64-bit x86-64.
     #[default]
     X64,
 }
 
+/// Guest operating system (`machine_platform` Postgres enum).
 #[derive(sqlx::Type, Debug, Serialize, Deserialize, Default, Clone, Hash, Eq, PartialEq)]
 #[sqlx(type_name = "machine_platform", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `machine_platform` Postgres enum; matched exhaustively by \
+              malbox-resources and malbox-scheduler"
+)]
 pub enum MachinePlatform {
+    /// Microsoft Windows guest.
     #[default]
     Windows,
+    /// Linux guest.
     Linux,
 }
 
@@ -46,16 +63,29 @@ impl std::str::FromStr for MachinePlatform {
     }
 }
 
+/// Machine lifecycle status (`machine_status` Postgres enum).
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "machine_status", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `machine_status` Postgres enum; matched exhaustively by \
+              malbox-resources reconcile"
+)]
 pub enum MachineStatusDb {
+    /// The provider is creating the VM.
     Creating,
+    /// Provisioning steps are running on the VM.
     Provisioning,
+    /// Idle and available for assignment.
     Ready,
+    /// Running a task.
     Assigned,
+    /// Being reverted to its snapshot after a task.
     Reverting,
+    /// Being torn down.
     Deleting,
+    /// Unusable until startup reconcile; see `error_message`.
     Failed,
 }
 
@@ -77,36 +107,66 @@ impl From<malbox_config::Arch> for MachineArch {
     }
 }
 
+/// A row of the `machines` table.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct Machine {
+    /// Database primary key; `None` only before insertion.
     pub id: Option<i32>,
+    /// Unique machine name.
     pub name: String,
+    /// Display label, initially the name.
     pub label: Option<String>,
+    /// Guest CPU architecture.
     pub arch: MachineArch,
+    /// Guest operating system.
     pub platform: MachinePlatform,
+    /// Guest IP address reported by the provider.
     pub ip: Option<String>,
+    /// Operator tags that detonation filters can require.
     pub tags: Option<Vec<String>>,
+    /// Lifecycle status.
     pub status: MachineStatusDb,
+    /// Image the machine was built from.
     pub image_id: Option<Uuid>,
+    /// Name of the provider that manages the VM.
     pub provider: Option<String>,
+    /// The provider's own identifier for the VM.
     pub provider_id: Option<String>,
+    /// When the provider last reported the machine.
     #[serde(with = "time::serde::rfc3339::option")]
     pub last_seen: Option<OffsetDateTime>,
+    /// Task the machine is assigned to, while `assigned`.
     pub current_task_id: Option<i32>,
+    /// Reason for the last failure, while `failed`.
     pub error_message: Option<String>,
+    /// When the row was inserted.
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    /// When the row was last modified.
     #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
+    /// Virtual CPU count.
     pub cpus: Option<i32>,
+    /// Memory size in MiB.
     pub memory_mb: Option<i32>,
+    /// Disk size in MiB.
     pub disk_size_mb: Option<i64>,
+    /// Name of the image the machine was built from.
     pub image_name: Option<String>,
+    /// Hash of the provider config the machine was built with, to detect drift.
     pub provider_config_hash: Option<String>,
 }
 
 /// Insert a new machine with full resource specs.
-#[allow(clippy::too_many_arguments)]
+///
+/// # Errors
+///
+/// Returns [`MachineError::InsertFailed`] when the insert fails, e.g. on a
+/// duplicate name.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one parameter per machine spec column"
+)]
 pub async fn insert_machine(
     pool: &PgPool,
     name: &str,
@@ -150,6 +210,10 @@ pub async fn insert_machine(
 }
 
 /// Replace a machine's tags.
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the update fails.
 pub async fn update_machine_tags(pool: &PgPool, machine_id: i32, tags: &[String]) -> Result<()> {
     sqlx::query(r#"UPDATE "machines" SET tags = $2, updated_at = NOW() WHERE id = $1"#)
         .bind(machine_id)
@@ -166,11 +230,15 @@ pub async fn update_machine_tags(pool: &PgPool, machine_id: i32, tags: &[String]
 /// Constraints a detonation places on the machine and snapshot it runs on.
 #[derive(Debug, Clone, Default)]
 pub struct MachineFilter {
+    /// Required guest operating system.
     pub platform: Option<MachinePlatform>,
     /// `x86` also matches `x64` machines.
     pub arch: Option<MachineArch>,
+    /// Exact machine to use.
     pub machine_id: Option<i32>,
+    /// Exact snapshot to use.
     pub snapshot_id: Option<Uuid>,
+    /// Snapshot name to use instead of the machine's active snapshot.
     pub snapshot_name: Option<String>,
     /// All must be present on the machine.
     pub tags: Vec<String>,
@@ -180,9 +248,18 @@ pub struct MachineFilter {
 
 /// Result of [`acquire_machine_for`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "closed set of acquire outcomes; matched exhaustively by malbox-resources"
+)]
 pub enum AcquireRow {
     /// The machine is now `assigned` to the task.
-    Acquired { machine_id: i32, snapshot_id: Uuid },
+    Acquired {
+        /// The assigned machine.
+        machine_id: i32,
+        /// Snapshot the machine must be reverted to before running.
+        snapshot_id: Uuid,
+    },
     /// A matching machine exists but none is `ready` right now.
     Busy,
     /// No machine could ever satisfy the filter.
@@ -191,7 +268,7 @@ pub enum AcquireRow {
 
 /// Candidate predicate shared by the acquire and existence queries. When no
 /// snapshot is named, only the machine's active snapshot qualifies.
-const ACQUIRE_PREDICATE: &str = r#"
+const ACQUIRE_PREDICATE: &str = r"
         ($1::machine_platform is null or m.platform = $1)
         and ($2::machine_arch is null or m.arch = $2 or ($2 = 'x86' and m.arch = 'x64'))
         and ($3::int is null or m.id = $3)
@@ -200,7 +277,7 @@ const ACQUIRE_PREDICATE: &str = r#"
         and ($4::uuid is not null or $5::text is not null or s.is_active)
         and coalesce(m.tags, '{}') @> $6::varchar[]
         and coalesce(s.guest_plugins, '[]'::jsonb) @> to_jsonb($7::text[])
-"#;
+";
 
 /// Atomically assign a `ready` machine matching `f` to `task_id`.
 ///
@@ -208,6 +285,12 @@ const ACQUIRE_PREDICATE: &str = r#"
 /// nothing is ready, reports whether a usable match exists at all (`Busy`)
 /// or not (`Unserviceable`); `failed` machines only come back at startup
 /// reconcile, so they don't count.
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the transaction or the
+/// claiming queries fail, and [`MachineError::FetchFailed`] when the
+/// existence check fails.
 pub async fn acquire_machine_for(
     pool: &PgPool,
     f: &MachineFilter,
@@ -281,6 +364,11 @@ pub async fn acquire_machine_for(
 }
 
 /// Release a machine after task completion, setting it to 'reverting'.
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the update fails or the
+/// machine does not exist.
 pub async fn release_machine(pool: &PgPool, machine_id: i32) -> Result<Machine> {
     sqlx::query_as::<_, Machine>(
         r#"
@@ -305,6 +393,11 @@ pub async fn release_machine(pool: &PgPool, machine_id: i32) -> Result<Machine> 
 }
 
 /// Update the lifecycle status of a machine, with an optional error message.
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the update fails or the
+/// machine does not exist.
 pub async fn update_machine_status(
     pool: &PgPool,
     machine_id: i32,
@@ -336,6 +429,11 @@ pub async fn update_machine_status(
 }
 
 /// Set provider-specific information after a machine has been created by a provider.
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the update fails or the
+/// machine does not exist.
 pub async fn set_machine_provider_info(
     pool: &PgPool,
     machine_id: i32,
@@ -371,6 +469,10 @@ pub async fn set_machine_provider_info(
 }
 
 /// Fetch a single machine by ID.
+///
+/// # Errors
+///
+/// Returns [`MachineError::FetchFailed`] when the query fails.
 pub async fn fetch_machine(pool: &PgPool, machine_id: i32) -> Result<Option<Machine>> {
     sqlx::query_as::<_, Machine>(
         r#"
@@ -384,6 +486,10 @@ pub async fn fetch_machine(pool: &PgPool, machine_id: i32) -> Result<Option<Mach
 }
 
 /// Fetch all machines, ordered by ID.
+///
+/// # Errors
+///
+/// Returns [`MachineError::FetchFailed`] when the query fails.
 pub async fn fetch_all_machines(pool: &PgPool) -> Result<Vec<Machine>> {
     sqlx::query_as::<_, Machine>(
         r#"
@@ -397,6 +503,10 @@ pub async fn fetch_all_machines(pool: &PgPool) -> Result<Vec<Machine>> {
 
 /// Atomically transition a machine from Ready to Provisioning.
 /// Returns None if the machine is not in Ready status (prevents races).
+///
+/// # Errors
+///
+/// Returns [`MachineError::UpdateFailed`] when the update fails.
 pub async fn transition_to_provisioning(pool: &PgPool, machine_id: i32) -> Result<Option<Machine>> {
     sqlx::query_as::<_, Machine>(
         r#"
@@ -421,6 +531,10 @@ pub async fn transition_to_provisioning(pool: &PgPool, machine_id: i32) -> Resul
 }
 
 /// Delete a machine by ID.
+///
+/// # Errors
+///
+/// Returns [`MachineError::DeleteFailed`] when the delete fails.
 pub async fn delete_machine(pool: &PgPool, machine_id: i32) -> Result<()> {
     sqlx::query(
         r#"

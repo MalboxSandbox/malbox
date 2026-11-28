@@ -12,7 +12,7 @@ use malbox_installer::manifest::Manifest;
     about = "Uninstall a provider (removes from config and rebuilds daemon)",
     after_help = "Examples:\n  malbox daemon provider uninstall libvirt\n  malbox daemon provider uninstall xen --no-rebuild"
 )]
-pub struct UninstallCommand {
+pub(crate) struct UninstallCommand {
     /// Provider name (e.g., "libvirt", "xen")
     pub name: String,
 
@@ -24,7 +24,7 @@ pub struct UninstallCommand {
 impl Command for UninstallCommand {
     async fn execute(self, ctx: &Context) -> Result<()> {
         let prompt = format!("Uninstall provider '{}'?", self.name);
-        if !format::confirm(&prompt, ctx.yes) {
+        if !ctx.yes && !format::confirm(&prompt) {
             format::empty("Cancelled.");
             return Ok(());
         }

@@ -28,6 +28,7 @@ use malbox_plugin_transport::plugin::{
 };
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,9 +44,13 @@ use tracing::{info, warn};
 /// (an [`ArtifactRelation`](crate::artifact::ArtifactRelation) discriminant).
 #[derive(Debug, Clone, Copy)]
 pub struct AutoCollectRuleRuntime {
+    /// Glob patterns (relative to the artifact dir) of files this rule collects.
     pub include: &'static [&'static str],
+    /// Glob patterns excluded even when they match `include`.
     pub exclude: &'static [&'static str],
+    /// Wire value of the [`ArtifactRelation`](crate::artifact::ArtifactRelation) to push with.
     pub relation: u8,
+    /// Whether the daemon should analyse the collected artifacts.
     pub analyze: bool,
 }
 
@@ -109,16 +114,14 @@ pub fn sweep_log_overflow_orphans(log_dir: &std::path::Path) {
     let grace = Duration::from_secs(ORPHAN_SWEEP_GRACE_SECS);
     let now = SystemTime::now();
 
-    let read_dir = match std::fs::read_dir(log_dir) {
-        Ok(d) => d,
-        Err(_) => return,
+    let Ok(read_dir) = std::fs::read_dir(log_dir) else {
+        return;
     };
 
     for entry in read_dir.flatten() {
         let path = entry.path();
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
-            None => continue,
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
         };
         if !name.ends_with(".overflow.jsonl") {
             continue;
@@ -186,13 +189,13 @@ fn run_foreground(
         child
             .stdout
             .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+            .map(|p| -> Box<dyn Read + Send> { Box::new(p) }),
     );
     let stderr = read_all(
         child
             .stderr
             .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+            .map(|p| -> Box<dyn Read + Send> { Box::new(p) }),
     );
 
     let deadline = std::time::Instant::now() + timeout;
@@ -241,7 +244,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         &self,
         _request: Request<proto::HealthCheckRequest>,
     ) -> std::result::Result<Response<proto::HealthCheckResponse>, Status> {
-        let plugin = self.plugin.clone();
+        let plugin = Arc::clone(&self.plugin);
         let (ready, reason) = tokio::task::spawn_blocking(move || {
             let status = plugin.health_check();
             (status.is_ready(), status.reason().to_owned())
@@ -271,8 +274,8 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         &self,
         request: Request<proto::TaskRequest>,
     ) -> std::result::Result<Response<Self::ExecuteTaskStream>, Status> {
-        let req = request.into_inner();
         const TASK_CHANNEL_CAPACITY: usize = 32;
+        let req = request.into_inner();
         let (proto_tx, proto_rx) =
             mpsc::channel::<std::result::Result<proto::TaskResult, Status>>(TASK_CHANNEL_CAPACITY);
         let (result_tx, mut result_rx) =
@@ -285,7 +288,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
             .insert(task_id, stop_tx);
         let stops = Arc::clone(&self.stops);
 
-        let plugin = self.plugin.clone();
+        let plugin = Arc::clone(&self.plugin);
         let full_sample_path = if std::path::Path::new(&req.sample_path).is_relative()
             && !req.sample_path.is_empty()
         {
@@ -316,7 +319,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
 
         tokio::task::spawn_blocking(move || {
             stream::guest_linear_task(
-                plugin,
+                plugin.as_ref(),
                 stream::TaskExecution {
                     task_id,
                     sample_path: full_sample_path,
@@ -373,7 +376,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         while let Some(chunk) = streaming
             .message()
             .await
-            .map_err(|e| Status::internal(format!("stream error: {}", e)))?
+            .map_err(|e| Status::internal(format!("stream error: {e}")))?
         {
             if dest.is_empty() {
                 dest.clone_from(&chunk.path);
@@ -399,8 +402,8 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let req = request.into_inner();
         match files::pull_file(&self.artifact_dir, &req.path).await {
             Ok(data) => {
-                let path = req.path;
                 const FILE_CHUNK_SIZE: usize = 64 * 1024;
+                let path = req.path;
                 let chunks: Vec<std::result::Result<proto::FileChunk, Status>> = data
                     .chunks(FILE_CHUNK_SIZE)
                     .enumerate()
@@ -503,7 +506,6 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
         let file = tokio::fs::File::open(&entry.path)
             .await
             .map_err(|e| Status::internal(format!("failed to open stashed result: {e}")))?;
-        let stash = Arc::clone(&self.stash);
         let s = async_stream::stream! {
             use tokio::io::AsyncReadExt;
             let mut file = file;
@@ -515,7 +517,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
                     Ok(n) => n,
                     Err(e) => {
                         yield Err(tonic::Status::internal(format!("read error: {e}")));
-                        stash.cleanup_after_pull(&entry);
+                        ResultStash::cleanup_after_pull(&entry);
                         return;
                     }
                 };
@@ -526,7 +528,7 @@ impl<P: GuestPlugin> GuestPluginService for GuestService<P> {
                 yield Ok(proto::ResultChunk { data: buf[..n].to_vec(), index, is_last: false });
                 index += 1;
             }
-            stash.cleanup_after_pull(&entry);
+            ResultStash::cleanup_after_pull(&entry);
         };
         Ok(Response::new(Box::pin(s)))
     }
@@ -546,6 +548,15 @@ pub struct GuestRuntime<P: Send + Sync + 'static> {
     log_bus: Option<Arc<LogBus>>,
 }
 
+impl<P: Send + Sync + 'static> std::fmt::Debug for GuestRuntime<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuestRuntime")
+            .field("config", &self.config)
+            .field("log_bus", &self.log_bus)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: GuestPlugin> GuestRuntime<P> {
     /// Create a guest runtime with custom configuration.
     pub fn with_config(plugin: P, config: GuestRuntimeConfig) -> Self {
@@ -558,12 +569,18 @@ impl<P: GuestPlugin> GuestRuntime<P> {
 
     /// Attach an externally-created [`LogBus`] so the gRPC log stream uses
     /// the same bus that the tracing layer / C++ FFI already writes to.
+    #[must_use]
     pub fn with_log_bus(mut self, bus: Arc<LogBus>) -> Self {
         self.log_bus = Some(bus);
         self
     }
 
     /// Start the gRPC server and block until shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Init`] if a runtime directory or the result stash
+    /// cannot be created, or if the gRPC server fails to bind or serve.
     pub async fn run(self) -> Result<()> {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -583,61 +600,22 @@ impl<P: GuestPlugin> GuestRuntime<P> {
         ] {
             tokio::fs::create_dir_all(dir)
                 .await
-                .map_err(|e| SdkError::Init(format!("failed to create {}: {}", label, e)))?;
+                .map_err(|e| SdkError::Init(format!("failed to create {label}: {e}")))?;
         }
 
-        // Set up the result stash for large payloads. On startup, sweep any
-        // orphan files left behind by a prior crashed run.
-        if let Err(e) = ResultStash::sweep_orphans_on_startup(&stash_dir) {
-            warn!(error = %e, "failed to sweep result stash orphans on startup");
-        }
-        let stash_config = StashConfig {
-            threshold_bytes: self.config.stash_threshold_bytes,
-            ttl: std::time::Duration::from_secs(self.config.stash_ttl_secs),
-        };
-        let stash = Arc::new(
-            ResultStash::new(stash_dir, stash_config)
-                .map_err(|e| SdkError::Init(format!("failed to create stash: {}", e)))?,
-        );
-
-        // Spawn a background TTL sweeper: purges stash entries that were
-        // never pulled by the daemon within the configured TTL window.
-        {
-            let sweep_stash = Arc::clone(&stash);
-            let sweep_interval = sweep_stash.config().ttl / 2;
-            tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(sweep_interval);
-                // Skip the immediate first tick.
-                ticker.tick().await;
-                loop {
-                    ticker.tick().await;
-                    let n = sweep_stash.sweep_expired();
-                    if n > 0 {
-                        warn!(
-                            reclaimed = n,
-                            "TTL sweep reclaimed stale result stash entries"
-                        );
-                    }
-                }
-            });
-        }
+        let stash = start_stash(&self.config, stash_dir)?;
 
         // Use the externally-provided LogBus (C++ FFI path where tracing
         // was already initialised with this bus), or create a fresh one and
         // install the tracing layer ourselves (Rust SDK path).
-        let log_bus = match self.log_bus {
-            Some(bus) => bus,
-            None => {
-                sweep_log_overflow_orphans(&log_dir);
-                let overflow_path =
-                    log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
-
-                const LOG_BUS_CAPACITY: usize = 1024;
-                let bus = Arc::new(LogBus::with_overflow(LOG_BUS_CAPACITY, overflow_path));
-                crate::internal::init_tracing(self.config.log_filter, Some(Arc::clone(&bus)));
-                bus
-            }
-        };
+        let log_bus = self.log_bus.unwrap_or_else(|| {
+            const LOG_BUS_CAPACITY: usize = 1024;
+            sweep_log_overflow_orphans(&log_dir);
+            let overflow_path = log_dir.join(format!("run-{}.overflow.jsonl", std::process::id()));
+            let bus = Arc::new(LogBus::with_overflow(LOG_BUS_CAPACITY, overflow_path));
+            crate::internal::init_tracing(self.config.log_filter, Some(Arc::clone(&bus)));
+            bus
+        });
 
         let to_section = |cfg: &AutoCollectRuntimeConfig| AutoCollectSection {
             enabled: cfg.enabled,
@@ -686,7 +664,7 @@ impl<P: GuestPlugin> GuestRuntime<P> {
                 let mut msg = format!("gRPC server error on {addr}: {e}");
                 let mut source = std::error::Error::source(&e);
                 while let Some(cause) = source {
-                    msg.push_str(&format!("\n  caused by: {cause}"));
+                    let _ = write!(msg, "\n  caused by: {cause}");
                     source = std::error::Error::source(cause);
                 }
                 SdkError::Init(msg)
@@ -700,11 +678,51 @@ impl<P: GuestPlugin> GuestRuntime<P> {
     ///
     /// This is the entry point for `fn main()` style plugins that don't
     /// already have an async runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Init`] if the tokio runtime cannot be created,
+    /// plus every error [`run`](Self::run) can return.
     pub fn run_blocking(self) -> Result<()> {
         let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| SdkError::Init(format!("failed to create tokio runtime: {}", e)))?;
+            .map_err(|e| SdkError::Init(format!("failed to create tokio runtime: {e}")))?;
         rt.block_on(self.run())
     }
+}
+
+/// Create the result stash, clearing orphans from a prior crashed run, and
+/// spawn the background TTL sweeper for entries the daemon never pulled.
+fn start_stash(config: &GuestRuntimeConfig, stash_dir: PathBuf) -> Result<Arc<ResultStash>> {
+    if let Err(e) = ResultStash::sweep_orphans_on_startup(&stash_dir) {
+        warn!(error = %e, "failed to sweep result stash orphans on startup");
+    }
+    let stash_config = StashConfig {
+        threshold_bytes: config.stash_threshold_bytes,
+        ttl: std::time::Duration::from_secs(config.stash_ttl_secs),
+    };
+    let stash = Arc::new(
+        ResultStash::new(stash_dir, stash_config)
+            .map_err(|e| SdkError::Init(format!("failed to create stash: {e}")))?,
+    );
+
+    let sweep_stash = Arc::clone(&stash);
+    let sweep_interval = sweep_stash.config().ttl / 2;
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(sweep_interval);
+        // Skip the immediate first tick.
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            let n = sweep_stash.sweep_expired();
+            if n > 0 {
+                warn!(
+                    reclaimed = n,
+                    "TTL sweep reclaimed stale result stash entries"
+                );
+            }
+        }
+    });
+    Ok(stash)
 }
 
 #[cfg(test)]

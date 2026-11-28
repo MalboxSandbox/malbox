@@ -12,7 +12,7 @@ use malbox_resources::error::ResourceError;
 use serde::Deserialize;
 use tracing::{error, info};
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/machines", get(list_machines))
         .route("/v1/machines/{id}", get(get_machine))
@@ -29,7 +29,7 @@ pub fn router() -> Router<AppState> {
 async fn list_machines(State(state): State<AppState>) -> impl IntoResponse {
     match state.machine_pool.list().await {
         Ok(machines) => (StatusCode::OK, Json(serde_json::json!(machines))).into_response(),
-        Err(e) => resource_error_response(e),
+        Err(e) => resource_error_response(&e),
     }
 }
 
@@ -41,7 +41,7 @@ async fn get_machine(State(state): State<AppState>, Path(id): Path<i32>) -> impl
             Json(serde_json::json!({"error": "Machine not found"})),
         )
             .into_response(),
-        Err(e) => resource_error_response(e),
+        Err(e) => resource_error_response(&e),
     }
 }
 
@@ -67,9 +67,7 @@ async fn delete_snapshot(
             Ok(None) => {
                 return (
                 StatusCode::NOT_FOUND,
-                Json(
-                    serde_json::json!({"error": format!("Snapshot '{}' not found", snapshot_name)}),
-                ),
+                Json(serde_json::json!({"error": format!("Snapshot '{snapshot_name}' not found")})),
             )
                 .into_response();
             }
@@ -146,7 +144,18 @@ async fn provision_machine(
 
             match found {
                 Some(entry) => {
-                    let port = base_port + i as u16;
+                    let Some(port) = u16::try_from(i)
+                        .ok()
+                        .and_then(|offset| base_port.checked_add(offset))
+                    else {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(serde_json::json!({
+                                "error": "too many guest plugins to assign ports"
+                            })),
+                        )
+                            .into_response();
+                    };
                     let mut plugin_info = toml::map::Map::new();
                     plugin_info.insert(
                         "binary".to_string(),
@@ -162,7 +171,7 @@ async fn provision_machine(
                                 .to_string(),
                         ),
                     );
-                    plugin_info.insert("port".to_string(), toml::Value::Integer(port as i64));
+                    plugin_info.insert("port".to_string(), toml::Value::Integer(i64::from(port)));
                     plugins_table.insert(name.clone(), toml::Value::Table(plugin_info));
 
                     info!(
@@ -176,7 +185,7 @@ async fn provision_machine(
                     return (
                         StatusCode::BAD_REQUEST,
                         Json(serde_json::json!({
-                            "error": format!("Guest plugin '{}' not found in registry", name)
+                            "error": format!("Guest plugin '{name}' not found in registry")
                         })),
                     )
                         .into_response();
@@ -205,7 +214,7 @@ async fn provision_machine(
         .await
     {
         Ok(run) => (StatusCode::OK, Json(serde_json::json!(run))).into_response(),
-        Err(e) => resource_error_response(e),
+        Err(e) => resource_error_response(&e),
     }
 }
 
@@ -244,7 +253,7 @@ async fn list_all_snapshots(
     }
 }
 
-/// Convert a serde_json::Value to a toml::Value.
+/// Convert a `serde_json::Value` to a `toml::Value`.
 fn json_to_toml(val: serde_json::Value) -> toml::Value {
     match val {
         serde_json::Value::Null => toml::Value::String(String::new()),
@@ -273,15 +282,16 @@ fn json_to_toml(val: serde_json::Value) -> toml::Value {
 }
 
 /// Map a `ResourceError` to an appropriate HTTP response.
-fn resource_error_response(err: ResourceError) -> axum::response::Response {
+fn resource_error_response(err: &ResourceError) -> axum::response::Response {
     error!(error = %err, "Request failed");
-    let (status, message) = match &err {
+    let (status, message) = match err {
         ResourceError::MachineNotFound { .. } => (StatusCode::NOT_FOUND, err.to_string()),
-        ResourceError::MachineAssigned { .. } => (StatusCode::CONFLICT, err.to_string()),
-        ResourceError::InvalidMachineState { .. } => (StatusCode::CONFLICT, err.to_string()),
+        ResourceError::MachineAssigned { .. } | ResourceError::InvalidMachineState { .. } => {
+            (StatusCode::CONFLICT, err.to_string())
+        }
         ResourceError::Database(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Database error: {}", msg),
+            format!("Database error: {msg}"),
         ),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
     };

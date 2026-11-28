@@ -1,3 +1,5 @@
+//! Derive macros for registering providers with the `malbox-machinery` registry.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Meta, parse_macro_input};

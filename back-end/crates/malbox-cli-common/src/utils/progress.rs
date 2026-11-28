@@ -1,8 +1,15 @@
+//! Animated terminal spinner for long-running CLI operations.
+
+#![expect(
+    clippy::print_stderr,
+    reason = "spinner renders user-facing progress to the terminal's stderr"
+)]
+
 use console::Term;
 use rattles::presets::prelude as presets;
 use std::io::Write;
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, PoisonError,
     atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
@@ -10,6 +17,10 @@ use std::time::Duration;
 
 use crate::utils::format::Brand;
 
+/// Spinner drawn on stderr by a background thread until dropped.
+///
+/// Draws nothing when stderr is not a terminal.
+#[derive(Debug)]
 pub struct Spinner {
     running: Arc<AtomicBool>,
     message: Arc<Mutex<String>>,
@@ -17,6 +28,7 @@ pub struct Spinner {
 }
 
 impl Spinner {
+    /// Starts a spinner showing `message` next to the animation.
     pub fn start(message: impl Into<String>) -> Self {
         let running = Arc::new(AtomicBool::new(true));
         let msg = Arc::new(Mutex::new(message.into()));
@@ -29,7 +41,10 @@ impl Spinner {
                 let rattle = presets::diagswipe();
                 let style = Brand::accent();
                 while running_clone.load(Ordering::Relaxed) {
-                    let text = msg_clone.lock().unwrap().clone();
+                    let text = msg_clone
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone();
                     eprint!(
                         "\r\x1b[2K  {} {}",
                         style.apply_to(rattle.current_frame()),
@@ -50,8 +65,9 @@ impl Spinner {
         }
     }
 
+    /// Replaces the text shown next to the animation.
     pub fn set_message(&self, message: impl Into<String>) {
-        *self.message.lock().unwrap() = message.into();
+        *self.message.lock().unwrap_or_else(PoisonError::into_inner) = message.into();
     }
 
     fn shutdown(&mut self) {

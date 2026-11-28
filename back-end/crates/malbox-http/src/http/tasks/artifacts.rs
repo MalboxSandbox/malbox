@@ -17,7 +17,10 @@ use malbox_database::repositories::{
     plugin_reports::{DbClassification, fetch_plugin_reports_for_task},
     tasks::{Task, fetch_task},
 };
-use malbox_scheduler::{DescendantPolicy, ensure_sample_for_artifact, package::sanitize_file_name};
+use malbox_scheduler::{
+    CacheUse, DescendantPolicy, PriorityScope, ensure_sample_for_artifact,
+    package::sanitize_file_name,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -29,7 +32,7 @@ use super::control_error;
 use super::create::{SubmitOptionsBody, created_response, identify_blocking, submit};
 use crate::http::{Result, error::Error};
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/tasks/{id}/tree", get(get_tree))
         .route("/v1/tasks/{id}/jobs", get(get_jobs))
@@ -339,9 +342,9 @@ async fn get_artifact_content(
 
     let mut file_name = sanitize_file_name(&name);
     if file_name.is_empty() {
-        file_name = artifact.sha256.clone();
+        file_name.clone_from(&artifact.sha256);
     }
-    let disposition = format!("attachment; filename=\"{}\"", file_name);
+    let disposition = format!("attachment; filename=\"{file_name}\"");
 
     Ok((
         StatusCode::OK,
@@ -405,7 +408,16 @@ async fn patch_artifact(
 ) -> Result<Json<serde_json::Value>> {
     state
         .orchestrator
-        .set_artifact_priority(task_id, artifact_id, body.priority, body.subtree)
+        .set_artifact_priority(
+            task_id,
+            artifact_id,
+            body.priority,
+            if body.subtree {
+                PriorityScope::Subtree
+            } else {
+                PriorityScope::Artifact
+            },
+        )
         .await
         .map_err(control_error)?;
     Ok(Json(
@@ -442,7 +454,16 @@ async fn rescan_artifact(
     let body = body.map(|Json(b)| b).unwrap_or_default();
     state
         .orchestrator
-        .rescan_artifact(task_id, artifact_id, body.plugins, body.ignore_cache)
+        .rescan_artifact(
+            task_id,
+            artifact_id,
+            body.plugins,
+            if body.ignore_cache {
+                CacheUse::Bypass
+            } else {
+                CacheUse::Reuse
+            },
+        )
         .await
         .map_err(control_error)?;
     Ok((
@@ -469,7 +490,7 @@ async fn promote_artifact(
 
     let sample = ensure_sample_for_artifact(state.orchestrator.core(), &artifact)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to prepare sample: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to prepare sample: {e}")))?;
 
     let edges = fetch_task_edges(&state.pool, task_id)
         .await
@@ -480,7 +501,7 @@ async fn promote_artifact(
     let path = state
         .sample_store
         .path(&artifact.sha256)
-        .map_err(|e| Error::Internal(format!("Failed to resolve artifact path: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to resolve artifact path: {e}")))?;
     let data = tokio::fs::read(&path)
         .await
         .map_err(|_| Error::Conflict("artifact has no stored content".to_string()))?;

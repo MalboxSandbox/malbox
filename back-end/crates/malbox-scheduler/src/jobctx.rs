@@ -65,7 +65,7 @@ pub(crate) fn artifact_name(
     }
 }
 
-pub async fn build_job_config(
+pub(crate) async fn build_job_config(
     core: &OrchestratorCore,
     task: &Task,
     job: &Job,
@@ -83,11 +83,14 @@ pub async fn build_job_config(
             .detonation
             .clone()
             .and_then(|v| serde_json::from_value::<DetonationRequest>(v).ok())
-            .map(|r| r.timeout_secs)
-            .unwrap_or_else(|| u64::try_from(task.timeout).unwrap_or(0)),
+            .map_or_else(
+                || u64::try_from(task.timeout).unwrap_or(0),
+                |r| r.timeout_secs,
+            ),
     };
 
-    let analysed = all_artifacts.iter().filter(|a| a.analyze).count() as i64;
+    let analysed =
+        i64::try_from(all_artifacts.iter().filter(|a| a.analyze).count()).unwrap_or(i64::MAX);
     let remaining = (i64::from(task.max_artifacts) - analysed).max(0);
     let max_artifacts = remaining.min(i64::from(core.settings.max_artifacts_per_job));
 

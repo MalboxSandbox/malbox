@@ -11,7 +11,7 @@ use malbox_database::repositories::machinery::{MachineArch, MachinePlatform};
 use serde::Deserialize;
 use tracing::info;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/images", post(register_image))
         .route("/v1/images", get(list_images))
@@ -58,7 +58,7 @@ async fn register_image(
     let src = std::path::Path::new(&request.path)
         .canonicalize()
         .map_err(|e| {
-            Error::unprocessable_entity([("path", format!("cannot resolve path: {}", e))])
+            Error::unprocessable_entity([("path", format!("cannot resolve path: {e}"))])
         })?;
 
     if !src.exists() {
@@ -70,15 +70,13 @@ async fn register_image(
 
     // Move image to managed store directory
     let format = request.format.unwrap_or_else(|| "qcow2".to_string());
-    let images_dir = state
-        .config
-        .images
-        .as_ref()
-        .map(|c| std::path::PathBuf::from(&c.store_path))
-        .unwrap_or_else(|| std::path::PathBuf::from("/var/lib/malbox/images"));
+    let images_dir = state.config.images.as_ref().map_or_else(
+        || std::path::PathBuf::from("/var/lib/malbox/images"),
+        |c| std::path::PathBuf::from(&c.store_path),
+    );
     tokio::fs::create_dir_all(&images_dir)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to create images directory: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to create images directory: {e}")))?;
 
     let filename = format!("{}.{}", &request.name, &format);
     let dest = images_dir.join(&filename);
@@ -93,15 +91,15 @@ async fn register_image(
         // rename fails across filesystems — fall back to copy + remove
         tokio::fs::copy(&src, &dest)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to copy image to store: {}", e)))?;
+            .map_err(|e| Error::Internal(format!("Failed to copy image to store: {e}")))?;
         tokio::fs::remove_file(&src)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to remove source image: {}", e)))?;
+            .map_err(|e| Error::Internal(format!("Failed to remove source image: {e}")))?;
     }
 
     let dest_canonical = dest
         .canonicalize()
-        .map_err(|e| Error::Internal(format!("Failed to canonicalize destination path: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to canonicalize destination path: {e}")))?;
 
     let dest_str = dest_canonical
         .to_str()
@@ -119,7 +117,7 @@ async fn register_image(
 
     let image = images::insert_image(&state.pool, new_image)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to insert image: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to insert image: {e}")))?;
 
     Ok((
         StatusCode::CREATED,
@@ -135,7 +133,7 @@ async fn register_image(
 async fn list_images(State(state): State<AppState>) -> Result<impl IntoResponse> {
     let images = images::fetch_all_images(&state.pool)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch images: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to fetch images: {e}")))?;
 
     Ok(Json(images))
 }
@@ -146,7 +144,7 @@ async fn get_image(
 ) -> Result<impl IntoResponse> {
     let image = images::fetch_image_by_name(&state.pool, &name)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch image: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to fetch image: {e}")))?;
 
     match image {
         Some(img) => Ok(Json(img).into_response()),
@@ -160,7 +158,7 @@ async fn delete_image(
 ) -> Result<impl IntoResponse> {
     let image = images::delete_image_by_name(&state.pool, &name)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to delete image: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to delete image: {e}")))?;
 
     match image {
         Some(_) => Ok(StatusCode::NO_CONTENT.into_response()),

@@ -1,10 +1,10 @@
-//! Host plugin runtime - WaitSet-based event loop over iceoryx2 IPC.
+//! Host plugin runtime - `WaitSet`-based event loop over iceoryx2 IPC.
 //!
 //! The runtime multiplexes several IPC channels into a single event loop:
 //!
 //! - **Task dispatch** - request/response channel from the daemon.
 //! - **Daemon events** - pub/sub for lifecycle and system signals.
-//! - **WaitSet wakeup** - efficient notification-driven wakeup (no polling).
+//! - **`WaitSet` wakeup** - efficient notification-driven wakeup (no polling).
 //!
 //! Gated behind the `host` feature flag.
 
@@ -36,7 +36,7 @@ use tracing::{debug, error, info, instrument};
 const POLL_INTERVAL_MS: u64 = 500;
 
 /// Task request payload serialized with postcard over IPC.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskRequestPayload<'a> {
     /// Path to the sample file on the host filesystem.
     pub sample_path: &'a str,
@@ -55,8 +55,6 @@ struct TaskRequestPayloadOwned {
 pub struct HostRuntime<P> {
     plugin: P,
     meta: PluginMeta,
-    #[allow(dead_code)]
-    plugin_id: String,
 
     // iceoryx2 node - must outlive all ports created from it
     _node: Node<IpcService>,
@@ -75,8 +73,22 @@ pub struct HostRuntime<P> {
     shutdown: AtomicBool,
 }
 
+impl<P> std::fmt::Debug for HostRuntime<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostRuntime")
+            .field("meta", &self.meta)
+            .field("shutdown", &self.shutdown)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P: HostPlugin> HostRuntime<P> {
     /// Create a new host plugin runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Init`] if `MALBOX_PLUGIN_ID` is unset or any
+    /// iceoryx2 node, port, or listener cannot be created.
     pub fn new(plugin: P, meta: PluginMeta) -> Result<Self> {
         // Honor IOX2_LOG_LEVEL (default Info) before any iceoryx2 port exists;
         // iceoryx2 pre-filters at this level before its logs reach `tracing`.
@@ -109,7 +121,6 @@ impl<P: HostPlugin> HostRuntime<P> {
         Ok(Self {
             plugin,
             meta,
-            plugin_id,
             _node: node,
             task_server,
             daemon_event_sub,
@@ -120,16 +131,22 @@ impl<P: HostPlugin> HostRuntime<P> {
     }
 
     /// Run the plugin event loop. Blocks until shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns the plugin's `on_start` error, or [`SdkError::Init`] if the
+    /// `WaitSet` cannot be created or attached. Errors after startup are
+    /// logged, not returned.
     #[instrument(skip_all, fields(plugin = %self.meta.name()), err)]
     pub fn run(&self) -> Result<()> {
         self.plugin.on_start(HashMap::new())?;
 
         // Emit PluginStarted
         let header = EventHeader {
-            event_type: EventKind::PluginStarted as u16,
+            event_type: u16::from(EventKind::PluginStarted),
             source_plugin_id: 0,
             associated_id: 0,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         };
         if let Err(e) = self.plugin_event_pub.emit_signal(&header) {
             error!(plugin = %self.meta.name(), error = %e, "Failed to emit PluginStarted event");
@@ -182,10 +199,10 @@ impl<P: HostPlugin> HostRuntime<P> {
         }
 
         let header = EventHeader {
-            event_type: EventKind::PluginStopped as u16,
+            event_type: u16::from(EventKind::PluginStopped),
             source_plugin_id: 0,
             associated_id: 0,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         };
         if let Err(e) = self.plugin_event_pub.emit_signal(&header) {
             error!(plugin = %self.meta.name(), error = %e, "Failed to emit PluginStopped event");
@@ -197,7 +214,7 @@ impl<P: HostPlugin> HostRuntime<P> {
 
     fn drain_tasks(&self) {
         while let Ok(Some(active_request)) = self.task_server.receive() {
-            self.handle_task(active_request);
+            self.handle_task(&active_request);
         }
     }
 
@@ -219,7 +236,7 @@ impl<P: HostPlugin> HostRuntime<P> {
         }
     }
 
-    fn handle_task(&self, active_request: ActiveTaskRequest) {
+    fn handle_task(&self, active_request: &ActiveTaskRequest) {
         let header = active_request.header();
         let task_id = header.task_id;
 
@@ -230,7 +247,7 @@ impl<P: HostPlugin> HostRuntime<P> {
                 error!(task_id, error = %e, "Failed to deserialize task request");
                 let resp = TaskResponseHeader {
                     task_id,
-                    kind: ResponseKind::Error as u8,
+                    kind: u8::from(ResponseKind::Error),
                     flags: FLAG_IS_FINAL,
                     ..Default::default()
                 };
@@ -261,7 +278,7 @@ impl<P: HostPlugin> HostRuntime<P> {
         task_ctx.close_result_channel();
 
         while let Ok(msg) = result_rx.try_recv() {
-            forward_result_to_ipc(&active_request, &msg);
+            forward_result_to_ipc(active_request, &msg);
         }
 
         match result {
@@ -276,10 +293,10 @@ impl<P: HostPlugin> HostRuntime<P> {
                 }
 
                 let ev = EventHeader {
-                    event_type: EventKind::TaskCompleted as u16,
+                    event_type: u16::from(EventKind::TaskCompleted),
                     source_plugin_id: 0,
                     associated_id: task_id,
-                    _reserved: [0; 6],
+                    reserved: [0; 6],
                 };
                 if let Err(e) = self.plugin_event_pub.emit_signal(&ev) {
                     error!(task_id, error = %e, "Failed to emit TaskCompleted event");
@@ -289,7 +306,7 @@ impl<P: HostPlugin> HostRuntime<P> {
             Err(e) => {
                 let resp = TaskResponseHeader {
                     task_id,
-                    kind: ResponseKind::Error as u8,
+                    kind: u8::from(ResponseKind::Error),
                     flags: FLAG_IS_FINAL,
                     ..Default::default()
                 };
@@ -299,10 +316,10 @@ impl<P: HostPlugin> HostRuntime<P> {
                 }
 
                 let ev = EventHeader {
-                    event_type: EventKind::TaskFailed as u16,
+                    event_type: u16::from(EventKind::TaskFailed),
                     source_plugin_id: 0,
                     associated_id: task_id,
-                    _reserved: [0; 6],
+                    reserved: [0; 6],
                 };
                 if let Err(emit_err) = self.plugin_event_pub.emit_signal(&ev) {
                     error!(task_id, error = %emit_err, "Failed to emit TaskFailed event");
@@ -345,8 +362,8 @@ fn forward_result_to_ipc(active_request: &ActiveTaskRequest, msg: &TaskResultMes
         };
         let meta_header = TaskResponseHeader {
             task_id: msg.task_id,
-            kind: ResponseKind::ArtifactMeta as u8,
-            format: IpcResultFormat::Bytes as u8,
+            kind: u8::from(ResponseKind::ArtifactMeta),
+            format: u8::from(IpcResultFormat::Bytes),
             flags: 0,
             name_len: 0,
             ..Default::default()
@@ -358,16 +375,16 @@ fn forward_result_to_ipc(active_request: &ActiveTaskRequest, msg: &TaskResultMes
     }
 
     let name_bytes = msg.result_name.as_bytes();
-    let name_len = name_bytes.len().min(255) as u8;
+    let name_len = u8::try_from(name_bytes.len()).unwrap_or(u8::MAX);
 
-    let mut payload = Vec::with_capacity(name_len as usize + msg.data.len());
-    payload.extend_from_slice(&name_bytes[..name_len as usize]);
+    let mut payload = Vec::with_capacity(usize::from(name_len) + msg.data.len());
+    payload.extend_from_slice(&name_bytes[..usize::from(name_len)]);
     payload.extend_from_slice(&msg.data);
 
     let header = TaskResponseHeader {
         task_id: msg.task_id,
-        kind: kind as u8,
-        format: ipc_format as u8,
+        kind: u8::from(kind),
+        format: u8::from(ipc_format),
         name_len,
         ..Default::default()
     };

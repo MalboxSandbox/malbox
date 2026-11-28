@@ -7,6 +7,9 @@ use crate::manifest::{
 use crate::progress::{ProgressObserver, observe};
 use std::path::{Path, PathBuf};
 
+/// Builds the manifest for a fresh install before any step runs, recording the
+/// intended install paths so an interrupted install can be resumed.
+#[must_use]
 pub fn build_initial_manifest(
     config: &InstallConfig,
     version: &str,
@@ -74,6 +77,14 @@ pub fn build_initial_manifest(
     }
 }
 
+/// Performs a fresh install of `release` according to `config`, saving progress to
+/// `manifest_path` after every step.
+///
+/// # Errors
+///
+/// Returns [`InstallError::Environment`] when the home directory is unknown,
+/// [`InstallError::Io`] for filesystem failures, and [`InstallError::StepFailed`]
+/// when an install step fails.
 pub async fn run(
     config: &InstallConfig,
     github: &GitHubClient,
@@ -112,6 +123,11 @@ pub async fn run(
 /// completed one, re-deriving the installation choices recorded in the
 /// manifest. Pins to the release the interrupted install was installing
 /// rather than floating to the latest.
+///
+/// # Errors
+///
+/// Returns [`InstallError::Manifest`] when the install already completed, manifest or
+/// GitHub errors when the release cannot be found, and step errors as in [`run`].
 pub async fn resume(
     github: &GitHubClient,
     manifest_path: &Path,
@@ -238,7 +254,7 @@ async fn run_steps(
         Step::Systemd,
         observer,
         crate::steps::systemd::execute(
-            config.systemd,
+            config.systemd.into(),
             &manifest.daemon.path,
             &config_path,
             pgdata.as_deref(),

@@ -1,3 +1,5 @@
+//! Core registry data types: plugin identifiers, status, and discovered entries.
+
 use std::fmt;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -9,10 +11,12 @@ use malbox_plugin_manifest::ResolvedRuntimeConfig;
 pub struct PluginId(String);
 
 impl PluginId {
+    /// Wrap a manifest plugin name as an identifier.
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
+    /// Borrow the underlying plugin name.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -26,6 +30,7 @@ impl fmt::Display for PluginId {
 
 /// Registration status of a discovered plugin.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PluginStatus {
     /// Plugin is valid and available for use.
     Registered,
@@ -37,7 +42,7 @@ impl fmt::Display for PluginStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Registered => write!(f, "registered"),
-            Self::Invalid(reason) => write!(f, "invalid: {}", reason),
+            Self::Invalid(reason) => write!(f, "invalid: {reason}"),
         }
     }
 }
@@ -45,11 +50,17 @@ impl fmt::Display for PluginStatus {
 /// A discovered plugin with its metadata and filesystem location.
 #[derive(Debug, Clone)]
 pub struct PluginEntry {
+    /// Identifier derived from the manifest's plugin name.
     pub id: PluginId,
+    /// Parsed `plugin.toml` contents.
     pub manifest: super::manifest::PluginManifest,
+    /// Resolved path of the plugin executable (may not exist if `status` is invalid).
     pub binary_path: PathBuf,
+    /// Directory containing the plugin's manifest and binary.
     pub plugin_dir: PathBuf,
+    /// When this entry was scanned.
     pub registered_at: SystemTime,
+    /// Whether the plugin passed validation and is usable.
     pub status: PluginStatus,
     /// Resolved runtime settings (defaults filled in). `None` if validation couldn't be attempted.
     pub runtime_config: Option<ResolvedRuntimeConfig>,
@@ -76,6 +87,6 @@ mod tests {
     fn plugin_status_display() {
         assert!(format!("{}", PluginStatus::Registered).contains("registered"));
         let invalid = PluginStatus::Invalid("missing binary".into());
-        assert!(format!("{}", invalid).contains("missing binary"));
+        assert!(format!("{invalid}").contains("missing binary"));
     }
 }

@@ -13,7 +13,7 @@ pub mod migrate;
 pub mod snapshot;
 
 // Re-export all capability traits and types
-pub use allocate::Allocate;
+pub use allocate::{Allocate, StopMode};
 pub use clone::Clone;
 pub use guest_access::{
     ExecOptions, ExecResult, GuestAccess, GuestSession, GuestStatus, TomlValue,

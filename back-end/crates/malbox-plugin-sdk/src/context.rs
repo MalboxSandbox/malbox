@@ -69,6 +69,15 @@ pub struct Context {
     inner: Arc<ContextInner>,
 }
 
+impl std::fmt::Debug for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Context")
+            .field("task_id", &self.inner.task_id)
+            .field("sample_path", &self.inner.sample_path)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Context {
     /// Create a new context with task data, a transport emitter, and an
     /// optional result channel.
@@ -118,6 +127,12 @@ impl Context {
     /// over it. Otherwise, just logs the progress.
     ///
     /// Never blocks: the result channel is unbounded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Channel`] if the result channel's mutex is poisoned
+    /// or the runtime has dropped the receiver, and
+    /// [`SdkError::Serialization`] if the progress payload cannot be encoded.
     pub fn progress(&self, pct: f64, message: &str) -> Result<()> {
         let clamped = pct.clamp(0.0, 1.0);
         info!(kind = "progress", progress = clamped, %message, "Plugin progress");
@@ -155,6 +170,10 @@ impl Context {
 
     /// Merge `{key: value}` into the task-wide shared data. Arrays are
     /// unioned with the existing value; anything else overwrites it.
+    ///
+    /// # Errors
+    ///
+    /// Fails like [`ResultSink::push`] when the result cannot be delivered.
     pub fn shared_put(&self, key: &str, value: serde_json::Value) -> Result<()> {
         let mut obj = serde_json::Map::new();
         obj.insert(key.to_string(), value);
@@ -165,6 +184,10 @@ impl Context {
     }
 
     /// Ask the daemon to skip this artifact's later stages.
+    ///
+    /// # Errors
+    ///
+    /// Fails like [`ResultSink::push`] when the result cannot be delivered.
     pub fn drop_artifact(&self) -> Result<()> {
         self.results().push(PluginResult::Json {
             name: DROP_RESULT_NAME.to_string(),
@@ -176,6 +199,10 @@ impl Context {
     ///
     /// Most plugins won't need this - it's an escape hatch for cases
     /// where you need to signal something outside the normal result flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Transport`] if the emitter fails to send the event.
     pub fn emit_event(&self, event: Event) -> Result<()> {
         self.inner.emitter.emit(event).map_err(SdkError::Transport)
     }
@@ -185,6 +212,10 @@ impl Context {
     /// For guest plugins, warnings are captured by the [`LogBus`](crate::log::LogBus)
     /// and streamed to the daemon. They appear in the log stream, not in the
     /// task report - use [`ResultSink::push`] for structured results.
+    ///
+    /// # Errors
+    ///
+    /// Never fails; the `Result` is kept for API stability.
     pub fn warn(&self, message: &str) -> Result<()> {
         warn!(kind = "warning", %message, "Plugin warning");
         Ok(())
@@ -206,7 +237,10 @@ impl Context {
     /// Close the result channel, preventing further pushes.
     ///
     /// Called by the runtime after `on_stop` to signal end-of-task.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(any(test, feature = "host")),
+        expect(dead_code, reason = "only the host runtime closes the channel")
+    )]
     pub(crate) fn close_result_channel(&self) {
         if let Ok(mut guard) = self.inner.result_tx.lock() {
             *guard = None;
@@ -222,7 +256,7 @@ impl Context {
         self.inner
             .claimed_paths
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 }
@@ -231,6 +265,15 @@ impl Context {
 /// key-value configuration submitted with the task.
 pub struct TaskInfo<'a> {
     inner: &'a ContextInner,
+}
+
+impl std::fmt::Debug for TaskInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskInfo")
+            .field("id", &self.inner.task_id)
+            .field("sample_path", &self.inner.sample_path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TaskInfo<'_> {
@@ -245,6 +288,10 @@ impl TaskInfo<'_> {
     }
 
     /// Read the entire sample file into memory. Be mindful of large samples.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Io`] if the sample file cannot be read.
     pub fn sample_bytes(&self) -> Result<Vec<u8>> {
         std::fs::read(&self.inner.sample_path).map_err(SdkError::Io)
     }
@@ -257,7 +304,7 @@ impl TaskInfo<'_> {
     /// Look up a single value from the task configuration. Returns `None`
     /// if the key is not present.
     pub fn config_value(&self, key: &str) -> Option<&str> {
-        self.inner.config.get(key).map(|s| s.as_str())
+        self.inner.config.get(key).map(String::as_str)
     }
 
     /// The orchestrator job id, when run by the daemon.

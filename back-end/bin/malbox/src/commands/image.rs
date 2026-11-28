@@ -17,7 +17,7 @@ use malbox_cli_common::utils::progress::Spinner;
                   malbox image register --name win10-x64 --platform windows --arch x64 --path /vms/win10.qcow2\n  \
                   malbox image delete win10-x64"
 )]
-pub struct ImageCommand {
+pub(crate) struct ImageCommand {
     #[command(subcommand)]
     command: ImageCommands,
 }
@@ -125,8 +125,7 @@ async fn list(api: &ApiClient) -> Result<()> {
             display_value(&img.arch),
             img.format.as_deref().unwrap_or("-").to_string(),
             img.available
-                .map(|a| if a { "yes" } else { "no" })
-                .unwrap_or("-")
+                .map_or("-", |a| if a { "yes" } else { "no" })
                 .to_string(),
         ]);
     }
@@ -144,7 +143,7 @@ async fn get(api: &ApiClient, args: GetArgs) -> Result<()> {
 
 async fn delete(ctx: &Context, args: DeleteArgs) -> Result<()> {
     let prompt = format!("Delete image '{}'?", args.name);
-    if !format::confirm(&prompt, ctx.yes) {
+    if !ctx.yes && !format::confirm(&prompt) {
         format::empty("Cancelled.");
         return Ok(());
     }

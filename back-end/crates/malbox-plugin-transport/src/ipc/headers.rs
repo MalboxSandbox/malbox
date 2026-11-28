@@ -1,6 +1,6 @@
 //! Zero-copy `#[repr(C)]` headers for IPC messages.
 //!
-//! These live in iceoryx2 user_header slots and are accessed via direct
+//! These live in iceoryx2 `user_header` slots and are accessed via direct
 //! pointer dereference from shared memory - no serialization needed.
 
 use iceoryx2::prelude::ZeroCopySend;
@@ -13,7 +13,8 @@ pub struct TaskRequestHeader {
     pub task_id: i32,
     /// 0 = Execute, 1 = Cancel.
     pub request_type: u8,
-    pub _reserved: [u8; 3],
+    /// Padding that keeps the layout explicit; always zero.
+    pub reserved: [u8; 3],
 }
 
 /// Header for task responses (plugin -> daemon via request/response).
@@ -26,7 +27,7 @@ pub struct TaskResponseHeader {
     pub kind: u8,
     /// [`ResultFormat`] discriminant.
     pub format: u8,
-    /// Bit 0: is_final, Bit 1: has_more_chunks.
+    /// Bit 0: `is_final`, Bit 1: `has_more_chunks`.
     pub flags: u8,
     /// Length of the result-name prefix in the payload (0 = no prefix).
     pub name_len: u8,
@@ -44,60 +45,125 @@ pub struct EventHeader {
     pub event_type: u16,
     /// Which plugin originated this event (0 for daemon events).
     pub source_plugin_id: i32,
-    /// Context-dependent: task_id, sample_id, etc.
+    /// Context-dependent: `task_id`, `sample_id`, etc.
     pub associated_id: i32,
-    pub _reserved: [u8; 6],
+    /// Padding that keeps the layout explicit; always zero.
+    pub reserved: [u8; 6],
 }
 
 // --- Flag constants ---
 
+/// [`TaskResponseHeader::flags`] bit marking the last frame of a task's response.
 pub const FLAG_IS_FINAL: u8 = 0b0000_0001;
+/// [`TaskResponseHeader::flags`] bit marking a chunked result with more chunks to come.
 pub const FLAG_HAS_MORE_CHUNKS: u8 = 0b0000_0010;
 
 // --- Discriminant enums ---
 
+/// What a task response frame carries; stored in [`TaskResponseHeader::kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "wire protocol discriminant matched exhaustively by malbox-plugin-internal's IPC reactor"
+)]
 pub enum ResponseKind {
+    /// A (possibly chunked) plugin result payload.
     Result = 0,
+    /// A progress update for the running task.
     Progress = 1,
+    /// The plugin is ready to accept tasks.
     Ready = 2,
+    /// The payload names a file holding the result instead of inlining it.
     FileRef = 3,
+    /// The task failed; the payload is the error message.
     Error = 4,
     /// Metadata for the next output (postcard-encoded `ArtifactMeta`).
     ArtifactMeta = 5,
 }
 
+impl From<ResponseKind> for u8 {
+    /// Wire discriminant stored in [`TaskResponseHeader::kind`].
+    #[expect(
+        clippy::as_conversions,
+        reason = "reading a fieldless repr(u8) enum discriminant requires `as`"
+    )]
+    fn from(kind: ResponseKind) -> Self {
+        kind as u8
+    }
+}
+
+/// Encoding of a result payload; stored in [`TaskResponseHeader::format`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum ResultFormat {
+    /// Opaque binary data.
     Bytes = 0,
+    /// UTF-8 JSON document.
     Json = 1,
+    /// Postcard-serialized value.
     Postcard = 2,
 }
 
+impl From<ResultFormat> for u8 {
+    /// Wire discriminant stored in [`TaskResponseHeader::format`].
+    #[expect(
+        clippy::as_conversions,
+        reason = "reading a fieldless repr(u8) enum discriminant requires `as`"
+    )]
+    fn from(format: ResultFormat) -> Self {
+        format as u8
+    }
+}
+
+/// System event carried by an [`EventHeader`]; stored in [`EventHeader::event_type`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
+#[non_exhaustive]
 pub enum EventKind {
     // Task lifecycle (associated_id = task_id)
+    /// A task was created and queued.
     TaskCreated = 0,
+    /// A task is about to begin processing.
     TaskStarting = 1,
+    /// A task finished processing.
     TaskCompleted = 2,
+    /// A task failed.
     TaskFailed = 3,
+    /// A task was canceled.
     TaskCanceled = 4,
 
     // Plugin lifecycle (associated_id = plugin_id)
+    /// A plugin started.
     PluginStarted = 10,
+    /// A plugin stopped.
     PluginStopped = 11,
 
     // Sample lifecycle (associated_id = sample_id)
+    /// A sample started.
     SampleStarted = 20,
+    /// A sample stopped.
     SampleStopped = 21,
+    /// A sample produced a result.
     SampleResultProduced = 22,
 
     // System (associated_id = 0)
+    /// The daemon is shutting down.
     DaemonShutdown = 30,
+    /// The daemon configuration was reloaded.
     ConfigReloaded = 31,
+}
+
+impl From<EventKind> for u16 {
+    /// Wire discriminant stored in [`EventHeader::event_type`].
+    #[expect(
+        clippy::as_conversions,
+        reason = "reading a fieldless repr(u16) enum discriminant requires `as`"
+    )]
+    fn from(kind: EventKind) -> Self {
+        kind as u16
+    }
 }
 
 impl TryFrom<u8> for ResponseKind {
@@ -172,7 +238,7 @@ mod tests {
     fn response_kind_roundtrip() {
         for v in 0..=5u8 {
             let kind = ResponseKind::try_from(v).unwrap();
-            assert_eq!(kind as u8, v);
+            assert_eq!(u8::from(kind), v);
         }
         assert!(ResponseKind::try_from(6).is_err());
     }
@@ -182,7 +248,7 @@ mod tests {
         let cases = [0, 1, 2, 3, 4, 10, 11, 20, 21, 22, 30, 31u16];
         for v in cases {
             let kind = EventKind::try_from(v).unwrap();
-            assert_eq!(kind as u16, v);
+            assert_eq!(u16::from(kind), v);
         }
         assert!(EventKind::try_from(99).is_err());
     }

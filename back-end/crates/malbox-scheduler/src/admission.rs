@@ -1,18 +1,18 @@
 //! Whether an artifact a plugin asked to analyse is admitted.
 
 #[derive(Debug, Clone, Copy)]
-pub struct AdmissionInput {
-    pub size_bytes: i64,
-    pub parent_depth: i32,
-    pub analysed_count: i32,
-    pub max_depth: i32,
-    pub max_artifacts: i32,
-    pub max_file_size: u64,
-    pub ignore_size: bool,
+pub(crate) struct AdmissionInput {
+    pub(crate) size_bytes: i64,
+    pub(crate) parent_depth: i32,
+    pub(crate) analysed_count: i32,
+    pub(crate) max_depth: i32,
+    pub(crate) max_artifacts: i32,
+    pub(crate) max_file_size: u64,
+    pub(crate) ignore_size: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Admission {
+pub(crate) enum Admission {
     Analyse {
         depth: i32,
     },
@@ -20,7 +20,7 @@ pub enum Admission {
     Drop(&'static str),
 }
 
-pub fn admit(a: &AdmissionInput) -> Admission {
+pub(crate) fn admit(a: &AdmissionInput) -> Admission {
     let size = u64::try_from(a.size_bytes).unwrap_or(0);
     if !a.ignore_size && size > a.max_file_size {
         return Admission::Drop("too_large");

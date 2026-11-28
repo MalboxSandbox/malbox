@@ -6,11 +6,23 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+/// Paths of the installed binaries.
+#[derive(Debug)]
 pub struct InstallResult {
+    /// Path of the installed `malboxd` daemon.
     pub daemon: PathBuf,
+    /// Path of the installed `malbox` CLI.
     pub malbox: PathBuf,
 }
 
+/// Installs `malboxd` and `malbox` into `install_dir`, downloading prebuilt archives or
+/// building the release source with `features`.
+///
+/// # Errors
+///
+/// Returns network/GitHub/checksum errors from downloads, [`InstallError::StepFailed`]
+/// when tools are missing, the build fails, or archives are malformed, and
+/// [`InstallError::Io`] for filesystem failures.
 pub async fn execute(
     source: &DaemonSource,
     features: &[String],
@@ -138,8 +150,14 @@ async fn run_cargo_build(
         .spawn()
         .step_ctx(Step::Daemon, "failed to run cargo build")?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child
+        .stdout
+        .take()
+        .expect("stdout is piped, so the child has a stdout handle");
+    let stderr = child
+        .stderr
+        .take()
+        .expect("stderr is piped, so the child has a stderr handle");
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -240,8 +258,7 @@ async fn count_cargo_packages(manifest_path: &Path) -> crate::Result<usize> {
     let count = val
         .get("packages")
         .and_then(|p| p.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, Vec::len);
     Ok(count)
 }
 
@@ -269,6 +286,9 @@ async fn host_triple() -> crate::Result<String> {
         })
 }
 
+/// Release asset architecture label for this host (e.g. `linux-x64`), or `None` when
+/// no prebuilt binaries are published for it.
+#[must_use]
 pub fn release_arch() -> Option<&'static str> {
     match (std::env::consts::ARCH, std::env::consts::OS) {
         ("x86_64", "linux") => Some("linux-x64"),

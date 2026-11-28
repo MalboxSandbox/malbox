@@ -5,7 +5,7 @@ use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
 
 #[derive(Parser)]
-pub struct CompletionCommand {
+pub(crate) struct CompletionCommand {
     #[arg(value_enum)]
     shell: Shell,
 }

@@ -26,7 +26,11 @@ pub fn set_global_log_bus(bus: Arc<LogBus>) {
 ///
 /// Returns silently if the bus has not been set (e.g. when running as a host
 /// plugin).
-fn push_log(level: LogLevel, target: *const c_char, message: *const c_char) {
+///
+/// # Safety
+///
+/// `target` and `message`, if non-null, must point to valid NUL-terminated C strings.
+unsafe fn push_log(level: LogLevel, target: *const c_char, message: *const c_char) {
     let Some(bus) = GLOBAL_LOG_BUS.get() else {
         return;
     };
@@ -34,6 +38,7 @@ fn push_log(level: LogLevel, target: *const c_char, message: *const c_char) {
     let target = if target.is_null() {
         "cpp".to_string()
     } else {
+        // SAFETY: `target` is non-null and the caller guarantees it is NUL-terminated.
         unsafe { CStr::from_ptr(target) }
             .to_str()
             .unwrap_or("cpp")
@@ -43,6 +48,7 @@ fn push_log(level: LogLevel, target: *const c_char, message: *const c_char) {
     let message = if message.is_null() {
         String::new()
     } else {
+        // SAFETY: `message` is non-null and the caller guarantees it is NUL-terminated.
         unsafe { CStr::from_ptr(message) }
             .to_str()
             .unwrap_or("")
@@ -52,7 +58,9 @@ fn push_log(level: LogLevel, target: *const c_char, message: *const c_char) {
     let timestamp_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos() as u64;
+        .as_nanos();
+    // Saturate rather than wrap; u64 nanoseconds only overflow in the year 2554.
+    let timestamp_ns = u64::try_from(timestamp_ns).unwrap_or(u64::MAX);
 
     bus.push(LogEntry {
         timestamp_ns,
@@ -83,7 +91,8 @@ pub unsafe extern "C" fn malbox_log(level: i32, target: *const c_char, message: 
         3 => LogLevel::Warn,
         _ => LogLevel::Error,
     };
-    push_log(log_level, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(log_level, target, message) };
 }
 
 /// Emit a `Trace`-level log entry.
@@ -93,7 +102,8 @@ pub unsafe extern "C" fn malbox_log(level: i32, target: *const c_char, message: 
 /// `target` and `message`, if non-null, must point to valid null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_log_trace(target: *const c_char, message: *const c_char) {
-    push_log(LogLevel::Trace, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(LogLevel::Trace, target, message) };
 }
 
 /// Emit a `Debug`-level log entry.
@@ -103,7 +113,8 @@ pub unsafe extern "C" fn malbox_log_trace(target: *const c_char, message: *const
 /// `target` and `message`, if non-null, must point to valid null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_log_debug(target: *const c_char, message: *const c_char) {
-    push_log(LogLevel::Debug, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(LogLevel::Debug, target, message) };
 }
 
 /// Emit an `Info`-level log entry.
@@ -113,7 +124,8 @@ pub unsafe extern "C" fn malbox_log_debug(target: *const c_char, message: *const
 /// `target` and `message`, if non-null, must point to valid null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_log_info(target: *const c_char, message: *const c_char) {
-    push_log(LogLevel::Info, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(LogLevel::Info, target, message) };
 }
 
 /// Emit a `Warn`-level log entry.
@@ -123,7 +135,8 @@ pub unsafe extern "C" fn malbox_log_info(target: *const c_char, message: *const 
 /// `target` and `message`, if non-null, must point to valid null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_log_warn(target: *const c_char, message: *const c_char) {
-    push_log(LogLevel::Warn, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(LogLevel::Warn, target, message) };
 }
 
 /// Emit an `Error`-level log entry.
@@ -133,7 +146,8 @@ pub unsafe extern "C" fn malbox_log_warn(target: *const c_char, message: *const 
 /// `target` and `message`, if non-null, must point to valid null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_log_error(target: *const c_char, message: *const c_char) {
-    push_log(LogLevel::Error, target, message);
+    // SAFETY: forwarded from this function's caller contract on both strings.
+    unsafe { push_log(LogLevel::Error, target, message) };
 }
 
 #[cfg(test)]
@@ -144,7 +158,8 @@ mod tests {
     #[test]
     fn push_log_without_bus_does_not_panic() {
         // GLOBAL_LOG_BUS is not set in test context — this must not panic.
-        push_log(LogLevel::Info, std::ptr::null(), std::ptr::null());
+        // SAFETY: null pointers are allowed and never dereferenced.
+        unsafe { push_log(LogLevel::Info, std::ptr::null(), std::ptr::null()) };
     }
 
     #[test]
@@ -155,6 +170,7 @@ mod tests {
         let message = CString::new("hello").unwrap();
 
         for level in [0, 1, 2, 3, 4, 99] {
+            // SAFETY: both pointers come from CStrings alive for the whole loop.
             unsafe {
                 malbox_log(level, target.as_ptr(), message.as_ptr());
             }

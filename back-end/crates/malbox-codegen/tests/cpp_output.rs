@@ -1,3 +1,5 @@
+//! Integration tests checking the C++ header emitted by the `malbox-codegen` binary.
+
 use std::io::Write;
 use std::process::Command;
 

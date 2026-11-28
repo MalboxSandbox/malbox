@@ -21,16 +21,22 @@ use crate::transport::daemon::GrpcClient;
 
 /// Format of a plugin output payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OutputFormat {
+    /// UTF-8 JSON document.
     Json,
+    /// Opaque binary data.
     Bytes,
 }
 
 /// A single named result produced by a plugin during task execution.
 #[derive(Debug, Clone)]
 pub struct PluginOutput {
+    /// Name the plugin gave this result (e.g. `report`).
     pub result_name: String,
+    /// Raw payload bytes.
     pub data: Vec<u8>,
+    /// Encoding of `data`.
     pub format: OutputFormat,
     /// Artifact metadata the plugin attached to this output, if any.
     pub artifact: Option<ArtifactMeta>,
@@ -49,6 +55,15 @@ pub struct PluginHandle {
     instance: Arc<Mutex<PluginInstance>>,
     /// Control connection for guest plugins; `None` for host plugins.
     control_client: Option<Arc<Mutex<GrpcClient>>>,
+}
+
+impl std::fmt::Debug for PluginHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginHandle")
+            .field("plugin_id", &self.plugin_id)
+            .field("has_control_client", &self.control_client.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl PluginHandle {
@@ -85,6 +100,14 @@ impl PluginHandle {
     ///
     /// `timeout` bounds the whole execution. For guest plugins, `ready` fires
     /// on the plugin's first READY message; host runtimes drop it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::Timeout`] if `timeout` elapses,
+    /// [`ManagerError::Crashed`] if the plugin disconnects mid-task,
+    /// [`ManagerError::Reported`] if the plugin reports a task error, and
+    /// [`ManagerError::ExecutionFailed`], [`ManagerError::Transport`] or
+    /// [`ManagerError::Reactor`] for dispatch or transport failures.
     #[instrument(skip_all, fields(plugin = %self.plugin_id(), task_id), err)]
     pub async fn execute_task(
         &self,
@@ -111,6 +134,10 @@ impl PluginHandle {
 
     /// Ask a guest plugin to stop observing `task_id` early. Host plugins are
     /// cancelled by killing their process, so this is a no-op for them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::Transport`] if the `StopTask` RPC fails.
     pub async fn stop_task(&self, task_id: i32) -> Result<()> {
         let Some(client) = &self.control_client else {
             return Ok(());

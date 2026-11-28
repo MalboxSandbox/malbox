@@ -10,7 +10,7 @@
 //!    analysis.
 
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
@@ -25,11 +25,11 @@ use crate::transport::grpc::proto;
 /// to a log file at `<log_dir>/<plugin_id>/<run_id>.log`.
 ///
 /// Returns the join handle for the consumer task and the path to the log file.
-pub fn spawn_log_consumer(
+pub(crate) fn spawn_log_consumer(
     plugin_id: PluginId,
     mut stream: tonic::Streaming<proto::LogEntry>,
-    log_dir: PathBuf,
-    run_id: String,
+    log_dir: &Path,
+    run_id: &str,
 ) -> (JoinHandle<()>, PathBuf) {
     let dir = log_dir.join(plugin_id.as_str());
     let log_file_path = dir.join(format!("{run_id}.log"));

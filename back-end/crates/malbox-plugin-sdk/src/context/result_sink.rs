@@ -20,7 +20,7 @@ use super::{ContextInner, ResultSender, lock_or_err};
 use crate::stash::StashFormat;
 
 /// Largest file result sent inline when no stash is available.
-pub const HOST_FILE_RESULT_MAX_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const HOST_FILE_RESULT_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Handle for pushing results back to the daemon during task execution.
 ///
@@ -29,6 +29,14 @@ pub const HOST_FILE_RESULT_MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// outside of one returns an error.
 pub struct ResultSink<'a> {
     pub(super) inner: &'a ContextInner,
+}
+
+impl std::fmt::Debug for ResultSink<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResultSink")
+            .field("task_id", &self.inner.task_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ResultSink<'_> {
@@ -117,6 +125,10 @@ impl ResultSink<'_> {
     }
 
     /// Push a JSON result (raw bytes that are already JSON-encoded).
+    ///
+    /// # Errors
+    ///
+    /// Fails like [`push`](Self::push).
     pub fn push_json(&self, name: &str, data: &[u8]) -> Result<()> {
         self.push(PluginResult::Json {
             name: name.into(),
@@ -125,6 +137,10 @@ impl ResultSink<'_> {
     }
 
     /// Push a raw byte result.
+    ///
+    /// # Errors
+    ///
+    /// Fails like [`push`](Self::push).
     pub fn push_bytes(&self, name: &str, data: &[u8]) -> Result<()> {
         self.push(PluginResult::Bytes {
             name: name.into(),
@@ -133,6 +149,11 @@ impl ResultSink<'_> {
     }
 
     /// Push a file result by path.
+    ///
+    /// # Errors
+    ///
+    /// Fails like [`push`](Self::push), including `SdkError::Io` when the
+    /// file cannot be read.
     pub fn push_file(&self, name: &str, path: impl AsRef<Path>) -> Result<()> {
         self.push(PluginResult::File {
             name: name.into(),
@@ -143,6 +164,10 @@ impl ResultSink<'_> {
     /// Push a batch of results. Results are sent one at a time in order;
     /// if one fails, the remaining results are not sent and the error is
     /// returned. Results sent before the failure are not rolled back.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error from [`push`](Self::push).
     pub fn push_all(&self, results: Vec<PluginResult>) -> Result<()> {
         for result in results {
             self.push(result)?;
@@ -220,7 +245,7 @@ impl ResultSink<'_> {
     #[cfg(feature = "guest")]
     fn classify_and_build(&self, result: PluginResult) -> Result<TaskResultMessage> {
         let Some(stash) = self.inner.stash.as_ref() else {
-            return match classify_result(result)? {
+            return match classify_result(result) {
                 Classified::Inline { name, data, format } => {
                     Ok(self.inline_message(name, data, format))
                 }
@@ -229,15 +254,15 @@ impl ResultSink<'_> {
         };
         let threshold = stash.config().threshold_bytes;
 
-        match classify_result(result)? {
+        match classify_result(result) {
             Classified::Inline { name, data, format } if data.len() < threshold => {
                 Ok(self.inline_message(name, data, format))
             }
             Classified::Inline { name, data, format } => {
                 let stash_format = result_format_to_stash(format);
-                let size_bytes = data.len() as u64;
+                let size_bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
                 let handle =
-                    stash.insert_bytes(self.inner.task_id, name.clone(), stash_format, data)?;
+                    stash.insert_bytes(self.inner.task_id, name.clone(), stash_format, &data)?;
                 Ok(build_ref_message(
                     self.inner.task_id,
                     handle,
@@ -265,7 +290,7 @@ impl ResultSink<'_> {
 
     #[cfg(not(feature = "guest"))]
     fn classify_and_build(&self, result: PluginResult) -> Result<TaskResultMessage> {
-        match classify_result(result)? {
+        match classify_result(result) {
             Classified::Inline { name, data, format } => {
                 Ok(self.inline_message(name, data, format))
             }
@@ -300,23 +325,23 @@ pub(crate) enum Classified {
 }
 
 /// Classify a `PluginResult` into inline bytes vs a file path.
-pub(crate) fn classify_result(result: PluginResult) -> Result<Classified> {
+pub(crate) fn classify_result(result: PluginResult) -> Classified {
     match result {
-        PluginResult::Json { name, data } => Ok(Classified::Inline {
+        PluginResult::Json { name, data } => Classified::Inline {
             name,
             data,
             format: ResultFormat::Json,
-        }),
-        PluginResult::Bytes { name, data } => Ok(Classified::Inline {
+        },
+        PluginResult::Bytes { name, data } => Classified::Inline {
             name,
             data,
             format: ResultFormat::Bytes,
-        }),
-        PluginResult::File { name, path } => Ok(Classified::File {
+        },
+        PluginResult::File { name, path } => Classified::File {
             name,
             path,
             format: ResultFormat::Bytes,
-        }),
+        },
     }
 }
 
@@ -415,7 +440,7 @@ mod tests {
                 tmp.path().join("_stash"),
                 StashConfig {
                     threshold_bytes: 10,
-                    ttl: std::time::Duration::from_secs(60),
+                    ttl: std::time::Duration::from_mins(1),
                 },
             )
             .unwrap(),
@@ -454,7 +479,7 @@ mod tests {
                 tmp.path().join("_stash"),
                 StashConfig {
                     threshold_bytes: 1024,
-                    ttl: std::time::Duration::from_secs(60),
+                    ttl: std::time::Duration::from_mins(1),
                 },
             )
             .unwrap(),
@@ -494,7 +519,7 @@ mod tests {
                 tmp.path().join("_stash"),
                 StashConfig {
                     threshold_bytes: 1024 * 1024,
-                    ttl: std::time::Duration::from_secs(60),
+                    ttl: std::time::Duration::from_mins(1),
                 },
             )
             .unwrap(),

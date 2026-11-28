@@ -14,17 +14,17 @@ use malbox_database::repositories::{
     tasks::Task,
 };
 use malbox_scheduler::{NewSubmission, SubmissionParams, create_task as orchestrator_create_task};
-use malbox_utils::hashing::*;
+use malbox_utils::hashing::{get_crc32, get_md5, get_sha1, get_sha256, get_sha512};
 use malbox_utils::identify::{Identification, identify};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use tracing::info;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/tasks", post(create_task))
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 10000000))
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 10_000_000))
 }
 
 /// Created-task response. The FE reads `task_id` and `sample.sha256`.
@@ -86,7 +86,10 @@ impl StringList {
 #[serde(rename_all = "snake_case")]
 // `Url`/`Hash` payloads are deserialized to preserve the request contract but
 // not yet consumed (ingestion is unimplemented); they are rejected at runtime.
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "Url/Hash payloads are parsed but ingestion is unimplemented"
+)]
 enum TaskSource {
     SampleId(i64),
     Url(String),
@@ -139,12 +142,12 @@ where
         if content_type.starts_with("multipart/form-data") {
             let TypedMultipart(fields) = TypedMultipart::<UploadFields>::from_request(req, state)
                 .await
-                .map_err(|e| e.into_response())?;
+                .map_err(IntoResponse::into_response)?;
             Ok(CreateTaskBody::Upload(fields))
         } else if content_type.starts_with("application/json") {
             let Json(body) = Json::<ReferenceBody>::from_request(req, state)
                 .await
-                .map_err(|e| e.into_response())?;
+                .map_err(IntoResponse::into_response)?;
             Ok(CreateTaskBody::Reference(body))
         } else {
             Err((
@@ -232,16 +235,13 @@ pub(super) async fn submit(
             parsed
         }
     };
-    let snapshot_id = match opts.snapshot_id.as_deref() {
-        None => None,
-        Some(s) => match uuid::Uuid::parse_str(s) {
-            Ok(id) => Some(id),
-            Err(_) => {
-                push_error(&mut errors, "snapshot_id", "invalid uuid");
-                None
-            }
-        },
-    };
+    let snapshot_id = opts.snapshot_id.as_deref().and_then(|s| {
+        let parsed = uuid::Uuid::parse_str(s).ok();
+        if parsed.is_none() {
+            push_error(&mut errors, "snapshot_id", "invalid uuid");
+        }
+        parsed
+    });
     if let Some(machine_id) = opts.machine_id
         && fetch_machine(&state.pool, machine_id)
             .await
@@ -285,7 +285,7 @@ pub(super) async fn submit(
         },
     )
     .await
-    .map_err(|e| Error::Internal(format!("Failed to create task: {}", e)))?;
+    .map_err(|e| Error::Internal(format!("Failed to create task: {e}")))?;
 
     tracing::Span::current().record("task_id", task.id);
     state.orchestrator.submit(task.id);
@@ -309,7 +309,7 @@ pub(super) fn created_response(task: &Task, root: &TaskArtifact, sample: SampleE
 pub(super) async fn identify_blocking(data: Bytes, name: Option<String>) -> Result<Identification> {
     tokio::task::spawn_blocking(move || identify(&data, name.as_deref()))
         .await
-        .map_err(|e| Error::Internal(format!("identification task failed: {}", e)))
+        .map_err(|e| Error::Internal(format!("identification task failed: {e}")))
 }
 
 async fn create_from_upload(state: &AppState, request: UploadFields) -> Result<Response> {
@@ -330,7 +330,7 @@ async fn create_from_upload(state: &AppState, request: UploadFields) -> Result<R
     let (sample, identification) = tokio::task::spawn_blocking(move || {
         let identification = identify(&contents, Some(&name_for_identify));
         let sample = Sample {
-            file_size: contents.len() as i64,
+            file_size: i64::try_from(contents.len()).expect("in-memory buffer length fits in i64"),
             file_type: identification.description.clone(),
             md5: get_md5(&contents),
             crc32: get_crc32(&contents),
@@ -342,17 +342,17 @@ async fn create_from_upload(state: &AppState, request: UploadFields) -> Result<R
         (sample, identification)
     })
     .await
-    .map_err(|e| Error::Internal(format!("hashing task failed: {}", e)))?;
+    .map_err(|e| Error::Internal(format!("hashing task failed: {e}")))?;
 
     state
         .sample_store
         .store(&sample.sha256, &request.file.contents)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to store sample file: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to store sample file: {e}")))?;
 
     let sample = insert_sample(&state.pool, sample)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to insert sample: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to insert sample: {e}")))?;
 
     let target = request.target_filename.clone().unwrap_or(file_name);
     let opts = SubmitOptions {
@@ -387,7 +387,7 @@ async fn create_from_sample(
 ) -> Result<Response> {
     let sample = fetch_sample_by_id(&state.pool, sample_id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch sample: {}", e)))?
+        .map_err(|e| Error::Internal(format!("Failed to fetch sample: {e}")))?
         .ok_or(Error::NotFound)?;
 
     let missing =
@@ -396,14 +396,14 @@ async fn create_from_sample(
         .sample_store
         .exists(&sample.sha256)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to check sample store: {}", e)))?
+        .map_err(|e| Error::Internal(format!("Failed to check sample store: {e}")))?
     {
         return Err(missing());
     }
     let path = state
         .sample_store
         .path(&sample.sha256)
-        .map_err(|e| Error::Internal(format!("Failed to resolve sample path: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to resolve sample path: {e}")))?;
     let data = tokio::fs::read(&path).await.map_err(|_| missing())?;
 
     let target = options

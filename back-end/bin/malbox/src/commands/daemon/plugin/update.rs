@@ -6,10 +6,10 @@ use malbox_cli_common::error::{CliError, Result};
 use malbox_plugin_registry::client::RegistryClient;
 use malbox_plugin_registry::lockfile::{Lockfile, PinKind};
 use malbox_plugin_registry::resolve::Platform;
-use malbox_plugin_registry::update::update_plugin;
+use malbox_plugin_registry::update::{UpdateMode, update_plugin};
 
 #[derive(Parser)]
-pub struct UpdateCommand {
+pub(crate) struct UpdateCommand {
     /// Plugin name to update (updates all if omitted)
     name: Option<String>,
 
@@ -41,17 +41,7 @@ impl Command for UpdateCommand {
 
         println!("  \u{25b8} Checking for updates...\n");
 
-        let plugin_names: Vec<String> = if let Some(ref name) = self.name {
-            if !lockfile.plugins.contains_key(name) {
-                return Err(CliError::CommandFailed(format!(
-                    "plugin '{}' is not installed or not tracked",
-                    name
-                )));
-            }
-            vec![name.clone()]
-        } else {
-            lockfile.plugins.keys().cloned().collect()
-        };
+        let plugin_names = self.target_names(&lockfile)?;
 
         let is_single = self.name.is_some();
         let mut updated_count = 0usize;
@@ -60,14 +50,16 @@ impl Command for UpdateCommand {
         for name in &plugin_names {
             if matches!(lockfile.plugins[name].pin, PinKind::Local) {
                 println!(
-                    "  {:<20} local - skipped (reinstall with `malbox daemon plugin install <path>`)",
-                    name
+                    "  {name:<20} local - skipped (reinstall with `malbox daemon plugin install <path>`)"
                 );
                 continue;
             }
-
-            match update_plugin(name, &lockfile, &client, plugins_dir, &platform, self.force).await
-            {
+            let mode = if self.force {
+                UpdateMode::Force
+            } else {
+                UpdateMode::IfNewer
+            };
+            match update_plugin(name, &lockfile, &client, plugins_dir, &platform, mode).await {
                 Ok(outcome) if outcome.updated => {
                     println!(
                         "  {:<20} {} \u{2192} {}   updated",
@@ -91,9 +83,16 @@ impl Command for UpdateCommand {
                         )
                     };
 
-                    if is_single && confirm_reinstall(&prompt, self.force || ctx.yes) {
-                        match update_plugin(name, &lockfile, &client, plugins_dir, &platform, true)
-                            .await
+                    if is_single && (self.force || ctx.yes || confirm_reinstall(&prompt)) {
+                        match update_plugin(
+                            name,
+                            &lockfile,
+                            &client,
+                            plugins_dir,
+                            &platform,
+                            UpdateMode::Force,
+                        )
+                        .await
                         {
                             Ok(o2) => {
                                 println!(
@@ -102,36 +101,56 @@ impl Command for UpdateCommand {
                                 );
                                 updated_count += 1;
                             }
-                            Err(e) => println!("  {:<20} error: {}", name, e),
+                            Err(e) => println!("  {name:<20} error: {e}"),
                         }
                     } else {
                         println!("  {:<20} {:<20}   up to date", name, outcome.old_version);
                         up_to_date_count += 1;
                     }
                 }
-                Err(e) => {
-                    println!("  {:<20} error: {}", name, e);
-                }
+                Err(e) => println!("  {name:<20} error: {e}"),
             }
         }
 
-        let untracked = lockfile
-            .untracked_plugins(plugins_dir)
-            .map_err(|e| CliError::CommandFailed(e.to_string()))?;
-        if !untracked.is_empty() {
-            println!(
-                "\n  \u{26a0} {} untracked plugin(s) skipped: {}",
-                untracked.len(),
-                untracked.join(", ")
-            );
-            println!("    Re-install with `malbox daemon plugin install` to enable updates.");
-        }
+        report_untracked(&lockfile, plugins_dir)?;
 
         println!(
-            "\n  \u{2713} {} plugin(s) updated, {} already up to date",
-            updated_count, up_to_date_count
+            "\n  \u{2713} {updated_count} plugin(s) updated, {up_to_date_count} already up to date"
         );
 
         Ok(())
     }
+}
+
+impl UpdateCommand {
+    /// Plugins this run should update: the named one (which must be tracked)
+    /// or every plugin in the lockfile.
+    fn target_names(&self, lockfile: &Lockfile) -> Result<Vec<String>> {
+        if let Some(name) = &self.name {
+            if !lockfile.plugins.contains_key(name) {
+                return Err(CliError::CommandFailed(format!(
+                    "plugin '{name}' is not installed or not tracked"
+                )));
+            }
+            Ok(vec![name.clone()])
+        } else {
+            Ok(lockfile.plugins.keys().cloned().collect())
+        }
+    }
+}
+
+/// Lists plugins present on disk but absent from the lockfile, which updates skip.
+fn report_untracked(lockfile: &Lockfile, plugins_dir: &std::path::Path) -> Result<()> {
+    let untracked = lockfile
+        .untracked_plugins(plugins_dir)
+        .map_err(|e| CliError::CommandFailed(e.to_string()))?;
+    if !untracked.is_empty() {
+        println!(
+            "\n  \u{26a0} {} untracked plugin(s) skipped: {}",
+            untracked.len(),
+            untracked.join(", ")
+        );
+        println!("    Re-install with `malbox daemon plugin install` to enable updates.");
+    }
+    Ok(())
 }

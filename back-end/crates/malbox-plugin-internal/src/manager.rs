@@ -7,11 +7,11 @@
 
 pub mod error;
 pub mod handle;
-pub mod health;
-pub mod instance;
+mod health;
+mod instance;
 pub mod ipc_reactor;
-pub mod log_router;
-pub mod runtime;
+mod log_router;
+mod runtime;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,14 +47,31 @@ pub struct PluginManager {
     ipc: IpcReactorHandle,
     log_dir: PathBuf,
     /// Held to keep the background health-check task alive for the lifetime of the manager.
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "owned only to tie the health-check task's lifetime to the manager"
+    )]
     health_check_handle: JoinHandle<()>,
     token: CancellationToken,
+}
+
+impl std::fmt::Debug for PluginManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginManager")
+            .field("instances", &self.instances.len())
+            .field("log_dir", &self.log_dir)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PluginManager {
     /// Create a new plugin manager, spawning all persistent host plugins and
     /// starting the background health check loop.
+    ///
+    /// # Errors
+    ///
+    /// Currently never fails: persistent plugins that fail to spawn are logged
+    /// and skipped rather than aborting manager startup.
     #[instrument(skip_all, err)]
     pub async fn new(
         registry: Arc<PluginRegistry>,
@@ -74,7 +91,7 @@ impl PluginManager {
 
             if is_persistent && is_host {
                 info!(plugin = %entry.id, "spawning persistent host plugin");
-                match spawn_host_plugin(entry, ipc.clone()).await {
+                match spawn_host_plugin(entry, ipc.clone()) {
                     Ok(instance) => {
                         instances.insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
                     }
@@ -117,6 +134,16 @@ impl PluginManager {
     /// A persistent instance found in [`Failed`](PluginLifecycle::Failed) is
     /// restarted once and the call returns [`ManagerError::PluginBusy`]; the
     /// health loop promotes the new instance to `Ready`.
+    ///
+    /// # Errors
+    ///
+    /// - [`ManagerError::PluginNotFound`] if the plugin is not registered or a
+    ///   persistent plugin has no running instance.
+    /// - [`ManagerError::PluginBusy`] if the instance is not ready or was just
+    ///   restarted after failing.
+    /// - [`ManagerError::SpawnFailed`] if an ephemeral or restarted process
+    ///   cannot be spawned.
+    /// - [`ManagerError::ScopedNotImplemented`] for scoped plugins.
     pub async fn acquire(&self, plugin_id: &PluginId, task_id: i32) -> Result<PluginHandle> {
         let snapshot = self.registry.snapshot();
         let entry = snapshot
@@ -161,7 +188,7 @@ impl PluginManager {
                 // ExceedsMaxSupportedServers.
                 self.ipc.cleanup_dead_nodes().await;
 
-                let mut instance = spawn_host_plugin(entry, self.ipc.clone()).await?;
+                let mut instance = spawn_host_plugin(entry, self.ipc.clone())?;
                 instance.lifecycle = PluginLifecycle::Ready;
                 instance.lifecycle = PluginLifecycle::Busy { task_id };
 
@@ -181,6 +208,11 @@ impl PluginManager {
     /// Forcefully stop the process behind a handle (cancellation, timeout or
     /// crash). Persistent host plugins are respawned. Guest handles are just
     /// released.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`restart_persistent`](Self::restart_persistent) error if a
+    /// persistent host plugin cannot be respawned.
     pub async fn kill_handle(&self, handle: PluginHandle) -> Result<()> {
         let mut instance = handle.instance().lock().await;
         let PluginRuntime::Host(host) = &mut instance.runtime else {
@@ -202,6 +234,11 @@ impl PluginManager {
 
     /// Respawn a persistent host plugin, replacing its instance entry with a
     /// fresh `Starting` instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagerError::PluginNotFound`] if the plugin is not registered,
+    /// or [`ManagerError::SpawnFailed`] if the process cannot be spawned.
     pub async fn restart_persistent(&self, plugin_id: &PluginId) -> Result<()> {
         let snapshot = self.registry.snapshot();
         let entry = snapshot
@@ -210,7 +247,7 @@ impl PluginManager {
 
         self.ipc.remove_channels(plugin_id.clone());
         self.ipc.cleanup_dead_nodes().await;
-        let instance = spawn_host_plugin(entry, self.ipc.clone()).await?;
+        let instance = spawn_host_plugin(entry, self.ipc.clone())?;
         self.instances
             .insert(plugin_id.clone(), Arc::new(Mutex::new(instance)));
         info!(plugin = %plugin_id, "persistent plugin restarted");
@@ -223,6 +260,12 @@ impl PluginManager {
     /// [`PluginInstance`] in the [`Ready`](PluginLifecycle::Ready) state.
     /// Returns a [`PluginHandle`] that the caller owns exclusively, bypassing
     /// the shared instances map to avoid contention between parallel tasks.
+    ///
+    /// # Errors
+    ///
+    /// - [`ManagerError::PluginNotFound`] if the plugin is not registered.
+    /// - [`ManagerError::Transport`] if connecting or the `Initialize` RPC fails.
+    /// - [`ManagerError::ExecutionFailed`] if the guest reports initialization failure.
     #[instrument(skip_all, fields(plugin = %plugin_id, addr = %addr), err)]
     pub async fn register_guest(&self, plugin_id: &PluginId, addr: String) -> Result<PluginHandle> {
         let snapshot = self.registry.snapshot();
@@ -258,10 +301,7 @@ impl PluginManager {
         let mut instance = PluginInstance {
             entry: Arc::clone(entry),
             lifecycle: PluginLifecycle::Ready,
-            runtime: PluginRuntime::Guest(GuestRuntime {
-                grpc_client,
-                control_client: Arc::clone(&control_client),
-            }),
+            runtime: PluginRuntime::Guest(GuestRuntime { grpc_client }),
             started_at: Some(Instant::now()),
             last_health_check: None,
             log_file_path: None,
@@ -269,7 +309,11 @@ impl PluginManager {
 
         // Start consuming the guest plugin's log stream in the background.
         if let PluginRuntime::Guest(guest) = &mut instance.runtime {
-            match guest.grpc_client.stream_logs(true).await {
+            match guest
+                .grpc_client
+                .stream_logs(crate::transport::daemon::LogReplay::IncludeBuffered)
+                .await
+            {
                 Ok(stream) => {
                     let run_id = format!(
                         "{}",
@@ -278,9 +322,12 @@ impl PluginManager {
                             .unwrap_or_default()
                             .as_millis()
                     );
-                    let log_dir = self.log_dir.clone();
-                    let (_handle, log_path) =
-                        log_router::spawn_log_consumer(plugin_id.clone(), stream, log_dir, run_id);
+                    let (_handle, log_path) = log_router::spawn_log_consumer(
+                        plugin_id.clone(),
+                        stream,
+                        &self.log_dir,
+                        &run_id,
+                    );
                     instance.log_file_path = Some(log_path);
                     debug!(plugin = %plugin_id, "log stream consumer started");
                 }
@@ -356,7 +403,7 @@ impl PluginManager {
 
             if is_persistent && is_host && !self.instances.contains_key(&entry.id) {
                 info!(plugin = %entry.id, "spawning newly discovered persistent host plugin");
-                match spawn_host_plugin(entry, self.ipc.clone()).await {
+                match spawn_host_plugin(entry, self.ipc.clone()) {
                     Ok(instance) => {
                         self.instances
                             .insert(entry.id.clone(), Arc::new(Mutex::new(instance)));
@@ -413,7 +460,7 @@ impl PluginManager {
 ///
 /// The returned instance is in the [`Starting`](PluginLifecycle::Starting)
 /// state with the process handle attached.
-async fn spawn_host_plugin(entry: &PluginEntry, ipc: IpcReactorHandle) -> Result<PluginInstance> {
+fn spawn_host_plugin(entry: &PluginEntry, ipc: IpcReactorHandle) -> Result<PluginInstance> {
     let child = tokio::process::Command::new(&entry.binary_path)
         .env("MALBOX_PLUGIN_ID", entry.id.as_str())
         .kill_on_drop(true)

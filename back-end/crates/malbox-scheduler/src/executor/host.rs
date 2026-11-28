@@ -20,21 +20,23 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 type BusyPlugins = Arc<Mutex<HashSet<String>>>;
 
 fn busy_lock(busy: &BusyPlugins) -> std::sync::MutexGuard<'_, HashSet<String>> {
-    busy.lock().unwrap_or_else(|e| e.into_inner())
+    busy.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub(crate) async fn run(shared: Arc<Shared>, runner: Arc<dyn HostJobRunner>) {
     let busy: BusyPlugins = Arc::default();
     let mut inflight = JoinSet::new();
     let mut interval = tokio::time::interval(POLL_INTERVAL);
-    let notify = shared.executors.host_notify().clone();
-    let concurrency = shared.core.settings.host_concurrency.max(1) as usize;
+    let notify = Arc::clone(shared.executors.host_notify());
+    let concurrency =
+        usize::try_from(shared.core.settings.host_concurrency.max(1)).unwrap_or(usize::MAX);
     let per_task = i64::from(shared.core.settings.max_running_jobs_per_task.max(1));
 
     loop {
         tokio::select! {
-            _ = shared.token.cancelled() => break,
-            _ = notify.notified() => {}
+            () = shared.token.cancelled() => break,
+            () = notify.notified() => {}
             _ = interval.tick() => {}
             Some(_) = inflight.join_next() => {}
         }
@@ -46,7 +48,12 @@ pub(crate) async fn run(shared: Arc<Shared>, runner: Arc<dyn HostJobRunner>) {
                 Ok(Some(job)) => {
                     debug!(job_id = job.id, analyzer = %job.analyzer, "claimed host job");
                     busy_lock(&busy).insert(job.analyzer.clone());
-                    inflight.spawn(run_one(shared.clone(), runner.clone(), job, busy.clone()));
+                    inflight.spawn(run_one(
+                        Arc::clone(&shared),
+                        Arc::clone(&runner),
+                        job,
+                        Arc::clone(&busy),
+                    ));
                 }
                 Ok(None) => break,
                 Err(e) => {

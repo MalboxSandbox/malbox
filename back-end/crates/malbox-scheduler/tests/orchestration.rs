@@ -3,6 +3,12 @@
 //! Gated on `MALBOX_TEST_DATABASE_URL` (an admin URL); each test creates and
 //! drops its own `malbox_test_{uuid}` database.
 
+#![expect(clippy::unwrap_used, reason = "test code: failures should panic")]
+#![expect(
+    clippy::print_stdout,
+    reason = "test harness reports skipped database tests on stdout"
+)]
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -281,10 +287,10 @@ fn report(plugin: &str, labels: &[&str]) -> PluginOutput {
     }
 }
 
-fn shared(value: serde_json::Value) -> PluginOutput {
+fn shared(value: &serde_json::Value) -> PluginOutput {
     PluginOutput {
         result_name: "malbox.shared".into(),
-        data: serde_json::to_vec(&value).unwrap(),
+        data: serde_json::to_vec(value).unwrap(),
         format: OutputFormat::Json,
         artifact: None,
     }
@@ -415,7 +421,7 @@ impl Env {
         let sample = samples::insert_sample(
             self.pool(),
             Sample {
-                file_size: data.len() as i64,
+                file_size: i64::try_from(data.len()).expect("test sample fits in i64"),
                 file_type: "fake".into(),
                 md5: hashing::get_md5(data),
                 crc32: hashing::get_crc32(data),
@@ -668,7 +674,11 @@ async fn self_extraction_breaks_loop() {
         }
     });
     let run = env
-        .start(zip_routing(), host.clone(), FakeDetonationRunner::none())
+        .start(
+            zip_routing(),
+            Arc::clone(&host),
+            FakeDetonationRunner::none(),
+        )
         .await;
     let task_id = env
         .submit(&run, ZIP, "a.zip", SubmissionParams::default())
@@ -784,7 +794,11 @@ async fn cache_hit_replays_children() {
     };
     let host = FakeHostRunner::new(extract_two);
     let run = env
-        .start(zip_routing(), host.clone(), FakeDetonationRunner::none())
+        .start(
+            zip_routing(),
+            Arc::clone(&host),
+            FakeDetonationRunner::none(),
+        )
         .await;
 
     let first = env
@@ -894,7 +908,7 @@ async fn detonation_budget_by_interest() {
         vec![spec("extractor", Stage::Extract, "archive/zip")],
         vec![profile("dyn", "executable/.*|code/.*")],
     );
-    let run = env.start(routing, host, detonation.clone()).await;
+    let run = env.start(routing, host, Arc::clone(&detonation)).await;
     let params = SubmissionParams {
         max_detonations: Some(2),
         ..Default::default()
@@ -1001,7 +1015,7 @@ async fn monitored_key_rerun() {
             b"MZ x",
             ArtifactRelation::Extracted,
         )]),
-        ("pw", _, _) => Reply::Outputs(vec![shared(json!({"passwords": ["x"]}))]),
+        ("pw", _, _) => Reply::Outputs(vec![shared(&json!({"passwords": ["x"]}))]),
         _ => Reply::Outputs(vec![]),
     });
     let routing = routing(
@@ -1015,7 +1029,7 @@ async fn monitored_key_rerun() {
         vec![],
     );
     let run = env
-        .start(routing, host.clone(), FakeDetonationRunner::none())
+        .start(routing, Arc::clone(&host), FakeDetonationRunner::none())
         .await;
     let task_id = env
         .submit(&run, ZIP, "a.zip", SubmissionParams::default())
@@ -1072,7 +1086,7 @@ async fn restart_recovers_running_job() {
     let run = env
         .start(
             routing(vec![spec("pe", Stage::Static, "executable/.*")], vec![]),
-            host.clone(),
+            Arc::clone(&host),
             FakeDetonationRunner::none(),
         )
         .await;

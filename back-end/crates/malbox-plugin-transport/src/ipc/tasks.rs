@@ -1,7 +1,7 @@
 //! Request/response task service for daemon -> plugin dispatch.
 //!
 //! Service name: `malbox/plugin/{plugin_id}/tasks`
-//! Pattern: request_response::<[u8], [u8]>() with user headers on both sides.
+//! Pattern: `request_response::<[u8], [u8]>()` with user headers on both sides.
 //!
 //! The daemon is the client, the plugin is the server. Supports streaming
 //! multiple responses per request (chunked results, progress, final marker).
@@ -27,6 +27,7 @@ fn task_service_name(plugin_id: &str) -> String {
 }
 
 /// Daemon-side client for dispatching tasks to a plugin.
+#[derive(Debug)]
 pub struct TaskClient {
     client: iceoryx2::port::client::Client<
         IpcServiceType,
@@ -38,6 +39,11 @@ pub struct TaskClient {
 }
 
 impl TaskClient {
+    /// Open (or create) the plugin's task service and attach a request client.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service or client cannot be created.
     pub fn new(node: &Node<IpcServiceType>, plugin_id: &str) -> Result<Self> {
         let service = open_or_create_task_service(node, plugin_id)?;
 
@@ -53,8 +59,12 @@ impl TaskClient {
 
     /// Send a task request. Returns a handle to receive streamed responses.
     ///
-    /// `header` contains task_id and request_type.
-    /// `payload` is postcard-serialized TaskRequestPayload.
+    /// `header` contains `task_id` and `request_type`.
+    /// `payload` is postcard-serialized `TaskRequestPayload`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if loaning or sending the request fails.
     pub fn send(&self, header: &TaskRequestHeader, payload: &[u8]) -> Result<TaskPendingResponse> {
         let mut request = self
             .client
@@ -74,6 +84,7 @@ impl TaskClient {
 }
 
 /// Handle for receiving streamed responses from a dispatched task.
+#[derive(Debug)]
 pub struct TaskPendingResponse {
     pending: iceoryx2::pending_response::PendingResponse<
         IpcServiceType,
@@ -87,6 +98,10 @@ pub struct TaskPendingResponse {
 impl TaskPendingResponse {
     /// Non-blocking receive of the next response chunk.
     /// Returns None if no response is available yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the pending response fails.
     pub fn try_recv(&self) -> Result<Option<TaskResponse>> {
         match self
             .pending
@@ -109,12 +124,16 @@ impl TaskPendingResponse {
 }
 
 /// A received response with header and payload data.
+#[derive(Debug)]
 pub struct TaskResponse {
+    /// Response header copied out of the shared-memory sample.
     pub header: TaskResponseHeader,
+    /// Response payload bytes copied out of the sample.
     pub payload: Vec<u8>,
 }
 
 /// Plugin-side server for receiving task requests.
+#[derive(Debug)]
 pub struct TaskServer {
     server: Server<IpcServiceType, [u8], TaskRequestHeader, [u8], TaskResponseHeader>,
     /// Shared with every [`ActiveTaskRequest`] so each response chunk can
@@ -123,6 +142,13 @@ pub struct TaskServer {
 }
 
 impl TaskServer {
+    /// Open (or create) the plugin's task service and attach the request
+    /// server plus the daemon wakeup notifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service, server, or notifier
+    /// cannot be created.
     pub fn new(node: &Node<IpcServiceType>, plugin_id: &str) -> Result<Self> {
         let service = open_or_create_task_service(node, plugin_id)?;
 
@@ -142,6 +168,10 @@ impl TaskServer {
     }
 
     /// Non-blocking receive of a pending task request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the server fails.
     pub fn receive(&self) -> Result<Option<ActiveTaskRequest>> {
         match self
             .server
@@ -159,6 +189,7 @@ impl TaskServer {
 
 /// An active request the plugin is handling. Dropping this signals
 /// to the client that no more responses will be sent.
+#[derive(Debug)]
 pub struct ActiveTaskRequest {
     active_request: iceoryx2::active_request::ActiveRequest<
         IpcServiceType,
@@ -171,7 +202,7 @@ pub struct ActiveTaskRequest {
 }
 
 impl ActiveTaskRequest {
-    /// Access the request header (task_id, request_type).
+    /// Access the request header (`task_id`, `request_type`).
     pub fn header(&self) -> &TaskRequestHeader {
         self.active_request.user_header()
     }
@@ -189,12 +220,18 @@ impl ActiveTaskRequest {
     /// Send a response, automatically chunking payloads that exceed the
     /// IPC buffer capacity. Retries on transient `OutOfMemory` (buffer
     /// backpressure) with a bounded retry window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if a chunk cannot be loaned or sent
+    /// within the retry window.
     pub fn send_response(&self, header: &TaskResponseHeader, payload: &[u8]) -> Result<()> {
         if payload.len() <= CHUNK_SIZE {
             return self.send_response_single(header, payload);
         }
 
-        let total_size = payload.len() as u64;
+        let total_size =
+            u64::try_from(payload.len()).map_err(|e| TransportError::Ipc(Box::new(e)))?;
         let mut offset = 0usize;
         let mut chunk_index = 0u32;
 
@@ -304,7 +341,7 @@ mod tests {
         let req_header = TaskRequestHeader {
             task_id: 42,
             request_type: 0,
-            _reserved: [0; 3],
+            reserved: [0; 3],
         };
         let payload = b"hello-request";
 
@@ -351,7 +388,7 @@ mod tests {
         let req_header = TaskRequestHeader {
             task_id: 1,
             request_type: 0,
-            _reserved: [0; 3],
+            reserved: [0; 3],
         };
         let pending = client.send(&req_header, b"go").expect("send");
 
@@ -367,7 +404,8 @@ mod tests {
                 chunk_index: i,
                 total_size: 0,
             };
-            active.send_response(&h, &[i as u8; 4]).expect("chunk");
+            let fill = u8::try_from(i).expect("loop index is below 3");
+            active.send_response(&h, &[fill; 4]).expect("chunk");
         }
 
         let final_h = TaskResponseHeader {

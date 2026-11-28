@@ -1,4 +1,4 @@
-pub mod create;
-pub mod delete;
-pub mod get;
-pub mod update;
+pub(crate) mod create;
+pub(crate) mod delete;
+pub(crate) mod get;
+pub(crate) mod update;

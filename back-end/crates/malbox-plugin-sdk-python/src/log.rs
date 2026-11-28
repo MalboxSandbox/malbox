@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 /// These call directly into the `tracing` macros used by the Rust SDK.
 /// For host plugins, tracing is wired to the same subscriber the host
 /// runtime sets up, so Python log calls appear identically to Rust ones.
-pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(trace, m)?)?;
     m.add_function(wrap_pyfunction!(debug, m)?)?;
     m.add_function(wrap_pyfunction!(info, m)?)?;

@@ -1,6 +1,7 @@
 /// Lifetime policy of a plugin instance.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MalboxPluginState {
     /// The plugin instance is kept alive across tasks.
     Persistent = 0,
@@ -13,6 +14,7 @@ pub enum MalboxPluginState {
 /// Concurrency policy controlling how the scheduler dispatches tasks to a plugin.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MalboxExecutionContext {
     /// Only one task may run in the plugin at a time and no other plugins may
     /// run concurrently.

@@ -7,29 +7,63 @@
 ///
 /// Each variant carries its relevant data inline.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-plugin-sdk-cpp and malbox-plugin-sdk-python FFI conversions"
+)]
 pub enum Event {
     /// A task has been created and queued.
-    TaskCreated { task_id: i32 },
+    TaskCreated {
+        /// Database id of the task.
+        task_id: i32,
+    },
     /// A task is about to begin processing.
-    TaskStarting { task_id: i32 },
+    TaskStarting {
+        /// Database id of the task.
+        task_id: i32,
+    },
     /// A task has finished processing.
-    TaskCompleted { task_id: i32 },
+    TaskCompleted {
+        /// Database id of the task.
+        task_id: i32,
+    },
     /// A task has failed processing.
-    TaskFailed { task_id: i32 },
+    TaskFailed {
+        /// Database id of the task.
+        task_id: i32,
+    },
     /// A task has been canceled (e.g. due to worker shutdown).
-    TaskCanceled { task_id: i32 },
+    TaskCanceled {
+        /// Database id of the task.
+        task_id: i32,
+    },
 
     /// A plugin has started.
-    PluginStarted { plugin_id: i32 },
+    PluginStarted {
+        /// Database id of the plugin.
+        plugin_id: i32,
+    },
     /// A plugin has stopped.
-    PluginStopped { plugin_id: i32 },
+    PluginStopped {
+        /// Database id of the plugin.
+        plugin_id: i32,
+    },
 
     /// A sample has started.
-    SampleStarted { sample_id: i32 },
+    SampleStarted {
+        /// Database id of the sample.
+        sample_id: i32,
+    },
     /// A sample has stopped.
-    SampleStopped { sample_id: i32 },
+    SampleStopped {
+        /// Database id of the sample.
+        sample_id: i32,
+    },
     /// A sample has produced a result.
-    SampleResultProduced { sample_id: i32 },
+    SampleResultProduced {
+        /// Database id of the sample.
+        sample_id: i32,
+    },
 
     /// The daemon is shutting down.
     DaemonShutdown,
@@ -44,22 +78,22 @@ mod tests {
     #[test]
     fn debug_format() {
         let event = Event::TaskCreated { task_id: 42 };
-        let dbg = format!("{:?}", event);
+        let dbg = format!("{event:?}");
         assert!(dbg.contains("TaskCreated"));
         assert!(dbg.contains("42"));
     }
 
     #[test]
     fn clone_and_eq() {
-        let a = Event::PluginStarted { plugin_id: 7 };
-        let b = a.clone();
-        assert_eq!(a, b);
+        let started = Event::PluginStarted { plugin_id: 7 };
+        let cloned = started.clone();
+        assert_eq!(started, cloned);
 
-        let c = Event::PluginStopped { plugin_id: 7 };
-        assert_ne!(a, c);
+        let stopped = Event::PluginStopped { plugin_id: 7 };
+        assert_ne!(started, stopped);
 
-        let d = Event::DaemonShutdown;
-        let e = Event::DaemonShutdown;
-        assert_eq!(d, e);
+        let shutdown_a = Event::DaemonShutdown;
+        let shutdown_b = Event::DaemonShutdown;
+        assert_eq!(shutdown_a, shutdown_b);
     }
 }

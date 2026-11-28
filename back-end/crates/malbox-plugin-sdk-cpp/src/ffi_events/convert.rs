@@ -1,6 +1,6 @@
 //! Rust <-> C conversion functions for the flat event type.
 
-use super::types::*;
+use super::types::{MalboxEvent, MalboxEventTag};
 use malbox_plugin_transport::messages::events::Event;
 
 /// Convert a Rust `Event` to its C-ABI representation.
@@ -26,9 +26,9 @@ pub(crate) fn rust_event_to_c(event: &Event) -> MalboxEvent {
 
 /// Convert a C-ABI `MalboxEvent` back to a Rust `Event`.
 ///
-/// Returns `Err(())` if the tag value is unrecognised.
-pub(crate) fn c_event_to_rust(event: &MalboxEvent) -> Result<Event, ()> {
-    Ok(match event.tag {
+/// Every `MalboxEventTag` variant maps to an `Event`, so the conversion is total.
+pub(crate) fn c_event_to_rust(event: MalboxEvent) -> Event {
+    match event.tag {
         MalboxEventTag::TaskCreated => Event::TaskCreated { task_id: event.id },
         MalboxEventTag::TaskStarting => Event::TaskStarting { task_id: event.id },
         MalboxEventTag::TaskCompleted => Event::TaskCompleted { task_id: event.id },
@@ -51,77 +51,77 @@ pub(crate) fn c_event_to_rust(event: &MalboxEvent) -> Result<Event, ()> {
         },
         MalboxEventTag::DaemonShutdown => Event::DaemonShutdown,
         MalboxEventTag::ConfigReloaded => Event::ConfigReloaded,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn event_roundtrip(event: Event) {
-        let c = rust_event_to_c(&event);
-        let back = c_event_to_rust(&c).expect("round-trip failed");
-        assert_eq!(event, back);
+    fn event_roundtrip(event: &Event) {
+        let c = rust_event_to_c(event);
+        let back = c_event_to_rust(c);
+        assert_eq!(*event, back);
     }
 
     #[test]
     fn roundtrip_task_created() {
-        event_roundtrip(Event::TaskCreated { task_id: 7 });
+        event_roundtrip(&Event::TaskCreated { task_id: 7 });
     }
 
     #[test]
     fn roundtrip_task_starting() {
-        event_roundtrip(Event::TaskStarting { task_id: 42 });
+        event_roundtrip(&Event::TaskStarting { task_id: 42 });
     }
 
     #[test]
     fn roundtrip_task_completed() {
-        event_roundtrip(Event::TaskCompleted { task_id: 1 });
+        event_roundtrip(&Event::TaskCompleted { task_id: 1 });
     }
 
     #[test]
     fn roundtrip_task_failed() {
-        event_roundtrip(Event::TaskFailed { task_id: 0 });
+        event_roundtrip(&Event::TaskFailed { task_id: 0 });
     }
 
     #[test]
     fn roundtrip_task_canceled() {
-        event_roundtrip(Event::TaskCanceled { task_id: 99 });
+        event_roundtrip(&Event::TaskCanceled { task_id: 99 });
     }
 
     #[test]
     fn roundtrip_plugin_started() {
-        event_roundtrip(Event::PluginStarted { plugin_id: 3 });
+        event_roundtrip(&Event::PluginStarted { plugin_id: 3 });
     }
 
     #[test]
     fn roundtrip_plugin_stopped() {
-        event_roundtrip(Event::PluginStopped { plugin_id: 5 });
+        event_roundtrip(&Event::PluginStopped { plugin_id: 5 });
     }
 
     #[test]
     fn roundtrip_sample_started() {
-        event_roundtrip(Event::SampleStarted { sample_id: 10 });
+        event_roundtrip(&Event::SampleStarted { sample_id: 10 });
     }
 
     #[test]
     fn roundtrip_sample_stopped() {
-        event_roundtrip(Event::SampleStopped { sample_id: 20 });
+        event_roundtrip(&Event::SampleStopped { sample_id: 20 });
     }
 
     #[test]
     fn roundtrip_sample_result_produced() {
-        event_roundtrip(Event::SampleResultProduced { sample_id: 30 });
+        event_roundtrip(&Event::SampleResultProduced { sample_id: 30 });
     }
 
     #[test]
     fn roundtrip_daemon_shutdown() {
-        event_roundtrip(Event::DaemonShutdown);
+        event_roundtrip(&Event::DaemonShutdown);
     }
 
     #[test]
     fn roundtrip_daemon_config_reloaded() {
-        event_roundtrip(Event::ConfigReloaded);
+        event_roundtrip(&Event::ConfigReloaded);
     }
 
     #[test]

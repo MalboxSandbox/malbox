@@ -1,29 +1,61 @@
+//! `machine_snapshots`: provider snapshots of machines, at most one active per machine.
+
 use crate::error::{Result, SnapshotError};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// A row of the `machine_snapshots` table.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct MachineSnapshot {
+    /// Database primary key.
     pub id: Uuid,
+    /// Machine the snapshot was taken of.
     pub machine_id: i32,
+    /// Snapshot name, unique per machine.
     pub name: String,
+    /// The provider's own identifier for the snapshot.
     pub provider_snapshot_id: String,
+    /// Free-form description.
     pub description: Option<String>,
+    /// Operator tags.
     pub tags: Option<Vec<String>>,
+    /// Guest plugins installed in the snapshot, as a JSON array of names.
     pub guest_plugins: Option<serde_json::Value>,
+    /// Whether this is the machine's default snapshot for detonations.
     pub is_active: bool,
+    /// When the row was inserted.
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    /// When the row was last modified.
     #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
 }
 
+/// Whether [`insert_snapshot`] makes the new snapshot its machine's active one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SnapshotActivation {
+    /// Deactivate the machine's other snapshots and mark the new one active.
+    Activate,
+    /// Insert the snapshot inactive, leaving the current active one in place.
+    Inactive,
+}
+
 /// Insert a new snapshot record.
 ///
-/// If `activate` is true, deactivates all other snapshots for this machine first.
-#[allow(clippy::too_many_arguments)]
+/// With [`SnapshotActivation::Activate`], deactivates all other snapshots for
+/// this machine first.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::UpdateFailed`] when deactivating the other
+/// snapshots fails, and [`SnapshotError::InsertFailed`] when the insert fails.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one parameter per snapshot column"
+)]
 pub async fn insert_snapshot(
     pool: &PgPool,
     machine_id: i32,
@@ -32,8 +64,9 @@ pub async fn insert_snapshot(
     description: Option<&str>,
     tags: Option<&[String]>,
     guest_plugins: Option<&serde_json::Value>,
-    activate: bool,
+    activation: SnapshotActivation,
 ) -> Result<MachineSnapshot> {
+    let activate = activation == SnapshotActivation::Activate;
     if activate {
         deactivate_all(pool, machine_id).await?;
     }
@@ -70,6 +103,10 @@ pub async fn insert_snapshot(
 }
 
 /// Fetch the active snapshot for a machine.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the query fails.
 pub async fn fetch_active_snapshot(
     pool: &PgPool,
     machine_id: i32,
@@ -88,6 +125,10 @@ pub async fn fetch_active_snapshot(
 }
 
 /// Fetch all snapshots for a machine, ordered by creation time.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the query fails.
 pub async fn fetch_snapshots_for_machine(
     pool: &PgPool,
     machine_id: i32,
@@ -106,6 +147,12 @@ pub async fn fetch_snapshots_for_machine(
 }
 
 /// Activate a specific snapshot (deactivates all others for that machine).
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the snapshot does not exist or
+/// cannot be read, and [`SnapshotError::UpdateFailed`] when changing the
+/// active flags fails.
 pub async fn activate_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<MachineSnapshot> {
     let snapshot =
         sqlx::query_as::<_, MachineSnapshot>(r#"SELECT * FROM "machine_snapshots" WHERE id = $1"#)
@@ -156,6 +203,10 @@ async fn deactivate_all(pool: &PgPool, machine_id: i32) -> Result<()> {
 }
 
 /// Fetch a snapshot by ID.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the query fails.
 pub async fn fetch_snapshot_by_id(pool: &PgPool, id: Uuid) -> Result<Option<MachineSnapshot>> {
     sqlx::query_as::<_, MachineSnapshot>(r#"SELECT * FROM "machine_snapshots" WHERE id = $1"#)
         .bind(id)
@@ -165,6 +216,10 @@ pub async fn fetch_snapshot_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Mach
 }
 
 /// Fetch a snapshot by machine ID and name.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the query fails.
 pub async fn fetch_snapshot_by_name(
     pool: &PgPool,
     machine_id: i32,
@@ -185,6 +240,10 @@ pub async fn fetch_snapshot_by_name(
 }
 
 /// Delete a single snapshot by ID.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::DeleteFailed`] when the delete fails.
 pub async fn delete_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<Option<MachineSnapshot>> {
     sqlx::query_as::<_, MachineSnapshot>(
         r#"
@@ -199,6 +258,10 @@ pub async fn delete_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<Option<
 }
 
 /// Delete all snapshots for a machine.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::DeleteFailed`] when the delete fails.
 pub async fn delete_snapshots_for_machine(pool: &PgPool, machine_id: i32) -> Result<()> {
     sqlx::query(
         r#"
@@ -212,26 +275,41 @@ pub async fn delete_snapshots_for_machine(pool: &PgPool, machine_id: i32) -> Res
     Ok(())
 }
 
+/// A snapshot joined with the name and platform of its machine.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct SnapshotWithMachine {
+    /// Snapshot primary key.
     pub id: Uuid,
+    /// Machine the snapshot was taken of.
     pub machine_id: i32,
+    /// Name of that machine.
     pub machine_name: String,
+    /// Snapshot name.
     pub name: String,
+    /// Free-form snapshot description.
     pub description: Option<String>,
+    /// Guest plugins installed in the snapshot, as a JSON array of names.
     pub guest_plugins: Option<serde_json::Value>,
+    /// Whether this is the machine's active snapshot.
     pub is_active: bool,
+    /// The machine's `machine_platform` label, e.g. `windows`.
     pub platform: String,
+    /// When the snapshot row was inserted.
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
 
+/// Snapshots of every machine on `platform` (a `machine_platform` label), newest first.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::FetchFailed`] when the query fails.
 pub async fn fetch_snapshots_by_platform(
     pool: &PgPool,
     platform: &str,
 ) -> Result<Vec<SnapshotWithMachine>> {
     sqlx::query_as::<_, SnapshotWithMachine>(
-        r#"
+        r"
         SELECT
             ms.id,
             ms.machine_id,
@@ -246,7 +324,7 @@ pub async fn fetch_snapshots_by_platform(
         JOIN machines m ON ms.machine_id = m.id
         WHERE m.platform::text = $1
         ORDER BY ms.created_at DESC
-        "#,
+        ",
     )
     .bind(platform)
     .fetch_all(pool)

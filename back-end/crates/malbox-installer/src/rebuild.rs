@@ -11,6 +11,12 @@ use std::path::Path;
 /// Recompile the installed version's binaries with `features` and swap them
 /// in atomically. The previous binary is kept for `upgrade --rollback`, and
 /// a systemd-managed daemon is stopped/started around the swap.
+///
+/// # Errors
+///
+/// Returns manifest and GitHub errors when the installed release cannot be resolved,
+/// [`crate::InstallError::StepFailed`] when the build fails, and
+/// [`crate::InstallError::Io`] when the binaries cannot be swapped.
 pub async fn run(
     features: &[String],
     github: &GitHubClient,

@@ -12,11 +12,13 @@ use crate::traits::TransportEmitter;
 ///   `emit()` converts the event to a `proto::TaskResult` and sends it through
 ///   the gRPC streaming response.
 /// - **Noop mode** (`noop`): no active task stream. `emit()` is a silent no-op, used
-///   during lifecycle callbacks (on_start, on_stop) that have no streaming channel.
+///   during lifecycle callbacks (`on_start`, `on_stop`) that have no streaming channel.
+#[derive(Debug)]
 pub struct GrpcEmitter {
     inner: GrpcEmitterInner,
 }
 
+#[derive(Debug)]
 enum GrpcEmitterInner {
     Task {
         task_id: i32,
@@ -51,11 +53,15 @@ impl GrpcEmitter {
     /// to the daemon after converting them to proto form. No-ops in Noop mode.
     ///
     /// Must be called from a blocking context (uses `blocking_send`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Grpc`] if the response stream receiver was dropped.
     pub fn send_task_result(&self, result: proto::TaskResult) -> Result<()> {
         match &self.inner {
             GrpcEmitterInner::Task { result_tx, .. } => result_tx
                 .blocking_send(Ok(result))
-                .map_err(|e| TransportError::Grpc(format!("channel send failed: {}", e))),
+                .map_err(|e| TransportError::Grpc(format!("channel send failed: {e}"))),
             GrpcEmitterInner::Noop => Ok(()),
         }
     }
@@ -68,7 +74,7 @@ impl TransportEmitter for GrpcEmitter {
                 let task_result = conversions::event_to_task_result(*task_id, &event);
                 result_tx
                     .blocking_send(Ok(task_result))
-                    .map_err(|e| TransportError::Grpc(format!("channel send failed: {}", e)))
+                    .map_err(|e| TransportError::Grpc(format!("channel send failed: {e}")))
             }
             GrpcEmitterInner::Noop => Ok(()),
         }

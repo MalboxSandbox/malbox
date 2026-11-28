@@ -1,3 +1,6 @@
+//! Build script: compiles the plugin gRPC protobuf definitions with tonic when
+//! the `grpc` feature is enabled.
+
 fn main() {
     #[cfg(feature = "grpc")]
     {

@@ -9,6 +9,7 @@ use tracing::field::{Field, Visit};
 use tracing_subscriber::Layer;
 
 /// A [`tracing_subscriber::Layer`] that captures events into a [`LogBus`].
+#[derive(Debug)]
 pub struct GuestLogLayer {
     bus: Arc<LogBus>,
 }
@@ -28,10 +29,11 @@ impl<S: Subscriber> Layer<S> for GuestLogLayer {
     ) {
         let meta = event.metadata();
 
-        let timestamp_ns = std::time::SystemTime::now()
+        let since_epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64;
+            .unwrap_or_default();
+        // Saturates in the year 2554, when nanoseconds since the epoch overflow u64.
+        let timestamp_ns = u64::try_from(since_epoch.as_nanos()).unwrap_or(u64::MAX);
 
         let level = LogLevel::from(meta.level());
         let target = meta.target().to_string();
@@ -71,7 +73,7 @@ impl FieldVisitor {
 
 impl Visit for FieldVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        self.record_field(field, format!("{:?}", value));
+        self.record_field(field, format!("{value:?}"));
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {

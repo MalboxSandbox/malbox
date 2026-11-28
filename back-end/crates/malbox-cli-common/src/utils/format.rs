@@ -1,34 +1,51 @@
+//! Styled terminal output: brand colors, tables, detail views, and prompts.
+
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "CLI writes user-facing output to the terminal"
+)]
+
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use console::{Style, Term};
 
+/// Malbox color palette used for all styled CLI output.
+#[derive(Debug)]
 pub struct Brand;
 
 impl Brand {
+    /// Highlight color for headers, prompts, and active items.
     pub fn accent() -> Style {
         Style::new().color256(63)
     }
 
+    /// Color for successful outcomes.
     pub fn success() -> Style {
         Style::new().color256(77)
     }
 
+    /// Color for errors and failures.
     pub fn error() -> Style {
         Style::new().color256(196)
     }
 
+    /// Color for pending states and warnings.
     pub fn warning() -> Style {
         Style::new().color256(220)
     }
 
+    /// Muted color for secondary information.
     pub fn dim() -> Style {
         Style::new().color256(245)
     }
 
+    /// Bright color for primary text.
     pub fn primary() -> Style {
         Style::new().color256(231)
     }
 }
 
+/// Picks the brand style matching a task, machine, or job status string.
 pub fn status_style(status: &str) -> Style {
     match status.to_lowercase().as_str() {
         "running" | "provisioning" | "analyzing" => Brand::accent(),
@@ -39,6 +56,7 @@ pub fn status_style(status: &str) -> Style {
     }
 }
 
+/// Renders a status string colored by [`status_style`].
 pub fn styled_status(status: &str) -> String {
     let style = status_style(status);
     style.apply_to(status).to_string()
@@ -83,6 +101,9 @@ fn relative_ago(dt: DateTime<Utc>) -> String {
     format!("{years}y ago")
 }
 
+/// Formats a timestamp as local date/time plus a dimmed relative age.
+///
+/// Unparseable input is returned unchanged.
 pub fn format_time(timestamp: &str) -> String {
     let Some(dt) = parse_timestamp(timestamp) else {
         return timestamp.to_string();
@@ -93,10 +114,14 @@ pub fn format_time(timestamp: &str) -> String {
     format!("{} {}", date, dim.apply_to(format!("({ago})")))
 }
 
+/// Width of the stdout terminal in columns.
 pub fn terminal_width() -> usize {
-    Term::stdout().size().1 as usize
+    usize::from(Term::stdout().size().1)
 }
 
+/// Shortens `s` to `max_width` visible columns, ending in `...`.
+///
+/// Strings already fitting, or widths below 4, are returned unchanged.
 pub fn truncate(s: &str, max_width: usize) -> String {
     if max_width < 4 {
         return s.to_string();
@@ -109,6 +134,7 @@ pub fn truncate(s: &str, max_width: usize) -> String {
     format!("{}...", &stripped[..max_width - 3])
 }
 
+/// Prints the malbox name and tagline banner to stdout.
 pub fn brand_header() {
     let accent = Brand::accent();
     let dim = Brand::dim();
@@ -120,11 +146,15 @@ pub fn brand_header() {
     println!();
 }
 
+/// Prints an accent-colored section title to stdout.
 pub fn section_header(title: &str) {
     let accent = Brand::accent();
     println!("\n  {}", accent.apply_to(title));
 }
 
+/// Prints a horizontal divider with a title to stderr.
+///
+/// Falls back to a timestamped plain line when stderr is not a terminal.
 pub fn section_divider(title: &str) {
     if Term::stderr().is_term() {
         let dim = Brand::dim();
@@ -142,10 +172,11 @@ pub fn section_divider(title: &str) {
         );
         eprintln!();
     } else {
-        eprintln!("[{}] --- {} ---", timestamp_hms(), title);
+        eprintln!("[{}] --- {title} ---", timestamp_hms());
     }
 }
 
+/// Current local time as `HH:MM:SS`.
 pub fn timestamp_hms() -> String {
     Local::now().format("%H:%M:%S").to_string()
 }
@@ -158,6 +189,7 @@ fn pad_ansi(s: &str, width: usize) -> String {
     format!("{}{}", s, " ".repeat(width - visible))
 }
 
+/// Renders a JSON value for display; strings appear without quotes.
 pub fn display_json(val: &serde_json::Value) -> String {
     match val {
         serde_json::Value::String(s) => s.clone(),
@@ -165,6 +197,7 @@ pub fn display_json(val: &serde_json::Value) -> String {
     }
 }
 
+/// Renders an optional JSON value via [`display_json`], or `-` when absent.
 pub fn display_value(val: &Option<serde_json::Value>) -> String {
     match val {
         Some(v) => display_json(v),
@@ -172,6 +205,8 @@ pub fn display_value(val: &Option<serde_json::Value>) -> String {
     }
 }
 
+/// Column-aligned table printed to stdout, shrinking columns to fit the terminal.
+#[derive(Debug)]
 pub struct Table {
     headers: Vec<&'static str>,
     rows: Vec<Vec<String>>,
@@ -182,6 +217,7 @@ pub struct Table {
 }
 
 impl Table {
+    /// Creates an empty table with the given column headers.
     pub fn new(headers: &[&'static str]) -> Self {
         Self {
             headers: headers.to_vec(),
@@ -192,6 +228,7 @@ impl Table {
         }
     }
 
+    /// Sets the number of spaces printed before every line.
     pub fn set_indent(&mut self, indent: usize) {
         self.indent = indent;
     }
@@ -201,10 +238,12 @@ impl Table {
         self.pinned.push(col);
     }
 
+    /// Appends a row; cells beyond the header count are not measured.
     pub fn add_row(&mut self, cells: Vec<String>) {
         self.rows.push(cells);
     }
 
+    /// Prints the header, a separator, and all rows to stdout.
     pub fn print(&self) {
         let col_count = self.headers.len();
         let mut widths: Vec<usize> = self.headers.iter().map(|h| h.len()).collect();
@@ -259,7 +298,7 @@ impl Table {
                 })
                 .collect::<Vec<_>>()
                 .join(&gap_str);
-            println!("{}{}", prefix, line);
+            println!("{prefix}{line}");
         }
     }
 }
@@ -291,6 +330,8 @@ fn shrink_columns(widths: &mut [usize], budget: usize, pinned: &[usize]) {
     }
 }
 
+/// Aligned `label: value` list printed to stdout.
+#[derive(Debug)]
 pub struct Detail {
     fields: Vec<(String, String)>,
 }
@@ -302,15 +343,18 @@ impl Default for Detail {
 }
 
 impl Detail {
+    /// Creates an empty detail list.
     pub fn new() -> Self {
         Self { fields: Vec::new() }
     }
 
+    /// Appends a labeled value.
     pub fn field(&mut self, label: &str, value: impl std::fmt::Display) -> &mut Self {
         self.fields.push((label.to_string(), value.to_string()));
         self
     }
 
+    /// Appends a labeled value only when `value` is `Some`.
     pub fn field_opt(&mut self, label: &str, value: Option<impl std::fmt::Display>) -> &mut Self {
         if let Some(v) = value {
             self.fields.push((label.to_string(), v.to_string()));
@@ -318,11 +362,13 @@ impl Detail {
         self
     }
 
+    /// Appends a status value colored by [`status_style`].
     pub fn field_status(&mut self, label: &str, status: &str) -> &mut Self {
         self.fields.push((label.to_string(), styled_status(status)));
         self
     }
 
+    /// Prints all fields with labels padded to a common width; prints nothing when empty.
     pub fn print(&self) {
         if self.fields.is_empty() {
             return;
@@ -338,21 +384,25 @@ impl Detail {
     }
 }
 
+/// Prints a check-marked success message to stdout.
 pub fn success(msg: impl std::fmt::Display) {
     let style = Brand::success();
     println!("{} {}", style.apply_to("\u{2713}"), msg);
 }
 
+/// Prints a cross-marked error message to stderr.
 pub fn error(msg: impl std::fmt::Display) {
     let style = Brand::error();
     eprintln!("{} {}", style.apply_to("\u{2717}"), msg);
 }
 
+/// Prints a dimmed "nothing to show" message to stdout.
 pub fn empty(msg: impl std::fmt::Display) {
     let dim = Brand::dim();
     println!("{}", dim.apply_to(msg.to_string()));
 }
 
+/// Prints a dimmed empty-state message followed by an arrowed hint to stdout.
 pub fn empty_with_hint(msg: impl std::fmt::Display, hint: impl std::fmt::Display) {
     let dim = Brand::dim();
     let accent = Brand::accent();
@@ -360,20 +410,27 @@ pub fn empty_with_hint(msg: impl std::fmt::Display, hint: impl std::fmt::Display
     println!("  {} {}", accent.apply_to("\u{2192}"), hint);
 }
 
+/// Prints a dimmed `Total: N label(s)` footer to stdout.
 pub fn total(count: usize, label: &str) {
     let dim = Brand::dim();
     let suffix = if count == 1 { "" } else { "s" };
     println!(
         "\n{}",
-        dim.apply_to(format!("Total: {} {}{}", count, label, suffix))
+        dim.apply_to(format!("Total: {count} {label}{suffix}"))
     );
 }
 
+/// Formats a byte count with binary units (`B`, `KB`, ... `TB`); negative sizes render as `-`.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "approximate value only used for one-decimal display"
+)]
 pub fn bytes(size: i64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     if size < 0 {
         return "-".to_string();
     }
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut value = size as f64;
     let mut unit = 0;
     while value >= 1024.0 && unit < UNITS.len() - 1 {
@@ -387,6 +444,7 @@ pub fn bytes(size: i64) -> String {
     }
 }
 
+/// Dialoguer theme in the malbox palette, rendered on stderr.
 pub fn malbox_theme() -> dialoguer::theme::ColorfulTheme {
     dialoguer::theme::ColorfulTheme {
         defaults_style: Style::new().for_stderr().color256(245),
@@ -430,10 +488,10 @@ pub fn malbox_theme() -> dialoguer::theme::ColorfulTheme {
     }
 }
 
-pub fn confirm(prompt: &str, skip: bool) -> bool {
-    if skip {
-        return true;
-    }
+/// Asks a yes/no question on stderr, defaulting to "no".
+///
+/// Returns `true` without asking when stderr is not a terminal.
+pub fn confirm(prompt: &str) -> bool {
     if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         return true;
     }
@@ -445,6 +503,9 @@ pub fn confirm(prompt: &str, skip: bool) -> bool {
         .unwrap_or(false)
 }
 
+/// Shows a fuzzy-searchable selection list and returns the chosen index.
+///
+/// Returns `None` when stderr is not a terminal, `items` is empty, or the user cancels.
 pub fn fuzzy_select(prompt: &str, items: &[String]) -> Option<usize> {
     if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         return None;

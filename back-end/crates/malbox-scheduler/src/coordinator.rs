@@ -21,7 +21,7 @@ use crate::running::RunningJobs;
 use crate::submission::task_params;
 use crate::{ControlError, OrchestratorCore, OrchestratorHandle, RoutingTable, Shared};
 
-const CACHE_PURGE_INTERVAL: Duration = Duration::from_secs(3600);
+const CACHE_PURGE_INTERVAL: Duration = Duration::from_hours(1);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(20);
 
 pub(crate) enum Command {
@@ -55,8 +55,8 @@ pub(crate) async fn launch(
     let core = Arc::new(core);
     let (commands, rx) = mpsc::unbounded_channel();
     let shared = Arc::new(Shared {
-        core: core.clone(),
-        routing: routing.clone(),
+        core: Arc::clone(&core),
+        routing: Arc::clone(&routing),
         running: RunningJobs::new(token.clone()),
         executors: Executors::default(),
         commands: commands.clone(),
@@ -68,9 +68,9 @@ pub(crate) async fn launch(
     info!(purged, recovered, "orchestrator recovered state");
 
     let executors = vec![
-        tokio::spawn(executor::host::run(shared.clone(), host)),
+        tokio::spawn(executor::host::run(Arc::clone(&shared), host)),
         tokio::spawn(executor::detonation::run(
-            shared.clone(),
+            Arc::clone(&shared),
             detonation,
             machine_available,
         )),
@@ -106,7 +106,7 @@ impl Coordinator {
         purge.tick().await;
         loop {
             tokio::select! {
-                _ = token.cancelled() => break,
+                () = token.cancelled() => break,
                 cmd = rx.recv() => match cmd {
                     Some(cmd) => self.handle(cmd).await,
                     None => break,
@@ -147,7 +147,7 @@ impl Coordinator {
         self.next_generation += 1;
         let generation = self.next_generation;
         self.actor_tasks
-            .spawn(run_actor(self.shared.clone(), task_id, generation, rx));
+            .spawn(run_actor(Arc::clone(&self.shared), task_id, generation, rx));
         self.actors.insert(task_id, (generation, tx.clone()));
         tx
     }

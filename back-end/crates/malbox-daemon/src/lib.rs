@@ -1,16 +1,22 @@
+//! The malbox daemon: wires configuration, database, providers, plugins, the
+//! scheduler and the HTTP API together and runs them until shutdown.
+
 use malbox_config::Config;
-use malbox_database::init_database;
+use malbox_database::{PgPool, init_database};
 use malbox_http::http;
+use malbox_machinery::ProviderHandle;
 use malbox_machinery::provider::{create_provider, list_providers};
 use malbox_plugin_internal::manager::PluginManager;
 use malbox_plugin_internal::manager::ipc_reactor::IpcReactor;
-use malbox_resources::{MachinePool, resolve_transport};
+use malbox_plugin_internal::registry::PluginRegistry;
+use malbox_resources::{MachinePool, NetworkMode, ResolvedTransport, resolve_transport};
 use malbox_scheduler::OrchestratorCore;
 use malbox_utils::{ResultStore, SampleStore};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, instrument, warn};
 
+/// Daemon error type and result alias.
 pub mod error;
 mod providers;
 mod provisioners;
@@ -18,173 +24,36 @@ mod signal;
 
 pub use error::DaemonError;
 
+/// Boots every daemon subsystem, serves HTTP until `shutdown_token` fires, then tears down.
+///
+/// # Errors
+///
+/// Returns an error when configuration validation fails, the database cannot be
+/// initialised, the provider, plugin registry, IPC reactor, plugin manager or
+/// orchestrator fail to start, machine reconciliation fails, or the HTTP server errors.
 #[instrument(skip_all, err)]
 pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::Result<()> {
-    // Validate provider configuration
-    {
-        let _span = info_span!("init.providers").entered();
-
-        let compiled_providers: Vec<String> = list_providers()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        debug!(providers = ?compiled_providers, "Providers compiled into daemon");
-
-        config
-            .providers
-            .validate(&compiled_providers)
-            .map_err(|e| DaemonError::Internal(e.to_string()))?;
-
-        malbox_config::validate_machine_configs(&config.machines)
-            .map_err(|e| DaemonError::Configuration(format!("Invalid machine config: {}", e)))?;
-
-        malbox_config::validate_orchestration(&config.orchestration).map_err(|e| {
-            DaemonError::Configuration(format!("Invalid orchestration config: {}", e))
-        })?;
-    }
+    validate_config(config)?;
 
     let db = {
         let _span = info_span!("init.database").entered();
         init_database(&config.database).await?
     };
 
-    // Start image store watcher if configured
-    {
-        let _span = info_span!("init.image_store").entered();
-        if let Some(ref images_config) = config.images {
-            let store_path = std::path::PathBuf::from(&images_config.store_path);
-            if store_path.exists() {
-                malbox_utils::image_store::spawn_image_watcher(
-                    store_path,
-                    db.clone(),
-                    shutdown_token.child_token(),
-                );
-            } else {
-                warn!(path = %images_config.store_path, "Image store path does not exist");
-            }
-        }
-    }
+    start_image_watcher(config, &db, &shutdown_token);
 
-    // Initialize provider from configuration
-    let (provider_arc, transport) = {
-        let _span = info_span!("init.provider").entered();
-
-        let provider_name = config
-            .providers
-            .get_default()
-            .or_else(|| config.providers.enabled.first().map(|s| s.as_str()))
-            .ok_or_else(|| {
-                DaemonError::Internal(
-                    "No providers enabled. Add providers to config [providers] section".to_string(),
-                )
-            })?;
-
-        info!(provider = %provider_name, "Provider selected");
-
-        // Get provider-specific configuration from the config
-        let provider_config = config.providers.configs.get(provider_name).ok_or_else(|| {
-            DaemonError::Internal(format!(
-                "No configuration found for provider '{}'. Add [providers.{}] section to config",
-                provider_name, provider_name
-            ))
-        })?;
-
-        // Create the provider
-        let provider = create_provider(provider_name, provider_config).map_err(|e| {
-            DaemonError::Internal(format!(
-                "Failed to create provider '{}': {}",
-                provider_name, e
-            ))
-        })?;
-
-        // Create machine pool
-        let provider_arc = Arc::new(provider);
-
-        // Resolve guest access transport (if configured)
-        let transport = if let Some(ref ga_config) = config.guest_access {
-            let resolved = resolve_transport(&provider_arc, ga_config, false).map_err(|e| {
-                DaemonError::Configuration(format!(
-                    "Guest access transport resolution failed: {}",
-                    e
-                ))
-            })?;
-
-            info!(
-                transport = ?ga_config.transport,
-                "Guest access transport selected"
-            );
-            Some(Arc::new(resolved))
-        } else {
-            warn!("No guest access configured — tasks requiring guest access will fail");
-            None
-        };
-
-        (provider_arc, transport)
-    };
-
-    // Initialize plugin registry
-    let registry = {
-        let _span = info_span!("init.plugins").entered();
-
-        let plugin_dir = &config.plugins.directory;
-
-        // Ensure plugin directory exists
-        if !plugin_dir.exists() {
-            std::fs::create_dir_all(plugin_dir).map_err(|e| {
-                DaemonError::Internal(format!(
-                    "Failed to create plugin directory '{}': {}",
-                    plugin_dir.display(),
-                    e
-                ))
-            })?;
-        }
-
-        let registry = Arc::new(
-            malbox_plugin_internal::registry::PluginRegistry::new(plugin_dir.clone()).map_err(
-                |e| DaemonError::Internal(format!("Failed to initialize plugin registry: {}", e)),
-            )?,
-        );
-
-        let initial_snapshot = registry.snapshot();
-        info!(
-            plugins = initial_snapshot.len(),
-            dir = %plugin_dir.display(),
-            "Plugin registry initialized"
-        );
-
-        for entry in initial_snapshot.list() {
-            info!(
-                name = entry.id.as_str(),
-                status = %entry.status,
-                "Discovered plugin"
-            );
-        }
-
-        registry
-    };
+    let (provider_arc, transport) = init_provider(config)?;
+    let registry = init_registry(config)?;
 
     let machine_pool = Arc::new(MachinePool::new(Arc::clone(&provider_arc), db.clone()));
-
-    // Reconcile DB machines against provider state on startup
-    {
-        let _span = info_span!("init.reconcile").entered();
-        machine_pool.reconcile().await.map_err(|e| {
-            DaemonError::Internal(format!("Failed to reconcile machine pool: {}", e))
-        })?;
-
-        machine_pool
-            .reconcile_config(&config.machines)
-            .await
-            .map_err(|e| DaemonError::Internal(format!("Config reconciliation failed: {}", e)))?;
-    }
+    reconcile_machines(&machine_pool, config).await?;
 
     // Spawn the IPC reactor thread (owns all daemon-side iceoryx2 state)
     // and initialize the plugin manager.
     let (ipc, ipc_join) = {
         let _span = info_span!("init.ipc_reactor").entered();
         IpcReactor::spawn()
-            .map_err(|e| DaemonError::Internal(format!("Failed to start IPC reactor: {}", e)))?
+            .map_err(|e| DaemonError::Internal(format!("Failed to start IPC reactor: {e}")))?
     };
 
     // Register signal handlers AFTER iceoryx2 init. iceoryx2 overwrites
@@ -204,31 +73,11 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
                 config.paths.data_dir.join("logs"),
             )
             .await
-            .map_err(|e| {
-                DaemonError::Internal(format!("Failed to create plugin manager: {}", e))
-            })?,
+            .map_err(|e| DaemonError::Internal(format!("Failed to create plugin manager: {e}")))?,
         )
     };
 
-    // Check for missing soft dependencies (read-only, no network calls).
-    {
-        let cache_dir = config
-            .plugins
-            .registry
-            .as_ref()
-            .map(|r| r.cache_dir.clone())
-            .unwrap_or_else(|| malbox_config::RegistryConfig::default().cache_dir);
-        let missing =
-            malbox_plugin_registry::deps::check_startup_deps(&config.plugins.directory, &cache_dir);
-        for dep in &missing {
-            tracing::warn!(
-                plugin = %dep.plugin,
-                dependency = %dep.dep_name,
-                version = %dep.dep_version,
-                "missing optional plugin dependency"
-            );
-        }
-    }
+    warn_missing_soft_deps(config);
 
     // Initialize sample and result stores for uploads and job outputs
     let sample_store = Arc::new(SampleStore::new(&config.paths.data_dir));
@@ -253,7 +102,7 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
             shutdown_token.child_token(),
         )
         .await
-        .map_err(|e| DaemonError::Internal(format!("Failed to start orchestrator: {}", e)))?
+        .map_err(|e| DaemonError::Internal(format!("Failed to start orchestrator: {e}")))?
     };
 
     // Start HTTP server (this blocks until shutdown — no init span here;
@@ -299,4 +148,168 @@ pub async fn run(config: &Config, shutdown_token: CancellationToken) -> error::R
     }
 
     Ok(())
+}
+
+/// Start the image store watcher when `[images]` is configured and its path exists.
+fn start_image_watcher(config: &Config, db: &PgPool, shutdown_token: &CancellationToken) {
+    let _span = info_span!("init.image_store").entered();
+    if let Some(images_config) = &config.images {
+        let store_path = std::path::PathBuf::from(&images_config.store_path);
+        if store_path.exists() {
+            malbox_utils::image_store::spawn_image_watcher(
+                store_path,
+                db.clone(),
+                shutdown_token.child_token(),
+            );
+        } else {
+            warn!(path = %images_config.store_path, "Image store path does not exist");
+        }
+    }
+}
+
+/// Checks provider, machine and orchestration settings against what this binary supports.
+fn validate_config(config: &Config) -> error::Result<()> {
+    let _span = info_span!("init.providers").entered();
+
+    let compiled_providers: Vec<String> = list_providers()
+        .into_iter()
+        .map(std::string::ToString::to_string)
+        .collect();
+
+    debug!(providers = ?compiled_providers, "Providers compiled into daemon");
+
+    config
+        .providers
+        .validate(&compiled_providers)
+        .map_err(|e| DaemonError::Internal(e.to_string()))?;
+
+    malbox_config::validate_machine_configs(&config.machines)
+        .map_err(|e| DaemonError::Configuration(format!("Invalid machine config: {e}")))?;
+
+    malbox_config::validate_orchestration(&config.orchestration)
+        .map_err(|e| DaemonError::Configuration(format!("Invalid orchestration config: {e}")))?;
+    Ok(())
+}
+
+/// Creates the default provider and resolves the optional guest-access transport.
+fn init_provider(
+    config: &Config,
+) -> error::Result<(Arc<ProviderHandle>, Option<Arc<ResolvedTransport>>)> {
+    let _span = info_span!("init.provider").entered();
+
+    let provider_name = config
+        .providers
+        .get_default()
+        .or_else(|| config.providers.enabled.first().map(String::as_str))
+        .ok_or_else(|| {
+            DaemonError::Internal(
+                "No providers enabled. Add providers to config [providers] section".to_string(),
+            )
+        })?;
+
+    info!(provider = %provider_name, "Provider selected");
+
+    // Get provider-specific configuration from the config
+    let provider_config = config.providers.configs.get(provider_name).ok_or_else(|| {
+        DaemonError::Internal(format!(
+            "No configuration found for provider '{provider_name}'. Add [providers.{provider_name}] section to config"
+        ))
+    })?;
+
+    // Create the provider
+    let provider = create_provider(provider_name, provider_config).map_err(|e| {
+        DaemonError::Internal(format!("Failed to create provider '{provider_name}': {e}"))
+    })?;
+
+    let provider_arc = Arc::new(provider);
+
+    // Resolve guest access transport (if configured)
+    let transport = if let Some(ref ga_config) = config.guest_access {
+        let resolved = resolve_transport(&provider_arc, ga_config, NetworkMode::Connected)
+            .map_err(|e| {
+                DaemonError::Configuration(format!("Guest access transport resolution failed: {e}"))
+            })?;
+
+        info!(
+            transport = ?ga_config.transport,
+            "Guest access transport selected"
+        );
+        Some(Arc::new(resolved))
+    } else {
+        warn!("No guest access configured — tasks requiring guest access will fail");
+        None
+    };
+
+    Ok((provider_arc, transport))
+}
+
+/// Ensures the plugin directory exists and loads the plugin registry from it.
+fn init_registry(config: &Config) -> error::Result<Arc<PluginRegistry>> {
+    let _span = info_span!("init.plugins").entered();
+
+    let plugin_dir = &config.plugins.directory;
+
+    // Ensure plugin directory exists
+    if !plugin_dir.exists() {
+        std::fs::create_dir_all(plugin_dir).map_err(|e| {
+            DaemonError::Internal(format!(
+                "Failed to create plugin directory '{}': {e}",
+                plugin_dir.display()
+            ))
+        })?;
+    }
+
+    let registry = Arc::new(PluginRegistry::new(plugin_dir.clone()).map_err(|e| {
+        DaemonError::Internal(format!("Failed to initialize plugin registry: {e}"))
+    })?);
+
+    let initial_snapshot = registry.snapshot();
+    info!(
+        plugins = initial_snapshot.len(),
+        dir = %plugin_dir.display(),
+        "Plugin registry initialized"
+    );
+
+    for entry in initial_snapshot.list() {
+        info!(
+            name = entry.id.as_str(),
+            status = %entry.status,
+            "Discovered plugin"
+        );
+    }
+
+    Ok(registry)
+}
+
+/// Reconciles DB machines against provider state and the configured machine list.
+async fn reconcile_machines(machine_pool: &MachinePool, config: &Config) -> error::Result<()> {
+    let _span = info_span!("init.reconcile").entered();
+    machine_pool
+        .reconcile()
+        .await
+        .map_err(|e| DaemonError::Internal(format!("Failed to reconcile machine pool: {e}")))?;
+
+    machine_pool
+        .reconcile_config(&config.machines)
+        .await
+        .map_err(|e| DaemonError::Internal(format!("Config reconciliation failed: {e}")))?;
+    Ok(())
+}
+
+/// Logs a warning for each missing optional plugin dependency (read-only, no network calls).
+fn warn_missing_soft_deps(config: &Config) {
+    let cache_dir = config.plugins.registry.as_ref().map_or_else(
+        || malbox_config::RegistryConfig::default().cache_dir,
+        |r| r.cache_dir.clone(),
+    );
+    let missing =
+        malbox_plugin_registry::deps::check_startup_deps(&config.plugins.directory, &cache_dir);
+    for dep in &missing {
+        tracing::warn!(
+            plugin = %dep.plugin,
+            dependency = %dep.dep_name,
+            version = %dep.dep_version,
+            "missing optional plugin dependency"
+        );
+    }
 }

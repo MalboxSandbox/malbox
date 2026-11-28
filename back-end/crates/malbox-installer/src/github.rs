@@ -1,3 +1,5 @@
+//! GitHub release lookup and verified asset downloads.
+
 use crate::error::InstallError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,8 +15,14 @@ const GITHUB_API_BASE: &str = "https://api.github.com";
 /// for filtering - malbox currently publishes every release with it set.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by the malbox CLI install wizard"
+)]
 pub enum Channel {
+    /// Releases without a semver pre-release suffix.
     Stable,
+    /// The newest release of any kind.
     #[default]
     Nightly,
 }
@@ -28,26 +36,39 @@ impl std::fmt::Display for Channel {
     }
 }
 
+/// A published GitHub release, as returned by the releases API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Release {
+    /// Git tag of the release, e.g. `v0.1.0`.
     pub tag_name: String,
+    /// Display title of the release.
     pub name: Option<String>,
+    /// Release notes in Markdown.
     pub body: Option<String>,
+    /// Files attached to the release.
     pub assets: Vec<ReleaseAsset>,
 }
 
+/// A downloadable file attached to a release.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseAsset {
+    /// File name of the asset.
     pub name: String,
+    /// Public download URL.
     pub browser_download_url: String,
+    /// Size in bytes.
     pub size: u64,
 }
 
 impl Release {
+    /// Strips the conventional `v` prefix from a tag to obtain the version.
+    #[must_use]
     pub fn version_from_tag(tag: &str) -> &str {
         tag.strip_prefix('v').unwrap_or(tag)
     }
 
+    /// Version of this release, without the `v` tag prefix.
+    #[must_use]
     pub fn version(&self) -> &str {
         Self::version_from_tag(&self.tag_name)
     }
@@ -58,11 +79,15 @@ impl Release {
         semver::Version::parse(self.version()).is_ok_and(|v| v.pre.is_empty())
     }
 
+    /// Prebuilt `malboxd` archive for `arch`, if the release ships one.
+    #[must_use]
     pub fn find_daemon_asset(&self, arch: &str) -> Option<&ReleaseAsset> {
         let expected = format!("malboxd-{}-{}.tar.gz", self.tag_name, arch);
         self.assets.iter().find(|a| a.name == expected)
     }
 
+    /// Prebuilt `malbox` CLI archive for `arch`, if the release ships one.
+    #[must_use]
     pub fn find_malbox_asset(&self, arch: &str) -> Option<&ReleaseAsset> {
         let expected = format!("malbox-{}-{}.tar.gz", self.tag_name, arch);
         self.assets.iter().find(|a| a.name == expected)
@@ -75,6 +100,8 @@ impl Release {
         self.assets.iter().find(|a| a.name == expected)
     }
 
+    /// GitHub source tarball URL for this release's tag in `owner/repo`.
+    #[must_use]
     pub fn source_archive_url(&self, owner: &str, repo: &str) -> String {
         format!(
             "https://github.com/{owner}/{repo}/archive/refs/tags/{}.tar.gz",
@@ -83,6 +110,8 @@ impl Release {
     }
 }
 
+/// Client for the GitHub releases API of one repository.
+#[derive(Debug)]
 pub struct GitHubClient {
     client: reqwest::Client,
     owner: String,
@@ -90,6 +119,11 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
+    /// Creates a client for `owner/repo` with connect and idle-read timeouts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstallError::Network`] when the HTTP client cannot be built.
     pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> crate::Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent("malbox-installer")
@@ -106,10 +140,14 @@ impl GitHubClient {
         })
     }
 
+    /// GitHub account or organization owning the repository.
+    #[must_use]
     pub fn owner(&self) -> &str {
         &self.owner
     }
 
+    /// Repository name.
+    #[must_use]
     pub fn repo(&self) -> &str {
         &self.repo
     }
@@ -158,6 +196,12 @@ impl GitHubClient {
             .map_err(|e| InstallError::GitHub(e.to_string()))
     }
 
+    /// Newest published release on `channel`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstallError::Network`] on request failure and [`InstallError::GitHub`]
+    /// on API errors, rate limiting, or when no release matches the channel.
     pub async fn latest_release(&self, channel: Channel) -> crate::Result<Release> {
         // NOTE: deliberately not using `/releases/latest`. That endpoint only
         // ever returns the most recent *non-prerelease* release, and malbox
@@ -190,6 +234,11 @@ impl GitHubClient {
     }
 
     /// Release for an exact tag, or `None` when the tag has no release.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstallError::Network`] on request failure and [`InstallError::GitHub`]
+    /// on non-404 API errors or rate limiting.
     pub async fn release_by_tag(&self, tag: &str) -> crate::Result<Option<Release>> {
         let url = format!(
             "{}/repos/{}/{}/releases/tags/{tag}",
@@ -201,6 +250,11 @@ impl GitHubClient {
     /// Release matching an installed version, trying the canonical `v` tag
     /// prefix first. Resume and rebuild use this to pin to the installed
     /// version instead of floating to the latest release.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstallError::GitHub`] when neither tag has a release or the API fails,
+    /// and [`InstallError::Network`] on request failure.
     pub async fn release_for_version(&self, version: &str) -> crate::Result<Release> {
         if let Some(release) = self.release_by_tag(&format!("v{version}")).await? {
             return Ok(release);
@@ -215,6 +269,11 @@ impl GitHubClient {
 
     /// Download `url`, reporting `(bytes_downloaded, total_bytes)` after each
     /// chunk so callers can surface progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstallError::GitHub`] on a non-success HTTP status and
+    /// [`InstallError::Network`] when the request or body transfer fails.
     pub async fn download_asset(
         &self,
         url: &str,
@@ -230,10 +289,11 @@ impl GitHubClient {
         }
 
         let total = response.content_length();
-        let mut bytes = Vec::with_capacity(total.unwrap_or(0) as usize);
+        let capacity = total.and_then(|len| usize::try_from(len).ok()).unwrap_or(0);
+        let mut bytes = Vec::with_capacity(capacity);
         while let Some(chunk) = response.chunk().await? {
             bytes.extend_from_slice(&chunk);
-            on_progress(bytes.len() as u64, total);
+            on_progress(u64::try_from(bytes.len()).unwrap_or(u64::MAX), total);
         }
 
         Ok(bytes)
@@ -244,6 +304,12 @@ impl GitHubClient {
     /// tarball), verify the payload against it. URLs that do not correspond
     /// to a release asset (e.g. source tarballs) have no checksum and are
     /// returned as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns the download errors of [`Self::download_asset`],
+    /// [`InstallError::GitHub`] for a malformed checksum file, and
+    /// [`InstallError::ChecksumMismatch`] when the payload does not match.
     pub async fn download_verified(
         &self,
         release: &Release,

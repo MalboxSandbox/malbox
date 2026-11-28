@@ -6,17 +6,18 @@
 
 use crate::error::Result;
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
-/// Re-export the HostPlugin trait for macro codegen.
+/// Re-export the `HostPlugin` trait for macro codegen.
 pub use crate::plugin::HostPlugin;
 
-/// Deserialize a config HashMap into a typed struct.
+/// Deserialize a config `HashMap` into a typed struct.
 ///
 /// Used by generated `HostPlugin` impls when the user's `on_start`
 /// method takes a typed config parameter.
-pub fn deserialize_config<T: serde::de::DeserializeOwned>(
-    raw: HashMap<String, String>,
+pub fn deserialize_config<T: serde::de::DeserializeOwned, S: BuildHasher>(
+    raw: HashMap<String, String, S>,
 ) -> Result<T> {
     let value = serde_json::to_value(raw).map_err(crate::error::SdkError::Serialization)?;
     serde_json::from_value(value).map_err(crate::error::SdkError::Serialization)
@@ -55,7 +56,7 @@ pub fn init_tracing(
             .with(log_layer)
             .try_init()
         {
-            eprintln!(
+            tracing::warn!(
                 "[malbox-plugin-sdk] tracing subscriber already installed; \
                  LogBus log forwarding will not work: {e}"
             );
@@ -65,7 +66,7 @@ pub fn init_tracing(
         .with(fmt_layer)
         .try_init()
     {
-        eprintln!(
+        tracing::warn!(
             "[malbox-plugin-sdk] tracing subscriber already installed; \
              SDK formatting not applied: {e}"
         );

@@ -14,7 +14,7 @@ use malbox_installer::manifest::Manifest;
     about = "Install a provider (adds to config and rebuilds daemon)",
     after_help = "Examples:\n  malbox daemon provider install libvirt\n  malbox daemon provider install xen --no-rebuild"
 )]
-pub struct InstallCommand {
+pub(crate) struct InstallCommand {
     /// Provider name (e.g., "libvirt", "xen")
     pub name: String,
 

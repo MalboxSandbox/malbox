@@ -1,8 +1,14 @@
+//! Shared tracing setup for malbox binaries: log-level parsing and subscriber initialisation.
+
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Parse a log-level string ("error" | "warn" | "info" | "debug" | "trace",
 /// case-insensitive) into a `LevelFilter`.
+///
+/// # Errors
+///
+/// Returns a human-readable message when `s` is not a recognised level name.
 pub fn parse_log_level(s: &str) -> Result<LevelFilter, String> {
     match s.to_ascii_lowercase().as_str() {
         "error" => Ok(LevelFilter::ERROR),
@@ -33,8 +39,7 @@ pub fn init_tracing(default_level: LevelFilter) {
         // file, so we only surface warn/error in the daemon log by default. Override with
         // `RUST_LOG=guest=<lvl>,...` for verbose forwarding.
         EnvFilter::new(format!(
-            "malbox={lvl},libvirt={lvl},guest=warn",
-            lvl = default_level
+            "malbox={default_level},libvirt={default_level},guest=warn"
         ))
     });
 

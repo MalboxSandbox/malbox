@@ -15,19 +15,19 @@ use malbox_installer::github::GitHubClient;
 use malbox_installer::manifest::Manifest;
 use malbox_installer::{GITHUB_OWNER, GITHUB_REPO};
 
-pub mod install;
-pub mod list;
-pub mod rebuild;
-pub mod uninstall;
+pub(crate) mod install;
+pub(crate) mod list;
+pub(crate) mod rebuild;
+pub(crate) mod uninstall;
 
-pub use install::InstallCommand;
-pub use list::ListCommand;
-pub use rebuild::RebuildCommand;
-pub use uninstall::UninstallCommand;
+pub(crate) use install::InstallCommand;
+pub(crate) use list::ListCommand;
+pub(crate) use rebuild::RebuildCommand;
+pub(crate) use uninstall::UninstallCommand;
 
 #[derive(Parser)]
 #[command(about = "Manage virtualization providers")]
-pub struct ProviderCommand {
+pub(crate) struct ProviderCommand {
     #[command(subcommand)]
     command: ProviderCommands,
 }

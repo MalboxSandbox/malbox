@@ -1,3 +1,5 @@
+//! Tests for manifest persistence and resume bookkeeping.
+
 use malbox_installer::manifest::{
     CliManifest, DaemonManifest, FrontendManifest, Manifest, PostgresManifest, SystemdManifest,
 };

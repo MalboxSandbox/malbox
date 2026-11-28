@@ -10,7 +10,11 @@ use crate::OrchestratorCore;
 
 /// Recompute the latest-wins verdict of a sample after one of its artifacts
 /// finished. Failures are logged; verdicts are a derived view.
-pub async fn recompute_sample_verdict(core: &OrchestratorCore, sample_id: i64, task_id: i32) {
+pub(crate) async fn recompute_sample_verdict(
+    core: &OrchestratorCore,
+    sample_id: i64,
+    task_id: i32,
+) {
     let pool = &core.db;
     let reports =
         match plugin_reports::fetch_latest_plugin_reports_for_sample(pool, sample_id).await {
@@ -66,8 +70,8 @@ pub async fn recompute_sample_verdict(core: &OrchestratorCore, sample_id: i64, t
         sample_id,
         classification: worst,
         score: max_score,
-        indicator_count: iocs.len() as i32,
-        ttp_count: ttps.len() as i32,
+        indicator_count: i32::try_from(iocs.len()).unwrap_or(i32::MAX),
+        ttp_count: i32::try_from(ttps.len()).unwrap_or(i32::MAX),
         plugin_names: &names,
         task_count,
         last_task_id: Some(task_id),
@@ -79,13 +83,13 @@ pub async fn recompute_sample_verdict(core: &OrchestratorCore, sample_id: i64, t
 
 /// The report that decides a task's verdict: worst classification, then
 /// higher score, then lower artifact id.
-pub fn task_verdict(reports: &[PluginReport]) -> Option<&PluginReport> {
+pub(crate) fn task_verdict(reports: &[PluginReport]) -> Option<&PluginReport> {
     reports
         .iter()
         .filter(|r| r.classification.is_some())
         .min_by_key(|r| {
             (
-                std::cmp::Reverse(r.classification.map_or(0, |c| c.severity())),
+                std::cmp::Reverse(r.classification.map_or(0, DbClassification::severity)),
                 std::cmp::Reverse(r.score.map_or(i32::MIN, i32::from)),
                 r.artifact_id,
             )

@@ -32,6 +32,17 @@ pub enum ArtifactRelation {
     Output = 7,
 }
 
+impl From<ArtifactRelation> for u8 {
+    /// Wire value of the relation (its `repr(u8)` discriminant).
+    #[expect(
+        clippy::as_conversions,
+        reason = "reading a fieldless repr(u8) enum discriminant requires `as`"
+    )]
+    fn from(r: ArtifactRelation) -> Self {
+        r as u8
+    }
+}
+
 impl ArtifactRelation {
     /// Database label of this relation.
     pub fn as_str(self) -> &'static str {
@@ -114,7 +125,7 @@ mod tests {
     fn relation_roundtrip() {
         for v in 0..=7u8 {
             let r = ArtifactRelation::try_from(v).unwrap();
-            assert_eq!(r as u8, v);
+            assert_eq!(u8::from(r), v);
             assert_eq!(r.as_str().parse::<ArtifactRelation>().unwrap(), r);
         }
         assert_eq!(

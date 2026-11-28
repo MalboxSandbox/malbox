@@ -1,3 +1,5 @@
+//! Background loop that probes plugin liveness and updates lifecycle state.
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,7 +14,8 @@ use crate::manager::instance::{PluginInstance, PluginLifecycle};
 use crate::manager::runtime::PluginRuntime;
 use crate::registry::types::PluginId;
 
-pub fn spawn_health_check_loop(
+/// Spawn a task that health-checks every instance each `interval` until `token` is cancelled.
+pub(crate) fn spawn_health_check_loop(
     instances: Arc<DashMap<PluginId, Arc<Mutex<PluginInstance>>>>,
     interval: Duration,
     token: CancellationToken,
@@ -20,8 +23,8 @@ pub fn spawn_health_check_loop(
     tokio::spawn(async move {
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(interval) => {}
-                _ = token.cancelled() => {
+                () = tokio::time::sleep(interval) => {}
+                () = token.cancelled() => {
                     debug!("health check loop: shutdown signal received, exiting");
                     break;
                 }
@@ -35,12 +38,9 @@ pub fn spawn_health_check_loop(
                 // executing a task (the handle holds the lock during
                 // execute_task). A contended lock means the plugin is alive
                 // by definition, so skipping is correct.
-                let mut instance = match instance_lock.try_lock() {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        trace!(plugin = %plugin_id, "lock contended, skipping health check");
-                        continue;
-                    }
+                let Ok(mut instance) = instance_lock.try_lock() else {
+                    trace!(plugin = %plugin_id, "lock contended, skipping health check");
+                    continue;
                 };
 
                 if instance.lifecycle.is_starting() {
@@ -64,7 +64,7 @@ pub fn spawn_health_check_loop(
                         PluginRuntime::Host(_) => "host",
                         PluginRuntime::Guest(_) => "guest",
                     };
-                    let reason = format!("{} plugin '{}' failed health check", kind, plugin_id);
+                    let reason = format!("{kind} plugin '{plugin_id}' failed health check");
                     warn!(reason = %reason, "Plugin failed health check");
                     instance.lifecycle = PluginLifecycle::Failed { reason };
                 }

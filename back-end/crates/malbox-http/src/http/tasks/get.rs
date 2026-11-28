@@ -49,7 +49,7 @@ struct Cursor {
     id: i32,
 }
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/tasks", get(list_tasks))
         .route("/v1/tasks/count", get(get_task_count))
@@ -108,8 +108,7 @@ fn build_filter(params: &ListParams) -> TaskFilter {
         .cursor
         .as_deref()
         .and_then(decode_cursor)
-        .map(|c| (Some(c.ts), Some(c.id)))
-        .unwrap_or((None, None));
+        .map_or((None, None), |c| (Some(c.ts), Some(c.id)));
 
     TaskFilter {
         statuses,

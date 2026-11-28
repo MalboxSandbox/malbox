@@ -1,5 +1,5 @@
-#![allow(dead_code)]
+#![expect(dead_code, reason = "utility helpers shared by optional install flows")]
 
-pub mod install_renderer;
-pub mod provider_config;
-pub mod wizard;
+pub(crate) mod install_renderer;
+pub(crate) mod provider_config;
+pub(crate) mod wizard;

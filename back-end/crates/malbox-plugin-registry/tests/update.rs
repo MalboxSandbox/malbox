@@ -1,3 +1,5 @@
+//! Tests for semver update detection.
+
 use malbox_plugin_registry::update::needs_update;
 
 #[test]

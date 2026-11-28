@@ -21,6 +21,7 @@ const MAX_NOTIFIERS: usize = 2;
 const MAX_LISTENERS: usize = 2;
 
 /// Wakes the reactor thread from async tasks. `Send + Sync`; share via `Arc`.
+#[derive(Debug)]
 pub struct ReactorWaker {
     /// Keeps the threadsafe node (and thus the notifier) alive.
     _node: Node<IpcServiceThreadsafe>,
@@ -28,6 +29,11 @@ pub struct ReactorWaker {
 }
 
 impl ReactorWaker {
+    /// Open (or create) the wakeup service and attach a threadsafe notifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if node, service, or notifier creation fails.
     pub fn new() -> Result<Self> {
         let node = NodeBuilder::new()
             .signal_handling_mode(SignalHandlingMode::Disabled)
@@ -58,6 +64,10 @@ impl ReactorWaker {
     }
 
     /// Wake the reactor so it drains its command queue.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the notification cannot be delivered.
     pub fn wake(&self) -> Result<()> {
         self.notifier
             .notify()
@@ -67,11 +77,17 @@ impl ReactorWaker {
 }
 
 /// Reactor-side listener for command wakeups.
+#[derive(Debug)]
 pub struct ReactorWakeupListener {
     listener: Listener<IpcService>,
 }
 
 impl ReactorWakeupListener {
+    /// Open (or create) the wakeup service on `node` and attach a listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if service or listener creation fails.
     pub fn new(node: &Node<IpcService>) -> Result<Self> {
         let service = node
             .service_builder(
@@ -93,13 +109,17 @@ impl ReactorWakeupListener {
         Ok(Self { listener })
     }
 
-    /// Get a reference to the underlying listener for WaitSet attachment.
+    /// Get a reference to the underlying listener for `WaitSet` attachment.
     pub fn listener(&self) -> &Listener<IpcService> {
         &self.listener
     }
 
     /// Non-blocking drain of all pending wakeups (the payload carries no
     /// information; commands live in the mpsc queue).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if polling the listener fails.
     pub fn drain(&self) -> Result<()> {
         while self
             .listener

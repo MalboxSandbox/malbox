@@ -1,3 +1,6 @@
+//! Discovers plugins by reading each subdirectory's `plugin.toml` and
+//! validating its binary and runtime configuration.
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -7,17 +10,23 @@ use super::error::ScanError;
 use super::manifest::{PluginTypeConfig, parse_manifest};
 use super::types::{PluginEntry, PluginId, PluginStatus};
 
-pub struct Scanner {
+/// Reads plugin subdirectories of one root directory into [`PluginEntry`] values.
+pub(crate) struct Scanner {
     plugin_dir: PathBuf,
 }
 
 impl Scanner {
-    pub fn new(plugin_dir: PathBuf) -> Self {
+    pub(crate) fn new(plugin_dir: PathBuf) -> Self {
         Self { plugin_dir }
     }
 
+    /// Root directory whose subdirectories are scanned.
+    pub(crate) fn plugin_dir(&self) -> &Path {
+        &self.plugin_dir
+    }
+
     /// Scan the entire plugin directory. Invalid manifests are logged and skipped.
-    pub fn scan_all(&self) -> Result<Vec<PluginEntry>, ScanError> {
+    pub(crate) fn scan_all(&self) -> Result<Vec<PluginEntry>, ScanError> {
         if !self.plugin_dir.exists() {
             return Err(ScanError::DirectoryNotFound(self.plugin_dir.clone()));
         }
@@ -32,7 +41,7 @@ impl Scanner {
                 continue;
             }
 
-            match self.scan_one(&path) {
+            match Self::scan_one(&path) {
                 Ok(entry) => entries.push(entry),
                 Err(e) => {
                     warn!(
@@ -48,7 +57,7 @@ impl Scanner {
     }
 
     /// Scan a single plugin subdirectory.
-    pub fn scan_one(&self, dir: &Path) -> Result<PluginEntry, ScanError> {
+    pub(crate) fn scan_one(dir: &Path) -> Result<PluginEntry, ScanError> {
         let manifest_path = dir.join("plugin.toml");
 
         let manifest = parse_manifest(&manifest_path).map_err(|source| ScanError::Manifest {
@@ -68,15 +77,14 @@ impl Scanner {
 
         let binary_path = resolve_binary_path(dir, &binary_name);
 
-        let is_guest = manifest.plugin.plugin_type == PluginTypeConfig::Guest;
+        let plugin_type = manifest.plugin.plugin_type;
 
         // Resolve the runtime section (filling defaults) and validate.
         let resolved_runtime =
             malbox_plugin_manifest::ResolvedRuntimeConfig::from_raw(&manifest.runtime);
 
-        let (status, runtime_config) = match resolved_runtime.validate(manifest.plugin.plugin_type)
-        {
-            Ok(()) => match check_binary(&binary_path, is_guest) {
+        let (status, runtime_config) = match resolved_runtime.validate(plugin_type) {
+            Ok(()) => match check_binary(&binary_path, plugin_type) {
                 Ok(()) => (PluginStatus::Registered, Some(resolved_runtime)),
                 Err(reason) => (PluginStatus::Invalid(reason), Some(resolved_runtime)),
             },
@@ -118,19 +126,19 @@ fn resolve_binary_path(dir: &Path, binary_name: &str) -> PathBuf {
 ///
 /// Guest plugins are Windows executables deployed into the VM, so only
 /// existence is verified — Unix permission bits are irrelevant.
-fn check_binary(path: &Path, is_guest: bool) -> Result<(), String> {
+fn check_binary(path: &Path, plugin_type: PluginTypeConfig) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("binary not found: {}", path.display()));
     }
 
     let metadata =
-        std::fs::metadata(path).map_err(|e| format!("cannot read binary metadata: {}", e))?;
+        std::fs::metadata(path).map_err(|e| format!("cannot read binary metadata: {e}"))?;
 
     if !metadata.is_file() {
         return Err(format!("binary path is not a file: {}", path.display()));
     }
 
-    if !is_guest {
+    if plugin_type != PluginTypeConfig::Guest {
         let permissions = metadata.permissions();
         if permissions.mode() & 0o111 == 0 {
             return Err(format!("binary is not executable: {}", path.display()));
@@ -212,8 +220,7 @@ execution = "parallel"
         let tmp = TempDir::new().unwrap();
         let dir = create_plugin_dir(tmp.path(), "pe-parser", &valid_manifest("pe-parser"));
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
 
         assert_eq!(entry.id.as_str(), "pe-parser");
         assert!(matches!(entry.status, PluginStatus::Registered));
@@ -226,8 +233,7 @@ execution = "parallel"
         let dir = tmp.path().join("no-manifest");
         std::fs::create_dir_all(&dir).unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let result = scanner.scan_one(&dir);
+        let result = Scanner::scan_one(&dir);
         assert!(result.is_err());
     }
 
@@ -238,8 +244,7 @@ execution = "parallel"
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plugin.toml"), valid_manifest("no-binary")).unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Invalid(_)));
     }
 
@@ -253,8 +258,7 @@ execution = "parallel"
         let binary_path = dir.join("no-exec");
         std::fs::write(&binary_path, "not executable").unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Invalid(_)));
     }
 
@@ -281,8 +285,7 @@ execution = "parallel"
         std::fs::write(&binary_path, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Registered));
         assert!(entry.binary_path.ends_with("my-custom-binary"));
     }
@@ -317,8 +320,7 @@ execution = "exclusive"
         let binary_path = dir.join("guest-yara-scanner.exe");
         std::fs::write(&binary_path, b"MZ\x00").unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Registered));
         assert!(entry.binary_path.ends_with("guest-yara-scanner.exe"));
     }
@@ -335,8 +337,7 @@ execution = "exclusive"
         // Explicitly non-executable
         std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        let scanner = Scanner::new(tmp.path().to_path_buf());
-        let entry = scanner.scan_one(&dir).unwrap();
+        let entry = Scanner::scan_one(&dir).unwrap();
         assert!(matches!(entry.status, PluginStatus::Registered));
     }
 
@@ -396,7 +397,7 @@ port = 80
         assert_eq!(entries.len(), 1);
         match &entries[0].status {
             PluginStatus::Invalid(reason) => assert!(reason.contains("port")),
-            s => panic!("expected Invalid, got {:?}", s),
+            PluginStatus::Registered => panic!("expected Invalid, got Registered"),
         }
     }
 

@@ -1,31 +1,54 @@
+//! `samples`: deduplicated submitted files, identified by their hashes.
+
 use crate::error::{Result, SampleError};
 use sqlx::{AssertSqlSafe, FromRow, PgPool, postgres::PgDatabaseError, query_as};
 use time::OffsetDateTime;
 
+/// Hashes and metadata of a file to register as a sample.
 #[derive(Debug, Clone)]
 pub struct Sample {
+    /// File size in bytes.
     pub file_size: i64,
+    /// Detected file type description.
     pub file_type: String,
+    /// Hex MD5 digest.
     pub md5: String,
+    /// Hex CRC32 checksum.
     pub crc32: String,
+    /// Hex SHA-1 digest.
     pub sha1: String,
+    /// Hex SHA-256 digest.
     pub sha256: String,
+    /// Hex SHA-512 digest.
     pub sha512: String,
+    /// ssdeep fuzzy hash.
     pub ssdeep: String,
 }
 
+/// A row of the `samples` table.
 #[derive(FromRow, Debug, Clone)]
 pub struct SampleEntity {
+    /// Database primary key.
     pub id: i64,
+    /// File size in bytes.
     pub file_size: i64,
+    /// Detected file type description.
     pub file_type: String,
+    /// Hex MD5 digest.
     pub md5: String,
+    /// Hex CRC32 checksum.
     pub crc32: String,
+    /// Hex SHA-1 digest.
     pub sha1: String,
+    /// Hex SHA-256 digest.
     pub sha256: String,
+    /// Hex SHA-512 digest.
     pub sha512: String,
+    /// ssdeep fuzzy hash.
     pub ssdeep: String,
+    /// When the row was inserted.
     pub created_at: OffsetDateTime,
+    /// When the row was last modified.
     pub updated_at: OffsetDateTime,
 }
 
@@ -47,6 +70,13 @@ impl Default for SampleEntity {
     }
 }
 
+/// Insert a sample, or return the existing row when one with the same hashes exists.
+///
+/// # Errors
+///
+/// Returns [`SampleError::InsertFailed`] when the insert fails for a reason
+/// other than a duplicate, and [`SampleError::FetchFailed`] when looking up
+/// the existing duplicate fails.
 pub async fn insert_sample(pool: &PgPool, sample: Sample) -> Result<SampleEntity> {
     match query_as!(
         SampleEntity,
@@ -92,11 +122,17 @@ pub async fn insert_sample(pool: &PgPool, sample: Sample) -> Result<SampleEntity
                     }
                 }
 
-            Err(SampleError::InsertFailed { hash: "".to_string(), message: "".to_string(), source: e }.into())
+            Err(SampleError::InsertFailed { hash: String::new(), message: String::new(), source: e }.into())
         }
     }
 }
 
+/// Fetch a sample by one of its hashes; `hash_type` is `md5`, `sha1`, `sha256` or `sha512`.
+///
+/// # Errors
+///
+/// Returns [`SampleError::FetchFailed`] when `hash_type` is not one of the
+/// supported names or the query fails.
 pub async fn fetch_sample_by_hash(
     pool: &PgPool,
     hash_type: &str,
@@ -110,16 +146,15 @@ pub async fn fetch_sample_by_hash(
         _ => {
             return Err(SampleError::FetchFailed {
                 hash: hash_value.to_string(),
-                message: format!("Unsupported hash type: {}", hash_type),
-                source: sqlx::Error::Protocol(format!("unsupported hash type: {}", hash_type)),
+                message: format!("Unsupported hash type: {hash_type}"),
+                source: sqlx::Error::Protocol(format!("unsupported hash type: {hash_type}")),
             }
             .into());
         }
     };
 
     let query = format!(
-        r#"SELECT id::bigint, file_size::bigint, file_type, md5, crc32, sha1, sha256, sha512, ssdeep, created_at, updated_at FROM "samples" WHERE {} = $1"#,
-        column
+        r#"SELECT id::bigint, file_size::bigint, file_type, md5, crc32, sha1, sha256, sha512, ssdeep, created_at, updated_at FROM "samples" WHERE {column} = $1"#
     );
 
     // Safety: `column` is restricted to the whitelist above and the hash value
@@ -131,15 +166,23 @@ pub async fn fetch_sample_by_hash(
         .map_err(|e| {
             SampleError::FetchFailed {
                 hash: hash_value.to_string(),
-                message: format!("Failed to fetch sample by {}", hash_type),
+                message: format!("Failed to fetch sample by {hash_type}"),
                 source: e,
             }
             .into()
         })
 }
 
+/// Fetch a sample by primary key, `None` when it does not exist.
+///
+/// # Errors
+///
+/// Returns [`SampleError::FetchFailed`] when the query fails.
 pub async fn fetch_sample_by_id(pool: &PgPool, id: i64) -> Result<Option<SampleEntity>> {
-    let id_i32 = id as i32;
+    // `samples.id` is an `integer` column: an id outside `i32` cannot exist.
+    let Ok(id_i32) = i32::try_from(id) else {
+        return Ok(None);
+    };
     query_as!(
         SampleEntity,
         r#"SELECT * FROM "samples" WHERE id = $1"#,
@@ -160,11 +203,16 @@ pub async fn fetch_sample_by_id(pool: &PgPool, id: i64) -> Result<Option<SampleE
 /// Batch-load samples by id. Used by the task list to attach sample info
 /// without an N+1 (one query per page instead of one per row).
 /// Returns only the rows that exist; callers map by id.
+///
+/// # Errors
+///
+/// Returns [`SampleError::FetchFailed`] when the query fails.
 pub async fn fetch_samples_by_ids(pool: &PgPool, ids: &[i64]) -> Result<Vec<SampleEntity>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let ids_i32: Vec<i32> = ids.iter().map(|&i| i as i32).collect();
+    // `samples.id` is an `integer` column: ids outside `i32` cannot match.
+    let ids_i32: Vec<i32> = ids.iter().filter_map(|&i| i32::try_from(i).ok()).collect();
     query_as!(
         SampleEntity,
         r#"SELECT * FROM "samples" WHERE id = ANY($1)"#,

@@ -4,11 +4,22 @@ use crate::github::{GitHubClient, Release};
 use crate::progress::ProgressObserver;
 use std::path::{Path, PathBuf};
 
+/// Where the front-end bundle was installed.
+#[derive(Debug)]
 pub struct FrontendResult {
+    /// Directory now serving the bundle.
     pub path: PathBuf,
+    /// Previous bundle kept for rollback, if one existed.
     pub prev_path: Option<PathBuf>,
 }
 
+/// Installs the front-end bundle into `data_dir/web`, downloading or building it, and
+/// keeps the previous bundle as `web.prev`.
+///
+/// # Errors
+///
+/// Returns network/GitHub/checksum errors from downloads, [`InstallError::StepFailed`]
+/// when the build or extraction fails, and [`InstallError::Io`] for filesystem failures.
 pub async fn execute(
     source: &FrontendSource,
     data_dir: &Path,

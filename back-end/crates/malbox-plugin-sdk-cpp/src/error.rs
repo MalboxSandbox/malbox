@@ -22,10 +22,10 @@ thread_local! {
 /// byte)"` is stored instead.
 pub(crate) fn set_last_error(msg: &str) {
     LAST_ERROR.with(|cell| {
-        *cell.borrow_mut() = Some(
-            CString::new(msg)
-                .unwrap_or_else(|_| CString::new("(error contained null byte)").unwrap()),
-        );
+        *cell.borrow_mut() = Some(CString::new(msg).unwrap_or_else(|_| {
+            CString::new("(error contained null byte)")
+                .expect("fallback message contains no NUL byte")
+        }));
     });
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn clear_last_error() {
     });
 }
 
-/// Converts a Result<T, E> to an int32_t return code, storing the error message if any.
+/// Converts a `Result<T, E>` to an `int32_t` return code, storing the error message if any.
 pub(crate) fn result_to_rc<T, E: std::fmt::Display>(result: Result<T, E>) -> (i32, Option<T>) {
     match result {
         Ok(val) => {
@@ -58,7 +58,7 @@ pub(crate) fn last_error_string() -> Option<String> {
         cell.borrow()
             .as_ref()
             .and_then(|cs| cs.to_str().ok())
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
     })
 }
 
@@ -84,6 +84,8 @@ pub unsafe extern "C" fn malbox_last_error(out_message: *mut *const c_char) -> i
         match borrow.as_ref() {
             Some(msg) => {
                 if !out_message.is_null() {
+                    // SAFETY: the caller guarantees a non-null `out_message` is
+                    // valid for writes of one `*const c_char`.
                     unsafe {
                         *out_message = msg.as_ptr();
                     }
@@ -103,8 +105,11 @@ mod tests {
     fn test_set_and_get_last_error() {
         set_last_error("something went wrong");
         let mut msg: *const c_char = std::ptr::null();
-        let rc = unsafe { malbox_last_error(&mut msg) };
+        // SAFETY: `msg` is a live local, valid for writes of one pointer.
+        let rc = unsafe { malbox_last_error(&raw mut msg) };
         assert_eq!(rc, 0);
+        // SAFETY: rc == 0 means `msg` was set to the NUL-terminated message held
+        // in the thread-local slot, which is not modified before this read.
         let s = unsafe { std::ffi::CStr::from_ptr(msg) }.to_str().unwrap();
         assert_eq!(s, "something went wrong");
     }
@@ -113,7 +118,8 @@ mod tests {
     fn test_no_error_returns_negative() {
         clear_last_error();
         let mut msg: *const c_char = std::ptr::null();
-        let rc = unsafe { malbox_last_error(&mut msg) };
+        // SAFETY: `msg` is a live local, valid for writes of one pointer.
+        let rc = unsafe { malbox_last_error(&raw mut msg) };
         assert!(rc < 0);
     }
 

@@ -10,29 +10,34 @@ use sha2::{Digest, Sha256, Sha512};
 // `hex::encode` (digest 0.11 dropped the `LowerHex` impl on its output
 // array). CRC-32 is a plain `u32`, so it keeps the `{:08x}` form.
 
+/// Compute the MD5 of `buf` as lowercase, zero-padded hex.
 pub fn get_md5(buf: &[u8]) -> String {
     // md5's `Digest` renders as full 32-char padded hex via its `LowerHex` impl.
     format!("{:x}", compute(buf))
 }
 
+/// Compute the SHA-1 of `buf` as lowercase, zero-padded hex.
 pub fn get_sha1(buf: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.update(buf);
     hex::encode(hasher.finalize())
 }
 
+/// Compute the SHA-256 of `buf` as lowercase, zero-padded hex.
 pub fn get_sha256(buf: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(buf);
     hex::encode(hasher.finalize())
 }
 
+/// Compute the SHA-512 of `buf` as lowercase, zero-padded hex.
 pub fn get_sha512(buf: &[u8]) -> String {
     let mut hasher = Sha512::new();
     hasher.update(buf);
     hex::encode(hasher.finalize())
 }
 
+/// Compute the CRC-32 of `buf` as lowercase, zero-padded hex.
 pub fn get_crc32(buf: &[u8]) -> String {
     let mut hasher = Hasher::new();
     hasher.update(buf);

@@ -41,21 +41,21 @@ pub fn artifact_meta_from_proto(m: &proto::ArtifactMeta) -> Option<ArtifactMeta>
 /// Used by `GrpcEmitter` to send event metadata back through the
 /// `ExecuteTask` streaming response.
 pub fn event_to_task_result(task_id: i32, event: &Event) -> proto::TaskResult {
-    let result_name = format!("{:?}", event);
+    let result_name = format!("{event:?}");
 
     let data = match event {
         Event::TaskCreated { task_id }
         | Event::TaskStarting { task_id }
         | Event::TaskCompleted { task_id }
         | Event::TaskFailed { task_id }
-        | Event::TaskCanceled { task_id } => format!(r#"{{"task_id":{}}}"#, task_id).into_bytes(),
+        | Event::TaskCanceled { task_id } => format!(r#"{{"task_id":{task_id}}}"#).into_bytes(),
         Event::PluginStarted { plugin_id } | Event::PluginStopped { plugin_id } => {
-            format!(r#"{{"plugin_id":{}}}"#, plugin_id).into_bytes()
+            format!(r#"{{"plugin_id":{plugin_id}}}"#).into_bytes()
         }
         Event::SampleStarted { sample_id }
         | Event::SampleStopped { sample_id }
         | Event::SampleResultProduced { sample_id } => {
-            format!(r#"{{"sample_id":{}}}"#, sample_id).into_bytes()
+            format!(r#"{{"sample_id":{sample_id}}}"#).into_bytes()
         }
         Event::DaemonShutdown | Event::ConfigReloaded => b"{}".to_vec(),
     };

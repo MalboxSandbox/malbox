@@ -7,7 +7,7 @@ use malbox_plugin_registry::lockfile::Lockfile;
 use malbox_plugin_registry::remove::remove_plugin;
 
 #[derive(Parser)]
-pub struct RemoveCommand {
+pub(crate) struct RemoveCommand {
     /// Plugin name to remove
     name: String,
 }

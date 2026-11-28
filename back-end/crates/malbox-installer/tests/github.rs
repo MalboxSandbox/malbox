@@ -1,3 +1,5 @@
+//! Tests for GitHub release parsing and asset lookup.
+
 use malbox_installer::github::{Release, ReleaseAsset};
 
 fn sample_release() -> Release {
@@ -40,12 +42,12 @@ fn parse_release_response() {
             {
                 "name": "malboxd-v0.2.0-linux-x64.tar.gz",
                 "browser_download_url": "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malboxd-v0.2.0-linux-x64.tar.gz",
-                "size": 15000000
+                "size": 15_000_000
             },
             {
                 "name": "malbox-v0.2.0-linux-x64.tar.gz",
                 "browser_download_url": "https://github.com/malboxapp/malbox/releases/download/v0.2.0/malbox-v0.2.0-linux-x64.tar.gz",
-                "size": 10000000
+                "size": 10_000_000
             }
         ]
     });

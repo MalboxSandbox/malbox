@@ -19,7 +19,7 @@ impl MachinePool {
     pub(crate) async fn revert_machine(&self, machine_id: i32) -> Result<()> {
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
+            .map_err(ResourceError::Database)?
             .ok_or(ResourceError::MachineNotFound {
                 id: machine_id.to_string(),
             })?;
@@ -28,7 +28,7 @@ impl MachinePool {
         if let Some(provider_id) = db_machine.provider_id.as_deref() {
             let active_snap = snapshots::fetch_active_snapshot(&self.db, machine_id)
                 .await
-                .map_err(|e| ResourceError::Database(e.into()))?;
+                .map_err(ResourceError::Database)?;
 
             if let Some(snap) = active_snap
                 && self
@@ -42,7 +42,7 @@ impl MachinePool {
                     None,
                 )
                 .await
-                .map_err(|e| ResourceError::Database(e.into()))?;
+                .map_err(ResourceError::Database)?;
 
                 self.machine_available.notify_waiters();
                 info!(
@@ -72,15 +72,13 @@ impl MachinePool {
             .ok_or_else(|| ResourceError::Internal("Machine has no image_id".to_string()))?;
         let image_path = images::fetch_image_by_id(&self.db, image_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
-            .ok_or_else(|| {
-                ResourceError::Internal(format!("Image with id {} not found", image_id))
-            })?
+            .map_err(ResourceError::Database)?
+            .ok_or_else(|| ResourceError::Internal(format!("Image with id {image_id} not found")))?
             .path;
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         self.setup_machine(machine_id, &image_path).await
     }

@@ -10,22 +10,31 @@
 /// values keep their numbers.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MalboxEventTag {
-    // Task events
+    /// A task was created; `id` is the task ID.
     TaskCreated = 0,
+    /// A task is about to start running; `id` is the task ID.
     TaskStarting = 1,
+    /// A task finished successfully; `id` is the task ID.
     TaskCompleted = 2,
+    /// A task finished with an error; `id` is the task ID.
     TaskFailed = 3,
+    /// A task was canceled before completion; `id` is the task ID.
     TaskCanceled = 4,
-    // Plugin events
+    /// A plugin process came up; `id` is the plugin ID.
     PluginStarted = 5,
+    /// A plugin process shut down; `id` is the plugin ID.
     PluginStopped = 6,
-    // Sample events
+    /// Analysis of a sample began; `id` is the sample ID.
     SampleStarted = 8,
+    /// Analysis of a sample ended; `id` is the sample ID.
     SampleStopped = 9,
+    /// A result was produced for a sample; `id` is the sample ID.
     SampleResultProduced = 10,
-    // Daemon events
+    /// The daemon is shutting down; `id` is unused.
     DaemonShutdown = 11,
+    /// The daemon reloaded its configuration; `id` is unused.
     ConfigReloaded = 12,
 }
 
@@ -39,7 +48,9 @@ pub enum MalboxEventTag {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct MalboxEvent {
+    /// Which kind of event this is.
     pub tag: MalboxEventTag,
+    /// Task, plugin or sample ID selected by `tag`; `0` for daemon events.
     pub id: i32,
 }
 
@@ -48,6 +59,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(
+        clippy::as_conversions,
+        reason = "reading a #[repr(i32)] discriminant requires `as`"
+    )]
     fn event_tag_values() {
         assert_eq!(MalboxEventTag::TaskCreated as i32, 0);
         assert_eq!(MalboxEventTag::TaskStarting as i32, 1);

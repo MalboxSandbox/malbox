@@ -13,7 +13,7 @@ use malbox_database::repositories::recipes::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/recipes", get(list_recipes))
         .route("/v1/recipes/{id}", get(get_recipe))
@@ -33,7 +33,7 @@ async fn list_recipes(
     let recipes = if let Some(author) = query.author {
         fetch_recipes_by_author(&state.pool, &author)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {}", e)))?
+            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {e}")))?
     } else if let Some(scope_str) = query.scope {
         let scope = match scope_str.to_lowercase().as_str() {
             "personal" => RecipeScope::Personal,
@@ -47,15 +47,15 @@ async fn list_recipes(
         };
         fetch_recipes_by_scope(&state.pool, scope)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {}", e)))?
+            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {e}")))?
     } else if let Some(tag) = query.tag {
         fetch_recipes_by_tag(&state.pool, &tag)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {}", e)))?
+            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {e}")))?
     } else {
         fetch_all_recipes(&state.pool)
             .await
-            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {}", e)))?
+            .map_err(|e| Error::Internal(format!("Failed to fetch recipes: {e}")))?
     };
 
     Ok(Json(recipes))
@@ -67,7 +67,7 @@ async fn get_recipe(
 ) -> Result<impl IntoResponse> {
     let recipe = fetch_recipe(&state.pool, id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch recipe: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to fetch recipe: {e}")))?;
 
     match recipe {
         Some(r) => Ok(Json(r).into_response()),

@@ -47,7 +47,7 @@ struct EventAttrArgs {
 }
 
 impl syn::parse::Parse for EventAttrArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
         let variant: syn::Ident = input.parse()?;
         if !input.is_empty() {
             return Err(syn::Error::new(input.span(), "unexpected argument"));
@@ -75,18 +75,13 @@ fn has_return_type(method: &syn::ImplItemFn) -> bool {
 
 /// Extract the type of the first non-self parameter, if any.
 fn first_param_type(method: &syn::ImplItemFn) -> Option<syn::Type> {
-    method
-        .sig
-        .inputs
-        .iter()
-        .filter_map(|arg| {
-            if let syn::FnArg::Typed(pat_type) = arg {
-                Some((*pat_type.ty).clone())
-            } else {
-                None
-            }
-        })
-        .next()
+    method.sig.inputs.iter().find_map(|arg| {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            Some((*pat_type.ty).clone())
+        } else {
+            None
+        }
+    })
 }
 
 /// Expand `#[malbox::handlers]` on an impl block.
@@ -95,7 +90,7 @@ fn first_param_type(method: &syn::ImplItemFn) -> Option<syn::Type> {
 /// `#[health_check]`, `#[on_event(...)]` (or their
 /// `#[malbox::...]` equivalents), strips those attributes, and generates a
 /// single `impl HostPlugin for T` block with only the annotated methods.
-pub fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
+pub(crate) fn expand_handlers(item: TokenStream) -> syn::Result<TokenStream> {
     let mut input: ItemImpl = syn::parse2(item)?;
 
     let struct_ty = &input.self_ty;

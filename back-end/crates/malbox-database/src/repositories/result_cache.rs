@@ -4,6 +4,10 @@ use crate::error::{Result, ResultCacheError};
 use sqlx::PgPool;
 
 /// Look up a live cache entry: `(job_id, empty)`.
+///
+/// # Errors
+///
+/// Returns [`ResultCacheError::FetchFailed`] when the query fails.
 pub async fn lookup(pool: &PgPool, key: &str) -> Result<Option<(i64, bool)>> {
     sqlx::query_as::<_, (i64, bool)>(
         "select job_id, empty from result_cache where cache_key = $1 and expires_on > now()",
@@ -21,6 +25,14 @@ pub async fn lookup(pool: &PgPool, key: &str) -> Result<Option<(i64, bool)>> {
 }
 
 /// Insert or replace the entry for `key`, valid for `ttl_secs`.
+///
+/// # Errors
+///
+/// Returns [`ResultCacheError::InsertFailed`] when the upsert fails.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "`empty` is the value written to the boolean column, not a mode switch"
+)]
 pub async fn store(
     pool: &PgPool,
     key: &str,
@@ -48,6 +60,10 @@ pub async fn store(
 }
 
 /// Delete expired entries. Returns the number removed.
+///
+/// # Errors
+///
+/// Returns [`ResultCacheError::DeleteFailed`] when the delete fails.
 pub async fn purge_expired(pool: &PgPool) -> Result<u64> {
     let r = sqlx::query("delete from result_cache where expires_on <= now()")
         .execute(pool)

@@ -16,62 +16,43 @@ impl Clone for LibvirtProvider {
         let source_domain_name = format!("malbox-{}", machine.id());
 
         let source_domain = Domain::lookup_by_name(self.connection(), &source_domain_name)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            .map_err(LibvirtError::from)?;
 
         // Parse source domain XML to get disk path
-        let source_xml = source_domain
-            .get_xml_desc(0)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let source_xml = source_domain.get_xml_desc(0).map_err(LibvirtError::from)?;
 
-        let mut domain_info = XmlDomain::from_xml(&source_xml).map_err(|e| {
-            Box::new(LibvirtError::Libvirt(format!(
-                "Failed to parse domain XML: {}",
-                e
-            ))) as Box<dyn Error + Send + Sync>
-        })?;
+        let mut domain_info = XmlDomain::from_xml(&source_xml)
+            .map_err(|e| LibvirtError::Libvirt(format!("Failed to parse domain XML: {e}")))?;
 
         // Generate new ID and domain name for the clone
         let id = uuid::Uuid::new_v4().to_string();
-        let clone_domain_name = format!("malbox-{}", id);
+        let clone_domain_name = format!("malbox-{id}");
 
-        domain_info.name = clone_domain_name.clone();
+        domain_info.name.clone_from(&clone_domain_name);
 
         // Create new disk using source disk as backing file
-        let source_disk_path = domain_info.disk_path().ok_or_else(|| {
-            Box::new(LibvirtError::Libvirt(
-                "Source domain has no disk".to_string(),
-            )) as Box<dyn Error + Send + Sync>
-        })?;
+        let source_disk_path = domain_info.disk_path();
 
-        let clone_disk_path = self
-            .create_disk(
-                &clone_domain_name,
-                Some(&source_disk_path),
-                64 * 1024 * 1024 * 1024,
-            )
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let clone_disk_path = self.create_disk(
+            &clone_domain_name,
+            Some(&source_disk_path),
+            64 * 1024 * 1024 * 1024,
+        )?;
 
         domain_info.update_disk_path(&clone_disk_path);
 
         // Define the cloned domain
-        let clone_xml = domain_info.to_xml().map_err(|e| {
-            Box::new(LibvirtError::Libvirt(format!(
-                "Failed to serialize domain XML: {}",
-                e
-            ))) as Box<dyn Error + Send + Sync>
-        })?;
+        let clone_xml = domain_info
+            .to_xml()
+            .map_err(|e| LibvirtError::Libvirt(format!("Failed to serialize domain XML: {e}")))?;
 
-        let _clone_domain = Domain::define_xml(self.connection(), &clone_xml)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let _clone_domain =
+            Domain::define_xml(self.connection(), &clone_xml).map_err(LibvirtError::from)?;
 
         // Track allocation
         self.allocated()
             .write()
-            .unwrap()
+            .expect("allocated-machines lock poisoned")
             .insert(MachineId(id.clone()));
 
         // Return stopped — caller must start() explicitly

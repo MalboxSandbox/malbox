@@ -19,20 +19,35 @@ use crate::plan::{DetonationRequest, SUBMISSION_PROFILE, TaskSelection, selected
 use crate::routing::RoutingTable;
 
 /// A validated submission: the root sample plus the user's choices.
+#[derive(Debug)]
 pub struct NewSubmission {
+    /// Stored `samples` row of the submitted file.
     pub sample: SampleEntity,
+    /// Detected artifact type and MIME of the submitted file.
     pub identification: Identification,
+    /// Original file name or target shown to users.
     pub target: String,
+    /// Plugins the user selected; empty means every routed plugin.
     pub plugins: Vec<String>,
+    /// Plugins the user excluded.
     pub excluded_plugins: Vec<String>,
+    /// Detonation timeout, in seconds.
     pub timeout: i64,
+    /// Scheduling priority; higher runs first.
     pub priority: i64,
+    /// Requested guest platform for an explicit root detonation.
     pub platform: Option<MachinePlatform>,
+    /// Requested snapshot for an explicit root detonation.
     pub snapshot_id: Option<Uuid>,
+    /// Requested machine for an explicit root detonation.
     pub machine_id: Option<i32>,
+    /// User that submitted the task.
     pub owner: Option<String>,
+    /// Free-form labels attached to the task.
     pub tags: Option<Vec<String>>,
+    /// Analysis options chosen at submission time.
     pub params: SubmissionParams,
+    /// Task that produced this submission, for resubmitted children.
     pub parent_task_id: Option<i32>,
 }
 
@@ -46,6 +61,11 @@ pub(crate) fn relative_storage_path(data_dir: &Path, path: &Path) -> String {
 }
 
 /// Insert the task and its root artifact in one transaction.
+///
+/// # Errors
+///
+/// Fails when the params cannot be encoded, the sample blob path is invalid,
+/// or a database insert fails.
 pub async fn create_task(
     core: &OrchestratorCore,
     sub: NewSubmission,
@@ -113,6 +133,11 @@ pub async fn create_task(
 }
 
 /// The `samples` row for an artifact's blob, created if missing.
+///
+/// # Errors
+///
+/// Fails when the artifact's blob is missing or unreadable, hashing panics, or
+/// the database insert fails.
 pub async fn ensure_sample_for_artifact(
     core: &OrchestratorCore,
     artifact: &TaskArtifact,
@@ -128,7 +153,7 @@ pub async fn ensure_sample_for_artifact(
     let identify = core.identify;
     let sha256 = artifact.sha256.clone();
     let sample = tokio::task::spawn_blocking(move || Sample {
-        file_size: data.len() as i64,
+        file_size: i64::try_from(data.len()).unwrap_or(i64::MAX),
         file_type: identify(&data, None).description,
         md5: hashing::get_md5(&data),
         crc32: hashing::get_crc32(&data),
@@ -144,7 +169,7 @@ pub async fn ensure_sample_for_artifact(
 
 /// The root detonation the submission asked for explicitly (platform,
 /// snapshot or machine), if any.
-pub fn explicit_detonation(
+pub(crate) fn explicit_detonation(
     task: &Task,
     params: &SubmissionParams,
     routing: &RoutingTable,

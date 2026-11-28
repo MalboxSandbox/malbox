@@ -3,7 +3,7 @@
 use std::cmp::Reverse;
 
 /// Higher is more interesting to detonate.
-pub fn interest_class(artifact_type: &str) -> u8 {
+pub(crate) fn interest_class(artifact_type: &str) -> u8 {
     const CLASSES: [(&[&str], u8); 3] = [
         (&["executable/", "installer/"], 3),
         (&["code/", "shortcut/", "java/", "android/"], 2),
@@ -16,15 +16,15 @@ pub fn interest_class(artifact_type: &str) -> u8 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
-    pub artifact_id: i64,
-    pub artifact_type: String,
-    pub max_score: Option<i16>,
-    pub depth: i32,
+pub(crate) struct Candidate {
+    pub(crate) artifact_id: i64,
+    pub(crate) artifact_type: String,
+    pub(crate) max_score: Option<i16>,
+    pub(crate) depth: i32,
 }
 
 /// Class desc, then max score desc (`None` last), then depth asc, then id asc.
-pub fn order_candidates(c: &mut [Candidate]) {
+pub(crate) fn order_candidates(c: &mut [Candidate]) {
     c.sort_by_key(|x| {
         (
             Reverse(interest_class(&x.artifact_type)),

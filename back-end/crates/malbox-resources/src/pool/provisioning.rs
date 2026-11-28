@@ -7,7 +7,7 @@ use malbox_database::repositories::provision_runs::{self, ProvisionRun};
 use malbox_database::repositories::snapshots;
 use malbox_machinery::Machine;
 use malbox_machinery::machine::{CreateMachineParams, ManagementAccess};
-use malbox_machinery::provider::capabilities::Allocate;
+use malbox_machinery::provider::capabilities::{Allocate, StopMode};
 use malbox_machinery::provisioner::{ProvisionContext, ProvisionStatus, create_provisioner};
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, SocketAddr};
@@ -15,8 +15,8 @@ use tokio::net::TcpStream;
 use tokio::time::Instant;
 use tracing::{info, instrument, warn};
 
-/// Compute a deterministic hash of a provider_config value.
-pub(crate) fn hash_provider_config(config: &Option<toml::Value>) -> String {
+/// Compute a deterministic hash of a `provider_config` value.
+pub(crate) fn hash_provider_config(config: Option<&toml::Value>) -> String {
     match config {
         Some(val) => {
             let json = serde_json::to_string(val).unwrap_or_default();
@@ -31,7 +31,7 @@ use super::MachinePool;
 
 /// Name of the base snapshot created during initial machine provisioning.
 /// This snapshot represents the clean OS state and is always preserved.
-pub const BASE_SNAPSHOT_NAME: &str = "base";
+pub(crate) const BASE_SNAPSHOT_NAME: &str = "base";
 
 /// Build provider creation parameters from a config-declared machine definition.
 fn build_create_params(config: &MachineConfig, image_path: &str) -> CreateMachineParams {
@@ -80,9 +80,18 @@ fn build_create_params_from_db(
         name: db_machine.name.clone(),
         platform,
         arch,
-        cpus: db_machine.cpus.unwrap_or(2) as u32,
-        memory_mb: db_machine.memory_mb.unwrap_or(2048) as u32,
-        disk_size_mb: db_machine.disk_size_mb.unwrap_or(65536) as u64,
+        cpus: db_machine
+            .cpus
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(2),
+        memory_mb: db_machine
+            .memory_mb
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(2048),
+        disk_size_mb: db_machine
+            .disk_size_mb
+            .and_then(|v| u64::try_from(v).ok())
+            .unwrap_or(65536),
         base_image: if image_path.is_empty() {
             None
         } else {
@@ -100,19 +109,19 @@ impl MachinePool {
 
         let db_machine = machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
+            .map_err(ResourceError::Database)?
             .ok_or(ResourceError::MachineNotFound {
                 id: machine_id.to_string(),
             })?;
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let provider_config = self
             .provider_configs
             .read()
-            .unwrap()
+            .expect("provider config lock poisoned")
             .get(&db_machine.name)
             .cloned();
         let params = build_create_params_from_db(&db_machine, image_path, provider_config);
@@ -130,7 +139,7 @@ impl MachinePool {
         wait_for_endpoint(
             allocate.as_ref(),
             &mut machine,
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
         )
         .await?;
 
@@ -147,13 +156,13 @@ impl MachinePool {
             &ip_str,
         )
         .await
-        .map_err(|e| ResourceError::Database(e.into()))?;
+        .map_err(ResourceError::Database)?;
 
         // Stop before snapshotting — produces an internal disk-only snapshot
         allocate
-            .stop(&machine, true)
+            .stop(&machine, StopMode::Force)
             .await
-            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {}", e)))?;
+            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {e}")))?;
 
         // Create the "base" snapshot
         if let Some(snapshot_cap) = self.provider.snapshot() {
@@ -170,10 +179,10 @@ impl MachinePool {
                 Some("Clean OS disk state"),
                 None,
                 None,
-                true,
+                snapshots::SnapshotActivation::Activate,
             )
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
             info!(
                 machine_id,
@@ -184,7 +193,7 @@ impl MachinePool {
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Ready, None)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         self.machine_available.notify_waiters();
         info!(machine_id, "Machine is ready");
@@ -205,7 +214,7 @@ impl MachinePool {
 
         machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Creating, None)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let params = build_create_params(config, image_path);
         let mut machine = allocate
@@ -221,7 +230,7 @@ impl MachinePool {
         wait_for_endpoint(
             allocate.as_ref(),
             &mut machine,
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
         )
         .await?;
 
@@ -238,12 +247,12 @@ impl MachinePool {
             &ip_str,
         )
         .await
-        .map_err(|e| ResourceError::Database(e.into()))?;
+        .map_err(ResourceError::Database)?;
 
         allocate
-            .stop(&machine, true)
+            .stop(&machine, StopMode::Force)
             .await
-            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {}", e)))?;
+            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {e}")))?;
 
         if let Some(snapshot_cap) = self.provider.snapshot() {
             let snap_id = snapshot_cap
@@ -259,10 +268,10 @@ impl MachinePool {
                 Some("Clean OS disk state"),
                 None,
                 None,
-                true,
+                snapshots::SnapshotActivation::Activate,
             )
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
             info!(
                 machine_id,
@@ -276,7 +285,13 @@ impl MachinePool {
 
     /// Run a provisioning step against a ready machine.
     ///
-    /// Returns the completed ProvisionRun record.
+    /// Returns the completed `ProvisionRun` record.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine is not ready, lacks a provider ID or valid IP,
+    /// the requested snapshot name is taken, or a database update fails.
+    /// Provisioner failures are recorded in the returned run, not returned.
     #[instrument(skip_all, fields(machine_id, step = %step.provisioner_type), err)]
     pub async fn run_provision_step(
         &self,
@@ -287,7 +302,7 @@ impl MachinePool {
         // Atomic Ready → Provisioning transition (prevents concurrent provisioning)
         let db_machine = machinery::transition_to_provisioning(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?
+            .map_err(ResourceError::Database)?
             .ok_or(ResourceError::InvalidMachineState {
                 id: machine_id,
                 status: "not ready".to_string(),
@@ -295,68 +310,25 @@ impl MachinePool {
             })?;
 
         // If the step creates a snapshot, check the name isn't already taken in the DB.
-        if let Some(ref snap_name) = step.snapshot {
+        if let Some(snap_name) = &step.snapshot {
             let existing = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
                 .await
-                .map_err(|e| ResourceError::Database(e.into()))?;
+                .map_err(ResourceError::Database)?;
 
             if existing.iter().any(|s| s.name == *snap_name) {
-                let _ = machinery::update_machine_status(
-                    &self.db,
-                    machine_id,
-                    MachineStatusDb::Ready,
-                    None,
-                )
-                .await;
+                self.restore_ready(machine_id).await;
                 return Err(ResourceError::Internal(format!(
-                    "Snapshot '{}' already exists on machine {}",
-                    snap_name, machine_id
+                    "Snapshot '{snap_name}' already exists on machine {machine_id}"
                 )));
             }
         }
 
         // Validate preconditions before creating the provision run
-        let provider_id = match db_machine.provider_id.as_deref() {
-            Some(id) if !id.is_empty() => id.to_string(),
-            _ => {
-                let _ = machinery::update_machine_status(
-                    &self.db,
-                    machine_id,
-                    MachineStatusDb::Ready,
-                    None,
-                )
-                .await;
-                return Err(ResourceError::MachineNotReady {
-                    reason: "Machine has no provider_id".to_string(),
-                });
-            }
-        };
-
-        let ip: std::net::IpAddr = match db_machine.ip.as_deref() {
-            Some(ip_str) => match ip_str.parse() {
-                Ok(ip) => ip,
-                Err(e) => {
-                    let _ = machinery::update_machine_status(
-                        &self.db,
-                        machine_id,
-                        MachineStatusDb::Ready,
-                        None,
-                    )
-                    .await;
-                    return Err(ResourceError::Internal(format!("Invalid IP in DB: {}", e)));
-                }
-            },
-            None => {
-                let _ = machinery::update_machine_status(
-                    &self.db,
-                    machine_id,
-                    MachineStatusDb::Ready,
-                    None,
-                )
-                .await;
-                return Err(ResourceError::MachineNotReady {
-                    reason: "Machine has no IP address".to_string(),
-                });
+        let (provider_id, ip) = match provision_target(&db_machine) {
+            Ok(target) => target,
+            Err(e) => {
+                self.restore_ready(machine_id).await;
+                return Err(e);
             }
         };
 
@@ -376,17 +348,43 @@ impl MachinePool {
             config_json.as_ref(),
         )
         .await
-        .map_err(|e| ResourceError::Database(e.into()))?;
+        .map_err(ResourceError::Database)?;
 
         // Run the provisioner
         let result = self
             .do_provision_step(machine_id, &provider_id, ip, platform, step, revert_to)
             .await;
 
-        let completed_run = match result {
+        let completed_run = self
+            .record_provision_result(machine_id, run.id, step, result)
+            .await?;
+
+        // Always restore machine to Ready
+        self.restore_ready(machine_id).await;
+
+        info!(machine_id, run_id = %completed_run.id, status = ?completed_run.status, "Provisioning step complete");
+        Ok(completed_run)
+    }
+
+    /// Best-effort reset of a machine back to `Ready` after a provisioning attempt.
+    async fn restore_ready(&self, machine_id: i32) {
+        let _ =
+            machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Ready, None)
+                .await;
+    }
+
+    /// Mark the provision run as succeeded or failed according to `result`.
+    async fn record_provision_result(
+        &self,
+        machine_id: i32,
+        run_id: uuid::Uuid,
+        step: &malbox_config::provisioning::ProvisionStep,
+        result: Result<()>,
+    ) -> Result<ProvisionRun> {
+        match result {
             Ok(()) => {
                 // Look up the snapshot by name (if one was requested)
-                let snapshot_id = if let Some(ref snap_name) = step.snapshot {
+                let snapshot_id = if let Some(snap_name) = &step.snapshot {
                     snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
                         .await
                         .ok()
@@ -395,30 +393,22 @@ impl MachinePool {
                     None
                 };
 
-                provision_runs::update_provision_run_success(&self.db, run.id, None, snapshot_id)
+                provision_runs::update_provision_run_success(&self.db, run_id, None, snapshot_id)
                     .await
-                    .map_err(|e| ResourceError::Database(e.into()))?
+                    .map_err(ResourceError::Database)
             }
-            Err(ref e) => {
+            Err(e) => {
                 let output_json = serde_json::to_value(e.to_string()).ok();
                 provision_runs::update_provision_run_failed(
                     &self.db,
-                    run.id,
+                    run_id,
                     &e.to_string(),
                     output_json.as_ref(),
                 )
                 .await
-                .map_err(|e| ResourceError::Database(e.into()))?
+                .map_err(ResourceError::Database)
             }
-        };
-
-        // Always restore machine to Ready
-        let _ =
-            machinery::update_machine_status(&self.db, machine_id, MachineStatusDb::Ready, None)
-                .await;
-
-        info!(machine_id, run_id = %completed_run.id, status = ?completed_run.status, "Provisioning step complete");
-        Ok(completed_run)
+        }
     }
 
     /// Inner provisioning logic.
@@ -454,76 +444,21 @@ impl MachinePool {
             .map_err(|e| ResourceError::Provisioner(e.to_string()))?;
 
         // Revert to a snapshot so we provision from a clean state
-        let revert_name = revert_to.unwrap_or(BASE_SNAPSHOT_NAME);
+        self.revert_before_provisioning(
+            machine_id,
+            runtime_vm,
+            revert_to.unwrap_or(BASE_SNAPSHOT_NAME),
+        )
+        .await?;
 
-        if let Some(snapshot_cap) = self.provider.snapshot() {
-            let snap = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
-                .await
-                .map_err(|e| ResourceError::Database(e.into()))?
-                .into_iter()
-                .find(|s| s.name == revert_name);
-
-            match snap {
-                Some(snap) => {
-                    info!(
-                        machine_id,
-                        snapshot = revert_name,
-                        "Reverting to snapshot before provisioning"
-                    );
-                    snapshot_cap
-                        .restore_snapshot(
-                            runtime_vm,
-                            &malbox_machinery::SnapshotId(snap.provider_snapshot_id),
-                        )
-                        .await
-                        .map_err(|e| {
-                            ResourceError::Provider(format!("Snapshot revert failed: {}", e))
-                        })?;
-                }
-                None => {
-                    return Err(ResourceError::Internal(format!(
-                        "Snapshot '{}' not found on machine {}",
-                        revert_name, machine_id
-                    )));
-                }
-            }
-        }
-
-        // Clean up stale provider snapshots that aren't tracked in the DB
-        // (e.g. from a previous DB-only delete) before the new snapshot is
-        // taken. Runs after the revert so the machine no longer uses the stale
-        // snapshot (container engines refuse to remove an image in use).
-        if let Some(ref snap_name) = step.snapshot
-            && let Some(snapshot_cap) = self.provider.snapshot()
-            && let Ok(provider_snaps) = snapshot_cap.list_snapshots(runtime_vm).await
-        {
-            let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
-                .await
-                .unwrap_or_default();
-
-            if let Some(stale) = provider_snaps.iter().find(|ps| {
-                ps.name == *snap_name
-                    && !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0)
-            }) {
-                warn!(
-                    machine_id,
-                    snapshot = snap_name,
-                    "Stale provider snapshot found (not in DB), deleting before provisioning"
-                );
-                snapshot_cap.delete_snapshot(&stale.id).await.map_err(|e| {
-                    ResourceError::Provider(format!(
-                        "Failed to delete stale provider snapshot '{}': {}",
-                        snap_name, e
-                    ))
-                })?;
-            }
-        }
+        self.delete_stale_step_snapshot(machine_id, runtime_vm, step)
+            .await?;
 
         // Start the VM (snapshot revert may leave it running or stopped)
         allocate
             .start(runtime_vm)
             .await
-            .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {}", e)))?;
+            .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {e}")))?;
 
         // Wait for the management service, unless the provider reaches the
         // machine some other way (e.g. container engine exec).
@@ -536,7 +471,7 @@ impl MachinePool {
                     "Waiting for management service"
                 );
 
-                wait_for_connectivity(ip, port, std::time::Duration::from_secs(180)).await?;
+                wait_for_connectivity(ip, port, std::time::Duration::from_mins(3)).await?;
             }
             ManagementAccess::ContainerEngine { .. } => {
                 info!(
@@ -546,14 +481,12 @@ impl MachinePool {
             }
         }
 
-        let endpoint = malbox_machinery::machine::MachineEndpoint {
-            address: ip,
-            id: provider_id.to_string(),
-            platform,
-        };
-
         let context = ProvisionContext {
-            endpoint,
+            endpoint: malbox_machinery::machine::MachineEndpoint {
+                address: ip,
+                id: provider_id.to_string(),
+                platform,
+            },
             config: step.config.clone(),
             access,
         };
@@ -581,54 +514,163 @@ impl MachinePool {
         // Stop the VM before snapshotting — produces an internal disk-only
         // snapshot. Reverts restore the disk cleanly and the VM boots fresh.
         allocate
-            .stop(runtime_vm, false)
+            .stop(runtime_vm, StopMode::Graceful)
             .await
-            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {}", e)))?;
+            .map_err(|e| ResourceError::Provider(format!("Failed to stop VM: {e}")))?;
 
-        // Create snapshot if requested
-        if let Some(ref snap_name) = step.snapshot {
-            if let Some(snapshot_cap) = self.provider.snapshot() {
-                let snap_id = snapshot_cap
-                    .create_snapshot(runtime_vm, snap_name)
-                    .await
-                    .map_err(|e| ResourceError::Provider(e.to_string()))?;
+        self.snapshot_after_provisioning(machine_id, runtime_vm, step)
+            .await
+    }
 
-                let guest_plugins_json = if step.guest_plugins.is_empty() {
-                    None
-                } else {
-                    Some(serde_json::json!(step.guest_plugins))
-                };
+    /// Restore the DB-tracked snapshot `revert_name` so provisioning starts clean.
+    ///
+    /// No-op when the provider has no snapshot capability.
+    async fn revert_before_provisioning(
+        &self,
+        machine_id: i32,
+        runtime_vm: &Machine,
+        revert_name: &str,
+    ) -> Result<()> {
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            return Ok(());
+        };
+        let snap = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
+            .await
+            .map_err(ResourceError::Database)?
+            .into_iter()
+            .find(|s| s.name == revert_name)
+            .ok_or_else(|| {
+                ResourceError::Internal(format!(
+                    "Snapshot '{revert_name}' not found on machine {machine_id}"
+                ))
+            })?;
 
-                snapshots::insert_snapshot(
-                    &self.db,
-                    machine_id,
-                    snap_name,
-                    &snap_id.0,
-                    None,
-                    None,
-                    guest_plugins_json.as_ref(),
-                    true,
-                )
-                .await
-                .map_err(|e| ResourceError::Database(e.into()))?;
+        info!(
+            machine_id,
+            snapshot = revert_name,
+            "Reverting to snapshot before provisioning"
+        );
+        snapshot_cap
+            .restore_snapshot(
+                runtime_vm,
+                &malbox_machinery::SnapshotId(snap.provider_snapshot_id),
+            )
+            .await
+            .map_err(|e| ResourceError::Provider(format!("Snapshot revert failed: {e}")))
+    }
 
-                info!(
-                    machine_id,
-                    snapshot = snap_name,
-                    provider_id = %snap_id,
-                    "Snapshot created (disk-only)"
-                );
-            } else {
-                warn!(
-                    machine_id,
-                    snapshot = snap_name,
-                    "Step requests snapshot but provider does not support snapshots"
-                );
-            }
+    /// Delete a provider snapshot named like the step's target that the DB
+    /// does not track (e.g. left over from a DB-only delete).
+    ///
+    /// Runs after the revert so the machine no longer uses the stale
+    /// snapshot (container engines refuse to remove an image in use).
+    async fn delete_stale_step_snapshot(
+        &self,
+        machine_id: i32,
+        runtime_vm: &Machine,
+        step: &malbox_config::provisioning::ProvisionStep,
+    ) -> Result<()> {
+        let Some(snap_name) = &step.snapshot else {
+            return Ok(());
+        };
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            return Ok(());
+        };
+        let Ok(provider_snaps) = snapshot_cap.list_snapshots(runtime_vm).await else {
+            return Ok(());
+        };
+        let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
+            .await
+            .unwrap_or_default();
+
+        if let Some(stale) = provider_snaps.iter().find(|ps| {
+            ps.name == *snap_name && !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0)
+        }) {
+            warn!(
+                machine_id,
+                snapshot = snap_name,
+                "Stale provider snapshot found (not in DB), deleting before provisioning"
+            );
+            snapshot_cap.delete_snapshot(&stale.id).await.map_err(|e| {
+                ResourceError::Provider(format!(
+                    "Failed to delete stale provider snapshot '{snap_name}': {e}"
+                ))
+            })?;
         }
-
         Ok(())
     }
+
+    /// Take and record the step's requested snapshot, if any.
+    async fn snapshot_after_provisioning(
+        &self,
+        machine_id: i32,
+        runtime_vm: &Machine,
+        step: &malbox_config::provisioning::ProvisionStep,
+    ) -> Result<()> {
+        let Some(snap_name) = &step.snapshot else {
+            return Ok(());
+        };
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            warn!(
+                machine_id,
+                snapshot = snap_name,
+                "Step requests snapshot but provider does not support snapshots"
+            );
+            return Ok(());
+        };
+        let snap_id = snapshot_cap
+            .create_snapshot(runtime_vm, snap_name)
+            .await
+            .map_err(|e| ResourceError::Provider(e.to_string()))?;
+
+        let guest_plugins_json = if step.guest_plugins.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!(step.guest_plugins))
+        };
+
+        snapshots::insert_snapshot(
+            &self.db,
+            machine_id,
+            snap_name,
+            &snap_id.0,
+            None,
+            None,
+            guest_plugins_json.as_ref(),
+            snapshots::SnapshotActivation::Activate,
+        )
+        .await
+        .map_err(ResourceError::Database)?;
+
+        info!(
+            machine_id,
+            snapshot = snap_name,
+            provider_id = %snap_id,
+            "Snapshot created (disk-only)"
+        );
+        Ok(())
+    }
+}
+
+/// Provider ID and management IP of a machine about to be provisioned.
+fn provision_target(db_machine: &machinery::Machine) -> Result<(String, IpAddr)> {
+    let provider_id = match db_machine.provider_id.as_deref() {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => {
+            return Err(ResourceError::MachineNotReady {
+                reason: "Machine has no provider_id".to_string(),
+            });
+        }
+    };
+    let Some(ip_str) = db_machine.ip.as_deref() else {
+        return Err(ResourceError::MachineNotReady {
+            reason: "Machine has no IP address".to_string(),
+        });
+    };
+    let ip = ip_str
+        .parse()
+        .map_err(|e| ResourceError::Internal(format!("Invalid IP in DB: {e}")))?;
+    Ok((provider_id, ip))
 }
 
 /// Wait until a machine has an endpoint (IP address) available.

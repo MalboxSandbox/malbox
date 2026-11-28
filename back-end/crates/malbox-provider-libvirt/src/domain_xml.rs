@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 /// Domain structure that serializes/deserializes to/from libvirt XML format.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "domain")]
-pub struct Domain {
+pub(crate) struct Domain {
     #[serde(rename = "@type")]
-    pub domain_type: String,
+    pub kind: String,
     pub name: String,
     pub memory: Memory,
     pub vcpu: Vcpu,
@@ -21,7 +21,7 @@ pub struct Domain {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Memory {
+pub(crate) struct Memory {
     #[serde(rename = "@unit")]
     pub unit: String,
     #[serde(rename = "$text")]
@@ -29,7 +29,7 @@ pub struct Memory {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Vcpu {
+pub(crate) struct Vcpu {
     #[serde(rename = "@placement")]
     pub placement: String,
     #[serde(rename = "$text")]
@@ -37,14 +37,14 @@ pub struct Vcpu {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Os {
+pub(crate) struct Os {
     #[serde(rename = "type")]
     pub os_type: OsType,
     pub boot: Boot,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OsType {
+pub(crate) struct OsType {
     #[serde(rename = "@arch")]
     pub arch: String,
     #[serde(rename = "@machine")]
@@ -54,22 +54,22 @@ pub struct OsType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Boot {
+pub(crate) struct Boot {
     #[serde(rename = "@dev")]
     pub dev: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Features {
+pub(crate) struct Features {
     pub acpi: EmptyElement,
     pub apic: EmptyElement,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EmptyElement {}
+pub(crate) struct EmptyElement {}
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Cpu {
+pub(crate) struct Cpu {
     #[serde(rename = "@mode")]
     pub mode: String,
     #[serde(rename = "@check")]
@@ -77,7 +77,7 @@ pub struct Cpu {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Clock {
+pub(crate) struct Clock {
     #[serde(rename = "@offset")]
     pub offset: String,
     #[serde(rename = "timer")]
@@ -85,7 +85,7 @@ pub struct Clock {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Timer {
+pub(crate) struct Timer {
     #[serde(rename = "@name")]
     pub name: String,
     #[serde(rename = "@tickpolicy", skip_serializing_if = "Option::is_none")]
@@ -95,7 +95,7 @@ pub struct Timer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Devices {
+pub(crate) struct Devices {
     pub emulator: String,
     pub disk: Disk,
     pub interface: Interface,
@@ -106,9 +106,9 @@ pub struct Devices {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Disk {
+pub(crate) struct Disk {
     #[serde(rename = "@type")]
-    pub disk_type: String,
+    pub kind: String,
     #[serde(rename = "@device")]
     pub device: String,
     pub driver: DiskDriver,
@@ -117,7 +117,7 @@ pub struct Disk {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DiskDriver {
+pub(crate) struct DiskDriver {
     #[serde(rename = "@name")]
     pub name: String,
     #[serde(rename = "@type")]
@@ -125,13 +125,13 @@ pub struct DiskDriver {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DiskSource {
+pub(crate) struct DiskSource {
     #[serde(rename = "@file")]
     pub file: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DiskTarget {
+pub(crate) struct DiskTarget {
     #[serde(rename = "@dev")]
     pub dev: String,
     #[serde(rename = "@bus")]
@@ -139,9 +139,9 @@ pub struct DiskTarget {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Interface {
+pub(crate) struct Interface {
     #[serde(rename = "@type")]
-    pub interface_type: String,
+    pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac: Option<MacAddress>,
     pub source: InterfaceSource,
@@ -149,13 +149,13 @@ pub struct Interface {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MacAddress {
+pub(crate) struct MacAddress {
     #[serde(rename = "@address")]
     pub address: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct InterfaceSource {
+pub(crate) struct InterfaceSource {
     #[serde(rename = "@network", skip_serializing_if = "Option::is_none")]
     pub network: Option<String>,
     #[serde(rename = "@bridge", skip_serializing_if = "Option::is_none")]
@@ -163,20 +163,20 @@ pub struct InterfaceSource {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct InterfaceModel {
+pub(crate) struct InterfaceModel {
     #[serde(rename = "@type")]
     pub model_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Console {
+pub(crate) struct Console {
     #[serde(rename = "@type")]
     pub console_type: String,
     pub target: ConsoleTarget,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ConsoleTarget {
+pub(crate) struct ConsoleTarget {
     #[serde(rename = "@type")]
     pub target_type: String,
     #[serde(rename = "@port")]
@@ -184,14 +184,14 @@ pub struct ConsoleTarget {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Channel {
+pub(crate) struct Channel {
     #[serde(rename = "@type")]
     pub channel_type: String,
     pub target: ChannelTarget,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ChannelTarget {
+pub(crate) struct ChannelTarget {
     #[serde(rename = "@type")]
     pub target_type: String,
     #[serde(rename = "@name")]
@@ -199,9 +199,9 @@ pub struct ChannelTarget {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Graphics {
+pub(crate) struct Graphics {
     #[serde(rename = "@type")]
-    pub graphics_type: String,
+    pub kind: String,
     #[serde(rename = "@port")]
     pub port: String,
     #[serde(rename = "@autoport")]
@@ -214,7 +214,7 @@ pub struct Graphics {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "listen")]
-pub struct ListenElement {
+pub(crate) struct ListenElement {
     #[serde(rename = "@type")]
     pub listen_type: String,
     #[serde(rename = "@address")]
@@ -222,12 +222,12 @@ pub struct ListenElement {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Video {
+pub(crate) struct Video {
     pub model: VideoModel,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct VideoModel {
+pub(crate) struct VideoModel {
     #[serde(rename = "@type")]
     pub model_type: String,
     #[serde(rename = "@ram")]
@@ -246,7 +246,11 @@ impl Domain {
     /// Uses sensible defaults for disk format (qcow2), network (NAT via
     /// libvirt's default network), and device models. The disk bus is set
     /// to virtio and the NIC model to e1000.
-    pub fn from_params(name: String, params: &CreateMachineParams, disk_path: String) -> Self {
+    pub(crate) fn from_params(
+        name: String,
+        params: &CreateMachineParams,
+        disk_path: String,
+    ) -> Self {
         let (os_type, arch_str, machine_type) = match params.arch {
             Arch::X64 => ("hvm", "x86_64", "pc-q35-5.2"),
             Arch::X86 => ("hvm", "i686", "pc-i440fx-5.2"),
@@ -258,7 +262,7 @@ impl Domain {
         };
 
         Domain {
-            domain_type: "kvm".to_string(),
+            kind: "kvm".to_string(),
             name,
             memory: Memory {
                 unit: "MiB".to_string(),
@@ -286,110 +290,125 @@ impl Domain {
                 mode: "host-passthrough".to_string(),
                 check: "none".to_string(),
             },
-            clock: Clock {
-                offset: "utc".to_string(),
-                timers: vec![
-                    Timer {
-                        name: "rtc".to_string(),
-                        tickpolicy: Some("catchup".to_string()),
-                        present: None,
-                    },
-                    Timer {
-                        name: "pit".to_string(),
-                        tickpolicy: Some("delay".to_string()),
-                        present: None,
-                    },
-                    Timer {
-                        name: "hpet".to_string(),
-                        tickpolicy: None,
-                        present: Some("no".to_string()),
-                    },
-                ],
-            },
+            clock: Clock::default_timers(),
             on_poweroff: "destroy".to_string(),
             on_reboot: "restart".to_string(),
             on_crash: "destroy".to_string(),
-            devices: Devices {
-                emulator: emulator.to_string(),
-                disk: Disk {
-                    disk_type: "file".to_string(),
-                    device: "disk".to_string(),
-                    driver: DiskDriver {
-                        name: "qemu".to_string(),
-                        driver_type: "qcow2".to_string(),
-                    },
-                    source: DiskSource { file: disk_path },
-                    target: DiskTarget {
-                        dev: "vda".to_string(),
-                        bus: "virtio".to_string(),
-                    },
-                },
-                // Default: NAT via libvirt's "default" network with e1000 NIC
-                interface: Interface {
-                    interface_type: "network".to_string(),
-                    mac: None,
-                    source: InterfaceSource {
-                        network: Some("default".to_string()),
-                        bridge: None,
-                    },
-                    model: InterfaceModel {
-                        model_type: "e1000".to_string(),
-                    },
-                },
-                console: Console {
-                    console_type: "pty".to_string(),
-                    target: ConsoleTarget {
-                        target_type: "serial".to_string(),
-                        port: "0".to_string(),
-                    },
-                },
-                channel: Channel {
-                    channel_type: "unix".to_string(),
-                    target: ChannelTarget {
-                        target_type: "virtio".to_string(),
-                        name: "org.qemu.guest_agent.0".to_string(),
-                    },
-                },
-                graphics: Graphics {
-                    graphics_type: "vnc".to_string(),
-                    port: "-1".to_string(),
-                    autoport: "yes".to_string(),
-                    listen: "127.0.0.1".to_string(),
-                    listen_element: Some(ListenElement {
-                        listen_type: "address".to_string(),
-                        address: "127.0.0.1".to_string(),
-                    }),
-                },
-                video: Video {
-                    model: VideoModel {
-                        model_type: "qxl".to_string(),
-                        ram: "65536".to_string(),
-                        vram: "65536".to_string(),
-                        vgamem: "16384".to_string(),
-                        heads: "1".to_string(),
-                    },
-                },
-            },
+            devices: Devices::defaults(emulator.to_string(), disk_path),
         }
     }
 
     /// Serialize to XML string.
-    pub fn to_xml(&self) -> Result<String, quick_xml::SeError> {
+    pub(crate) fn to_xml(&self) -> Result<String, quick_xml::SeError> {
         quick_xml::se::to_string(self)
     }
 
     /// Deserialize from XML string.
-    pub fn from_xml(xml: &str) -> Result<Self, quick_xml::DeError> {
+    pub(crate) fn from_xml(xml: &str) -> Result<Self, quick_xml::DeError> {
         quick_xml::de::from_str(xml)
     }
 
     /// Extract disk file path from domain.
-    pub fn disk_path(&self) -> Option<String> {
-        Some(self.devices.disk.source.file.clone())
+    pub(crate) fn disk_path(&self) -> String {
+        self.devices.disk.source.file.clone()
     }
 
     /// Update the disk file path in domain.
-    pub fn update_disk_path(&mut self, new_path: &str) {
+    pub(crate) fn update_disk_path(&mut self, new_path: &str) {
         self.devices.disk.source.file = new_path.to_string();
+    }
+}
+
+impl Clock {
+    /// UTC clock with Windows-friendly RTC/PIT tick policies and HPET disabled.
+    fn default_timers() -> Self {
+        Clock {
+            offset: "utc".to_string(),
+            timers: vec![
+                Timer {
+                    name: "rtc".to_string(),
+                    tickpolicy: Some("catchup".to_string()),
+                    present: None,
+                },
+                Timer {
+                    name: "pit".to_string(),
+                    tickpolicy: Some("delay".to_string()),
+                    present: None,
+                },
+                Timer {
+                    name: "hpet".to_string(),
+                    tickpolicy: None,
+                    present: Some("no".to_string()),
+                },
+            ],
+        }
+    }
+}
+
+impl Devices {
+    /// Default device set: virtio qcow2 disk, NAT e1000 NIC, serial console,
+    /// guest-agent channel, localhost VNC and QXL video.
+    fn defaults(emulator: String, disk_path: String) -> Self {
+        Devices {
+            emulator,
+            disk: Disk {
+                kind: "file".to_string(),
+                device: "disk".to_string(),
+                driver: DiskDriver {
+                    name: "qemu".to_string(),
+                    driver_type: "qcow2".to_string(),
+                },
+                source: DiskSource { file: disk_path },
+                target: DiskTarget {
+                    dev: "vda".to_string(),
+                    bus: "virtio".to_string(),
+                },
+            },
+            // Default: NAT via libvirt's "default" network with e1000 NIC
+            interface: Interface {
+                kind: "network".to_string(),
+                mac: None,
+                source: InterfaceSource {
+                    network: Some("default".to_string()),
+                    bridge: None,
+                },
+                model: InterfaceModel {
+                    model_type: "e1000".to_string(),
+                },
+            },
+            console: Console {
+                console_type: "pty".to_string(),
+                target: ConsoleTarget {
+                    target_type: "serial".to_string(),
+                    port: "0".to_string(),
+                },
+            },
+            channel: Channel {
+                channel_type: "unix".to_string(),
+                target: ChannelTarget {
+                    target_type: "virtio".to_string(),
+                    name: "org.qemu.guest_agent.0".to_string(),
+                },
+            },
+            graphics: Graphics {
+                kind: "vnc".to_string(),
+                port: "-1".to_string(),
+                autoport: "yes".to_string(),
+                listen: "127.0.0.1".to_string(),
+                listen_element: Some(ListenElement {
+                    listen_type: "address".to_string(),
+                    address: "127.0.0.1".to_string(),
+                }),
+            },
+            video: Video {
+                model: VideoModel {
+                    model_type: "qxl".to_string(),
+                    ram: "65536".to_string(),
+                    vram: "65536".to_string(),
+                    vgamem: "16384".to_string(),
+                    heads: "1".to_string(),
+                },
+            },
+        }
     }
 }

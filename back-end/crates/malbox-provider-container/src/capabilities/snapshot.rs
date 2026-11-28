@@ -172,7 +172,7 @@ impl ContainerProvider {
                 id: SnapshotId(tag),
                 description: None,
                 created_at: image.created,
-                size_bytes: Some(image.size as u64),
+                size_bytes: u64::try_from(image.size).ok(),
                 is_current: current_image.as_deref() == Some(image.id.as_str()),
             })
             .collect())

@@ -2,6 +2,7 @@ use crate::{LibvirtError, LibvirtProvider, domain_xml::Domain as XmlDomain};
 use async_trait::async_trait;
 use malbox_machinery::{
     Allocate, CreateMachineParams, Machine, MachineEndpoint, MachineId, MachineState, Platform,
+    StopMode,
 };
 use std::error::Error;
 use virt::domain::Domain;
@@ -21,42 +22,35 @@ impl Allocate for LibvirtProvider {
 
         // Create a qcow2 overlay disk (backed by the base image if provided)
         let capacity_bytes = params.disk_size_mb * 1024 * 1024;
-        let disk_path = self
-            .create_disk(&domain_name, params.base_image.as_deref(), capacity_bytes)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let disk_path =
+            self.create_disk(&domain_name, params.base_image.as_deref(), capacity_bytes)?;
 
         // Generate the libvirt domain XML
-        let xml = self
-            .build_domain_xml(&domain_name, params, &disk_path)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let xml = Self::build_domain_xml(&domain_name, params, &disk_path)?;
 
         // Register the domain in libvirt (persistent, not started)
         let domain = if let Ok(existing) = Domain::lookup_by_name(self.connection(), &domain_name) {
             tracing::warn!(domain = %domain_name, "Domain already exists, reusing");
             existing
         } else {
-            Domain::define_xml(self.connection(), &xml)
-                .map_err(LibvirtError::from)
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?
+            Domain::define_xml(self.connection(), &xml).map_err(LibvirtError::from)?
         };
 
         // Store the machine name in domain metadata so we can link back
         // to the DB record when reconstructing Machine structs on restart.
         domain
             .set_metadata(
-                virt::sys::VIR_DOMAIN_METADATA_DESCRIPTION as i32,
+                virt::sys::VIR_DOMAIN_METADATA_DESCRIPTION.cast_signed(),
                 Some(&params.name),
                 None,
                 None,
                 0,
             )
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            .map_err(LibvirtError::from)?;
 
         self.allocated()
             .write()
-            .unwrap()
+            .expect("allocated-machines lock poisoned")
             .insert(MachineId(id.clone()));
 
         // Return the machine in Stopped state — caller must call start()
@@ -71,9 +65,8 @@ impl Allocate for LibvirtProvider {
     async fn destroy(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>> {
         let domain_name = format!("malbox-{}", machine.id());
 
-        let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let domain =
+            Domain::lookup_by_name(self.connection(), &domain_name).map_err(LibvirtError::from)?;
 
         // Force-stop if running
         if domain.is_active().unwrap_or(false) {
@@ -81,17 +74,10 @@ impl Allocate for LibvirtProvider {
         }
 
         // Capture the disk path before we remove the domain definition
-        let xml_desc = domain
-            .get_xml_desc(0)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let xml_desc = domain.get_xml_desc(0).map_err(LibvirtError::from)?;
 
-        let domain_info = XmlDomain::from_xml(&xml_desc).map_err(|e| {
-            Box::new(LibvirtError::Libvirt(format!(
-                "Failed to parse domain XML: {}",
-                e
-            ))) as Box<dyn Error + Send + Sync>
-        })?;
+        let domain_info = XmlDomain::from_xml(&xml_desc)
+            .map_err(|e| LibvirtError::Libvirt(format!("Failed to parse domain XML: {e}")))?;
         let disk_path = domain_info.disk_path();
 
         // Remove all libvirt snapshots
@@ -102,19 +88,19 @@ impl Allocate for LibvirtProvider {
         }
 
         // Remove the domain definition from libvirt
-        domain
-            .undefine()
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        domain.undefine().map_err(LibvirtError::from)?;
 
         // Delete the disk volume from the storage pool
-        if let Some(path) = disk_path
-            && let Ok(vol) = virt::storage_vol::StorageVol::lookup_by_path(self.connection(), &path)
+        if let Ok(vol) =
+            virt::storage_vol::StorageVol::lookup_by_path(self.connection(), &disk_path)
         {
             let _ = vol.delete(0);
         }
 
-        self.allocated().write().unwrap().remove(machine.id());
+        self.allocated()
+            .write()
+            .expect("allocated-machines lock poisoned")
+            .remove(machine.id());
         Ok(())
     }
 
@@ -125,20 +111,12 @@ impl Allocate for LibvirtProvider {
     async fn start(&self, machine: &Machine) -> Result<(), Box<dyn Error + Send + Sync>> {
         let domain_name = format!("malbox-{}", machine.id());
 
-        let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let domain =
+            Domain::lookup_by_name(self.connection(), &domain_name).map_err(LibvirtError::from)?;
 
-        if !domain
-            .is_active()
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?
-        {
+        if !domain.is_active().map_err(LibvirtError::from)? {
             // libvirt calls this "create" — it boots an already-defined domain
-            domain
-                .create()
-                .map_err(LibvirtError::from)
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            domain.create().map_err(LibvirtError::from)?;
         }
 
         Ok(())
@@ -146,39 +124,32 @@ impl Allocate for LibvirtProvider {
 
     /// Shut down a running libvirt domain.
     ///
-    /// With `force: false`, sends an ACPI shutdown signal and waits up to 5s
-    /// for the guest to power off. Falls back to force-kill if it doesn't.
-    /// With `force: true`, kills immediately.
+    /// With [`StopMode::Graceful`], sends an ACPI shutdown signal and waits up
+    /// to 5s for the guest to power off. Falls back to force-kill if it doesn't.
+    /// With [`StopMode::Force`], kills immediately.
     async fn stop(
         &self,
         machine: &Machine,
-        force: bool,
+        mode: StopMode,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let domain_name = format!("malbox-{}", machine.id());
 
-        let domain = Domain::lookup_by_name(self.connection(), &domain_name)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        let domain =
+            Domain::lookup_by_name(self.connection(), &domain_name).map_err(LibvirtError::from)?;
 
         if !domain.is_active().unwrap_or(false) {
             return Ok(());
         }
 
-        if force {
-            domain
-                .destroy()
-                .map_err(LibvirtError::from)
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+        if mode == StopMode::Force {
+            domain.destroy().map_err(LibvirtError::from)?;
         } else {
             // Try ACPI shutdown, fall back to force-kill
             if domain.shutdown().is_ok() {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
             if domain.is_active().unwrap_or(false) {
-                domain
-                    .destroy()
-                    .map_err(LibvirtError::from)
-                    .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+                domain.destroy().map_err(LibvirtError::from)?;
             }
         }
 
@@ -193,33 +164,25 @@ impl Allocate for LibvirtProvider {
         let domains = self
             .connection()
             .list_all_domains(0)
-            .map_err(LibvirtError::from)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            .map_err(LibvirtError::from)?;
 
         let mut machines = Vec::new();
 
         for domain in domains {
-            let name = domain
-                .get_name()
-                .map_err(LibvirtError::from)
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            let name = domain.get_name().map_err(LibvirtError::from)?;
 
             // Only include domains managed by malbox
-            if !name.starts_with("malbox-") {
+            let Some(id) = name.strip_prefix("malbox-") else {
                 continue;
-            }
+            };
+            let id = id.to_string();
 
-            let id = name.strip_prefix("malbox-").unwrap().to_string();
-
-            let (state_code, _reason) = domain
-                .get_state()
-                .map_err(LibvirtError::from)
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+            let (state_code, _reason) = domain.get_state().map_err(LibvirtError::from)?;
 
             let state = match state_code {
                 virt::sys::VIR_DOMAIN_RUNNING => MachineState::Running,
                 virt::sys::VIR_DOMAIN_PAUSED => MachineState::Suspended,
-                virt::sys::VIR_DOMAIN_SHUTOFF => MachineState::Stopped,
+                // VIR_DOMAIN_SHUTOFF and unknown states both map to Stopped.
                 virt::sys::VIR_DOMAIN_CRASHED => MachineState::Failed,
                 virt::sys::VIR_DOMAIN_SHUTDOWN => MachineState::Stopping,
                 _ => MachineState::Stopped,
@@ -252,9 +215,8 @@ impl Allocate for LibvirtProvider {
     ) -> Result<Option<MachineEndpoint>, Box<dyn Error + Send + Sync>> {
         let domain_name = format!("malbox-{}", machine.id());
 
-        let domain = match Domain::lookup_by_name(self.connection(), &domain_name) {
-            Ok(d) => d,
-            Err(_) => return Ok(None),
+        let Ok(domain) = Domain::lookup_by_name(self.connection(), &domain_name) else {
+            return Ok(None);
         };
 
         match Self::get_domain_ip(&domain) {

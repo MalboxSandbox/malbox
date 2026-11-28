@@ -1,8 +1,8 @@
 //! Shared plugin -> daemon notification service.
 //!
 //! Service name: `malbox/daemon/notify` (one service; every plugin notifies it).
-//! The daemon-side IPC reactor attaches the listener to its WaitSet and wakes
-//! whenever any plugin has produced data. EventIds carry a [`DaemonNotifyKind`].
+//! The daemon-side IPC reactor attaches the listener to its `WaitSet` and wakes
+//! whenever any plugin has produced data. `EventId`s carry a [`DaemonNotifyKind`].
 //!
 //! Notifying after every send is a mandatory part of the host plugin IPC
 //! contract - the daemon has no polling fallback for plugins that never
@@ -26,18 +26,24 @@ const MAX_LISTENERS: usize = 2;
 /// Which kind of data a plugin produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
+#[non_exhaustive]
 pub enum DaemonNotifyKind {
     /// A task response (streamed result chunk, progress, or final marker).
     TaskResponse = 0,
-    /// A plugin event emission (e.g. PluginStarted, TaskCompleted).
+    /// A plugin event emission (e.g. `PluginStarted`, `TaskCompleted`).
     PluginEvent = 1,
 }
 
 impl DaemonNotifyKind {
+    /// iceoryx2 event id that encodes this kind on the wire.
     pub fn event_id(self) -> EventId {
-        EventId::new(self as usize)
+        EventId::new(match self {
+            Self::TaskResponse => 0,
+            Self::PluginEvent => 1,
+        })
     }
 
+    /// Decode a received event id; `None` if it names no known kind.
     pub fn from_event_id(id: &EventId) -> Option<Self> {
         match id.as_value() {
             0 => Some(Self::TaskResponse),
@@ -48,11 +54,17 @@ impl DaemonNotifyKind {
 }
 
 /// Plugin-side notifier on the shared daemon notification service.
+#[derive(Debug)]
 pub struct DaemonNotifier {
     notifier: Notifier<IpcService>,
 }
 
 impl DaemonNotifier {
+    /// Open (or create) the shared daemon notify service and attach a notifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service or notifier cannot be created.
     pub fn new(node: &Node<IpcService>) -> Result<Self> {
         let service = node
             .service_builder(
@@ -79,6 +91,10 @@ impl DaemonNotifier {
     /// Failures may be ignored: the data send has already committed by the
     /// time this runs, so a lost notify costs at most a delayed wakeup
     /// (bounded by the daemon's interval tick), never data loss.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the notification cannot be delivered.
     pub fn notify(&self, kind: DaemonNotifyKind) -> Result<()> {
         self.notifier
             .notify_with_custom_event_id(kind.event_id())
@@ -87,12 +103,18 @@ impl DaemonNotifier {
     }
 }
 
-/// Daemon-side listener, attached to the reactor's WaitSet.
+/// Daemon-side listener, attached to the reactor's `WaitSet`.
+#[derive(Debug)]
 pub struct DaemonNotifyListener {
     listener: Listener<IpcService>,
 }
 
 impl DaemonNotifyListener {
+    /// Open (or create) the shared daemon notify service and attach a listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service or listener cannot be created.
     pub fn new(node: &Node<IpcService>) -> Result<Self> {
         let service = node
             .service_builder(
@@ -114,12 +136,16 @@ impl DaemonNotifyListener {
         Ok(Self { listener })
     }
 
-    /// Get a reference to the underlying listener for WaitSet attachment.
+    /// Get a reference to the underlying listener for `WaitSet` attachment.
     pub fn listener(&self) -> &Listener<IpcService> {
         &self.listener
     }
 
     /// Non-blocking drain of all pending notification kinds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if polling the listener fails.
     pub fn drain(&self) -> Result<Vec<DaemonNotifyKind>> {
         let mut kinds = Vec::new();
         while let Some(id) = self

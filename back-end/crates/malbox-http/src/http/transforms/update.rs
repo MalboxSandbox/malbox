@@ -12,7 +12,7 @@ use malbox_database::repositories::custom_transforms::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/transforms/{id}", put(update_transform_handler))
 }
 
@@ -53,7 +53,7 @@ async fn update_transform_handler(
 
     let transform = update_transform(&state.pool, id, update)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to update transform: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to update transform: {e}")))?;
 
     match transform {
         Some(t) => Ok(Json(t).into_response()),

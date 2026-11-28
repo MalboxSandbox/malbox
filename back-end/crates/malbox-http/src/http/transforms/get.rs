@@ -9,7 +9,7 @@ use axum::{
 use malbox_database::repositories::custom_transforms::{fetch_all_transforms, fetch_transform};
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/transforms", get(list_transforms))
         .route("/v1/transforms/{id}", get(get_transform))
@@ -18,7 +18,7 @@ pub fn router() -> Router<AppState> {
 async fn list_transforms(State(state): State<AppState>) -> Result<impl IntoResponse> {
     let transforms = fetch_all_transforms(&state.pool)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch transforms: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to fetch transforms: {e}")))?;
 
     Ok(Json(transforms))
 }
@@ -29,7 +29,7 @@ async fn get_transform(
 ) -> Result<impl IntoResponse> {
     let transform = fetch_transform(&state.pool, id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to fetch transform: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to fetch transform: {e}")))?;
 
     match transform {
         Some(t) => Ok(Json(t).into_response()),

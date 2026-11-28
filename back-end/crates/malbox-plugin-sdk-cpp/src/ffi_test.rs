@@ -22,6 +22,7 @@ use crate::ffi_types::{MALBOX_ABI_VERSION, MalboxPluginVtable};
 ///
 /// All pointer fields must remain valid for the duration of the call.
 #[repr(C)]
+#[derive(Debug)]
 pub struct MalboxTestConfig {
     /// Numeric task identifier used to construct the test `Context`.
     pub task_id: i32,
@@ -79,6 +80,7 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
     }
 
     // Build config map
+    // SAFETY: forwarded from this function's caller contract on the config arrays.
     let config_map = match unsafe { build_config_map(&config) } {
         Ok(m) => m,
         Err(e) => {
@@ -91,6 +93,7 @@ pub unsafe extern "C" fn malbox_test_run_plugin(
     let sample_path = if config.sample_path.is_null() {
         PathBuf::new()
     } else {
+        // SAFETY: non-null, and the caller guarantees a NUL-terminated string.
         match unsafe { CStr::from_ptr(config.sample_path) }.to_str() {
             Ok(s) => PathBuf::from(s),
             Err(e) => {
@@ -166,11 +169,13 @@ unsafe fn build_config_map(config: &MalboxTestConfig) -> Result<HashMap<String, 
         return Err("config_keys or config_values is null but config_count > 0".to_string());
     }
 
-    for i in 0..config.config_count {
-        // SAFETY: caller guarantees both arrays have at least config_count elements.
-        let key_ptr = unsafe { *config.config_keys.add(i) };
-        let val_ptr = unsafe { *config.config_values.add(i) };
+    // SAFETY: both pointers are non-null (checked above) and the caller
+    // guarantees each array has at least `config_count` elements.
+    let keys = unsafe { std::slice::from_raw_parts(config.config_keys, config.config_count) };
+    // SAFETY: as above.
+    let values = unsafe { std::slice::from_raw_parts(config.config_values, config.config_count) };
 
+    for (i, (&key_ptr, &val_ptr)) in keys.iter().zip(values).enumerate() {
         if key_ptr.is_null() {
             return Err(format!("config_keys[{i}] is null"));
         }
@@ -178,11 +183,13 @@ unsafe fn build_config_map(config: &MalboxTestConfig) -> Result<HashMap<String, 
             return Err(format!("config_values[{i}] is null"));
         }
 
+        // SAFETY: non-null, and the caller guarantees a NUL-terminated string.
         let key = unsafe { CStr::from_ptr(key_ptr) }
             .to_str()
             .map_err(|e| format!("config_keys[{i}] is not valid UTF-8: {e}"))?
             .to_owned();
 
+        // SAFETY: non-null, and the caller guarantees a NUL-terminated string.
         let val = unsafe { CStr::from_ptr(val_ptr) }
             .to_str()
             .map_err(|e| format!("config_values[{i}] is not valid UTF-8: {e}"))?
@@ -251,10 +258,11 @@ mod tests {
     ) -> i32 {
         CALL_HEALTH.fetch_add(1, Ordering::SeqCst);
         if !status.is_null() {
-            unsafe {
-                (*status).ready = true;
-                (*status).reason = std::ptr::null();
-            }
+            // SAFETY: `status` is non-null and the runtime passes a pointer to a
+            // live, writable `MalboxHealthStatus`.
+            unsafe { (*status).ready = true };
+            // SAFETY: as above.
+            unsafe { (*status).reason = std::ptr::null() };
         }
         0
     }
@@ -304,6 +312,7 @@ mod tests {
         let _guard = COUNTER_LOCK.lock().unwrap();
         reset_counters();
 
+        // SAFETY: the vtable's callbacks are valid test mocks; the config is empty.
         let rc = unsafe { malbox_test_run_plugin(full_vtable(), empty_config()) };
 
         assert_eq!(rc, 0, "expected success");
@@ -336,6 +345,7 @@ mod tests {
             config_count: 1,
         };
 
+        // SAFETY: the key/value pointer arrays and their CStrings outlive the call.
         let rc = unsafe { malbox_test_run_plugin(full_vtable(), config) };
         assert_eq!(rc, 0);
     }
@@ -346,6 +356,7 @@ mod tests {
             abi_version: MALBOX_ABI_VERSION + 99,
             ..MalboxPluginVtable::default()
         };
+        // SAFETY: the ABI mismatch is rejected before any pointer is used.
         let rc = unsafe { malbox_test_run_plugin(vtable, empty_config()) };
         assert_eq!(rc, -1);
 
@@ -368,6 +379,7 @@ mod tests {
             ..MalboxPluginVtable::default()
         };
 
+        // SAFETY: the vtable's callbacks are valid test mocks; the config is empty.
         let rc = unsafe { malbox_test_run_plugin(vtable, empty_config()) };
         assert_eq!(rc, -1);
 
@@ -388,6 +400,7 @@ mod tests {
             abi_version: MALBOX_ABI_VERSION,
             ..MalboxPluginVtable::default()
         };
+        // SAFETY: no callbacks are wired and the config is empty.
         let rc = unsafe { malbox_test_run_plugin(vtable, empty_config()) };
         assert_eq!(rc, 0);
     }
@@ -408,6 +421,7 @@ mod tests {
 
         // We only verify it does not crash (the sample is not read in the
         // mock on_task callback).
+        // SAFETY: `path` outlives the call; the vtable's callbacks are test mocks.
         let rc = unsafe { malbox_test_run_plugin(full_vtable(), config) };
         assert_eq!(rc, 0);
         assert_eq!(CALL_TASK.load(Ordering::SeqCst), 1);

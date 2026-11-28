@@ -13,17 +13,41 @@ use std::path::PathBuf;
 /// Each variant carries a `name` that identifies the result in the task
 /// report (e.g. `"yara_matches"`, `"extracted_pe"`).
 #[derive(Debug)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-plugin-sdk-cpp and malbox-plugin-sdk-python result conversions"
+)]
 pub enum PluginResult {
     /// Structured data serialized as JSON.
-    Json { name: String, data: Vec<u8> },
+    Json {
+        /// Result name in the task output.
+        name: String,
+        /// UTF-8 encoded JSON document.
+        data: Vec<u8>,
+    },
     /// Arbitrary binary data.
-    Bytes { name: String, data: Vec<u8> },
+    Bytes {
+        /// Result name in the task output.
+        name: String,
+        /// Raw payload.
+        data: Vec<u8>,
+    },
     /// A file on disk - the runtime streams it back to the daemon.
-    File { name: String, path: PathBuf },
+    File {
+        /// Result name in the task output.
+        name: String,
+        /// Path of the file whose contents are sent.
+        path: PathBuf,
+    },
 }
 
 impl PluginResult {
     /// Serialize a value as JSON and wrap it as a named result.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SdkError::Serialization`](crate::SdkError) if `value`'s
+    /// `Serialize` impl fails or it has non-string map keys.
     pub fn json(name: impl Into<String>, value: &impl Serialize) -> Result<Self> {
         let data = serde_json::to_vec(value)?;
         Ok(PluginResult::Json {
@@ -52,9 +76,9 @@ impl PluginResult {
     /// The name that identifies this result in the task output.
     pub fn name(&self) -> &str {
         match self {
-            PluginResult::Json { name, .. } => name,
-            PluginResult::Bytes { name, .. } => name,
-            PluginResult::File { name, .. } => name,
+            PluginResult::Json { name, .. }
+            | PluginResult::Bytes { name, .. }
+            | PluginResult::File { name, .. } => name,
         }
     }
 }

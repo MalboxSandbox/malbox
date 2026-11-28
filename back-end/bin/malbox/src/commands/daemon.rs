@@ -3,12 +3,12 @@ use clap::{Parser, Subcommand};
 use malbox_cli_common::context::Context;
 use malbox_cli_common::error::Result;
 
-pub mod config;
-pub mod install;
-pub mod plugin;
-pub mod provider;
+pub(crate) mod config;
+pub(crate) mod install;
+pub(crate) mod plugin;
+pub(crate) mod provider;
 mod start;
-pub mod upgrade;
+pub(crate) mod upgrade;
 
 #[derive(Parser)]
 #[command(
@@ -17,13 +17,13 @@ pub mod upgrade;
                   These commands run on the analysis host and manage the local daemon installation.\n\
                   For analysis operations, use the top-level commands (task, machine, image)."
 )]
-pub struct DaemonCommand {
+pub(crate) struct DaemonCommand {
     #[command(subcommand)]
     pub command: DaemonCommands,
 }
 
 #[derive(Subcommand)]
-pub enum DaemonCommands {
+pub(crate) enum DaemonCommands {
     /// Start the malbox daemon
     Start(start::StartArgs),
     /// Install and set up malbox

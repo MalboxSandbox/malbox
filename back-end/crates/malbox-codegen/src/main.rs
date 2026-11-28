@@ -1,3 +1,9 @@
+//! `malbox-codegen`: emits compile-time runtime-config headers for native plugins from `plugin.toml`.
+#![expect(
+    clippy::print_stderr,
+    reason = "CLI reports fatal errors to the user on stderr"
+)]
+
 use clap::{Parser, ValueEnum};
 use malbox_plugin_manifest::{ResolvedAutoCollectRule, ResolvedRuntimeConfig, parse_manifest};
 use malbox_plugin_transport::artifact::ArtifactRelation;
@@ -25,7 +31,7 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
+    match run(&cli) {
         Ok(()) => ExitCode::from(0),
         Err(e) => {
             eprintln!("malbox-codegen: {e}");
@@ -34,7 +40,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
+fn run(cli: &Cli) -> Result<(), String> {
     let manifest = parse_manifest(&cli.manifest).map_err(|e| e.to_string())?;
     let resolved = ResolvedRuntimeConfig::from_raw(&manifest.runtime);
     resolved

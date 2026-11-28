@@ -5,8 +5,11 @@
 //! - `malbox-plugin-macros` at proc-macro expansion time
 //! - `malbox-codegen` when emitting C++ runtime-config headers
 
+/// Manifest error type.
 pub mod error;
+/// Top-level manifest schema, parsing and validation.
 pub mod manifest;
+/// `[runtime]` section schema and default resolution.
 pub mod runtime;
 
 pub use error::ManifestError;

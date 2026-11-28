@@ -1,7 +1,7 @@
 use malbox_plugin_sdk::health::HealthStatus;
 use pyo3::prelude::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Severity {
     Healthy,
     Degraded,
@@ -9,8 +9,8 @@ enum Severity {
 }
 
 #[pyclass(name = "HealthStatus", module = "malbox_plugin_sdk", from_py_object)]
-#[derive(Clone)]
-pub struct PyHealthStatus {
+#[derive(Debug, Clone)]
+pub(crate) struct PyHealthStatus {
     pub(crate) inner: HealthStatus,
     severity: Severity,
 }

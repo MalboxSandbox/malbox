@@ -33,22 +33,27 @@ impl Machine {
         }
     }
 
+    /// Provider-assigned identifier of this machine.
     pub fn id(&self) -> &MachineId {
         &self.id
     }
 
+    /// Last power state observed or set for this machine.
     pub fn state(&self) -> MachineState {
         self.state
     }
 
+    /// Management endpoint, once the machine has a reachable address.
     pub fn endpoint(&self) -> Option<&MachineEndpoint> {
         self.endpoint.as_ref()
     }
 
+    /// Record a new power state for this machine.
     pub fn set_state(&mut self, state: MachineState) {
         self.state = state;
     }
 
+    /// Replace the management endpoint (`None` when unreachable).
     pub fn set_endpoint(&mut self, endpoint: Option<MachineEndpoint>) {
         self.endpoint = endpoint;
     }
@@ -61,18 +66,27 @@ pub struct MachineEndpoint {
     pub address: IpAddr,
     /// Provider-side identifier (same as `MachineId.0`).
     pub id: String,
-    /// OS platform — used to select connection method (WinRM vs SSH).
+    /// OS platform — used to select connection method (`WinRM` vs SSH).
     pub platform: Platform,
 }
 
 /// How provisioners reach a machine's management interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-resources and malbox-provisioner-ansible to pick a connection method"
+)]
 pub enum ManagementAccess {
-    /// TCP management service on the endpoint address (WinRM 5986 / SSH 22).
-    Network { port: u16 },
+    /// TCP management service on the endpoint address (`WinRM` 5986 / SSH 22).
+    Network {
+        /// TCP port of the management service.
+        port: u16,
+    },
     /// Exec through a container engine API; no network service in the guest.
     ContainerEngine {
+        /// Container name or ID to exec into.
         container: String,
+        /// Engine API endpoint (e.g. a Docker socket URI).
         engine_host: String,
     },
 }
@@ -103,27 +117,47 @@ impl From<&str> for MachineId {
 
 /// Machine power state as reported by the provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MachineState {
+    /// Being defined by the provider; not yet bootable.
     Creating,
+    /// Boot in progress.
     Starting,
+    /// Powered on.
     Running,
+    /// Shutdown in progress.
     Stopping,
+    /// Powered off.
     Stopped,
+    /// Paused with memory state retained.
     Suspended,
+    /// In an error state reported by the provider.
     Failed,
 }
 
 /// Target OS platform.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by providers and provisioners to select platform-specific behavior"
+)]
 pub enum Platform {
+    /// Microsoft Windows guest.
     Windows,
+    /// Linux guest.
     Linux,
 }
 
 /// Machine architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "matched exhaustively by malbox-provider-libvirt to pick emulator and machine type"
+)]
 pub enum Arch {
+    /// 64-bit x86 (`x86_64`).
     X64,
+    /// 32-bit x86.
     X86,
 }
 

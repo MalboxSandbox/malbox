@@ -1,12 +1,13 @@
-pub mod context;
-pub mod event;
-pub mod health;
-pub mod report;
-pub mod result;
+pub(crate) mod context;
+pub(crate) mod event;
+pub(crate) mod health;
+pub(crate) mod report;
+pub(crate) mod result;
 
 use pyo3::prelude::*;
 
-pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+/// Register every SDK Python class, exception, and helper into the native module.
+pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<context::PyContext>()?;
     m.add_class::<context::PyTaskInfo>()?;
     m.add_class::<context::PyResultSink>()?;
@@ -14,7 +15,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "ArtifactLimitError",
         m.py().get_type::<context::ArtifactLimitError>(),
     )?;
-    m.add_function(wrap_pyfunction!(context::_validate_artifact_args, m)?)?;
+    m.add_function(wrap_pyfunction!(context::validate_artifact_args, m)?)?;
     m.add_class::<event::PyEvent>()?;
     m.add_class::<result::PyPluginResult>()?;
     m.add_class::<result::PyReportBuilder>()?;

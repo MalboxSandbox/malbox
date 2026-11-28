@@ -6,14 +6,14 @@ use malbox_cli_common::context::Context;
 use malbox_cli_common::error::{CliError, Result};
 use malbox_cli_common::utils::format::Brand;
 use malbox_plugin_registry::client::RegistryClient;
-use malbox_plugin_registry::install::{install_resolved_plugin, resolve_plugin};
+use malbox_plugin_registry::install::{ExistingInstall, install_resolved_plugin, resolve_plugin};
 use malbox_plugin_registry::resolve::{
     InstallStrategy, Platform, RefSelector, RequestedStrategy, SpecifierSource, parse_specifier,
     resolve_selector,
 };
 
 #[derive(Parser)]
-pub struct InstallCommand {
+pub(crate) struct InstallCommand {
     /// Plugin name, name@version, or owner/repo
     plugin: String,
 
@@ -42,17 +42,61 @@ pub struct InstallCommand {
     force: bool,
 }
 
-impl Command for InstallCommand {
-    async fn execute(self, ctx: &Context) -> Result<()> {
-        let (plugins_config, registry_config) = load_plugin_config().await?;
-        let plugins_dir = &plugins_config.directory;
-        let platform = Platform::current();
+/// Where the plugin artifact comes from; drives step list, header and summary.
+#[derive(Clone, Copy)]
+enum InstallMethod {
+    Local,
+    Source,
+    Prebuilt,
+}
 
-        let mut specifier =
-            parse_specifier(&self.plugin).map_err(|e| CliError::CommandFailed(e.to_string()))?;
+impl InstallMethod {
+    /// Progress renderer titled for this install, with its known steps pre-listed.
+    fn renderer(self, name: &str, pin_label: &str) -> InstallRenderer {
+        let header = match self {
+            Self::Local => format!("\u{27d0} Installing {name} ({pin_label}) from local source"),
+            Self::Source => format!("\u{27d0} Installing {name} ({pin_label}) from source"),
+            Self::Prebuilt => format!("\u{27d0} Installing {name} ({pin_label})"),
+        };
+        let renderer = InstallRenderer::new(&header);
+        match self {
+            // Local steps stream in from install_from_local (build or copy);
+            // no fixed pending list, since we do not know which until it runs.
+            Self::Local => {}
+            Self::Source => renderer.add_pending_steps(&[
+                "Cloning repository",
+                "Detecting build system",
+                "Building release binary",
+                "Validating plugin manifest",
+                "Installing to plugins directory",
+            ]),
+            Self::Prebuilt => renderer.add_pending_steps(&[
+                "Downloading asset",
+                "Extracting archive",
+                "Validating plugin manifest",
+                "Installing to plugins directory",
+            ]),
+        }
+        renderer
+    }
 
-        let is_local = matches!(specifier.source, SpecifierSource::Local { .. });
-        if is_local
+    fn summary(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Source => "from source",
+            Self::Prebuilt => "prebuilt",
+        }
+    }
+}
+
+impl InstallCommand {
+    /// Validates the CLI ref flags against the specifier and picks the build
+    /// strategy, updating `specifier.selector` from `--release/--branch/--rev`.
+    fn requested_strategy(
+        &self,
+        specifier: &mut malbox_plugin_registry::resolve::PluginSpecifier,
+    ) -> Result<RequestedStrategy> {
+        if matches!(specifier.source, SpecifierSource::Local { .. })
             && (self.release.is_some()
                 || self.branch.is_some()
                 || self.rev.is_some()
@@ -77,13 +121,27 @@ impl Command for InstallCommand {
             RefSelector::Branch(_) | RefSelector::Commit(_)
         );
 
-        let strategy = if is_source_ref || self.source {
+        Ok(if is_source_ref || self.source {
             RequestedStrategy::SourceOnly
         } else if self.prebuilt {
             RequestedStrategy::PrebuiltOnly
         } else {
             RequestedStrategy::PrebuiltWithFallback
-        };
+        })
+    }
+}
+
+impl Command for InstallCommand {
+    async fn execute(self, ctx: &Context) -> Result<()> {
+        let (plugins_config, registry_config) = load_plugin_config().await?;
+        let plugins_dir = &plugins_config.directory;
+        let platform = Platform::current();
+
+        let mut specifier =
+            parse_specifier(&self.plugin).map_err(|e| CliError::CommandFailed(e.to_string()))?;
+
+        let is_local = matches!(specifier.source, SpecifierSource::Local { .. });
+        let strategy = self.requested_strategy(&mut specifier)?;
 
         let client = RegistryClient::new(
             &registry_config.repository,
@@ -104,36 +162,23 @@ impl Command for InstallCommand {
         if matches!(strategy, RequestedStrategy::PrebuiltWithFallback)
             && matches!(resolved.strategy, InstallStrategy::Source { .. })
         {
-            let warn = Brand::warning();
-            println!(
-                "  {} No prebuilt asset for {} on {}",
-                warn.apply_to("\u{26a0}"),
-                specifier.name,
-                platform.asset_suffix()
-            );
-            if !ctx.yes {
-                let confirmed = dialoguer::Confirm::new()
-                    .with_prompt("  Build from source?")
-                    .default(false)
-                    .interact()
-                    .map_err(|e| CliError::CommandFailed(e.to_string()))?;
-                if !confirmed {
-                    println!("  Installation cancelled.");
-                    return Ok(());
-                }
+            warn_no_prebuilt(&specifier.name, &platform);
+            if !ctx.yes && !confirm_build_from_source()? {
+                println!("  Installation cancelled.");
+                return Ok(());
             }
         }
 
         let installed = plugins_dir.join(&resolved.name).exists();
         let force = if installed {
-            if !confirm_reinstall(
-                &format!(
+            if !(self.force
+                || ctx.yes
+                || confirm_reinstall(&format!(
                     "{} is already installed. Reinstall {}? ",
                     resolved.name,
                     resolved.pin.label(&resolved.version)
-                ),
-                self.force || ctx.yes,
-            ) {
+                )))
+            {
                 println!("  Installation cancelled.");
                 return Ok(());
             }
@@ -142,68 +187,32 @@ impl Command for InstallCommand {
             self.force
         };
 
-        let is_source = matches!(resolved.strategy, InstallStrategy::Source { .. });
+        let method = if is_local {
+            InstallMethod::Local
+        } else if matches!(resolved.strategy, InstallStrategy::Source { .. }) {
+            InstallMethod::Source
+        } else {
+            InstallMethod::Prebuilt
+        };
         let pin = resolved.pin.clone();
 
-        let header = if is_local {
-            format!(
-                "\u{27d0} Installing {} ({}) from local source",
-                resolved.name,
-                pin.label(&resolved.version)
-            )
-        } else if is_source {
-            format!(
-                "\u{27d0} Installing {} ({}) from source",
-                resolved.name,
-                pin.label(&resolved.version)
-            )
+        let renderer = method.renderer(&resolved.name, &pin.label(&resolved.version));
+
+        let existing = if force {
+            ExistingInstall::Replace
         } else {
-            format!(
-                "\u{27d0} Installing {} ({})",
-                resolved.name,
-                pin.label(&resolved.version)
-            )
+            ExistingInstall::Reject
         };
-
-        let renderer = InstallRenderer::new(&header);
-
-        if is_local {
-            // Local steps stream in from install_from_local (build or copy);
-            // no fixed pending list, since we do not know which until it runs.
-        } else if is_source {
-            renderer.add_pending_steps(&[
-                "Cloning repository",
-                "Detecting build system",
-                "Building release binary",
-                "Validating plugin manifest",
-                "Installing to plugins directory",
-            ]);
-        } else {
-            renderer.add_pending_steps(&[
-                "Downloading asset",
-                "Extracting archive",
-                "Validating plugin manifest",
-                "Installing to plugins directory",
-            ]);
-        }
-
-        let outcome = install_resolved_plugin(resolved, plugins_dir, force, &renderer)
+        let outcome = install_resolved_plugin(resolved, plugins_dir, existing, &renderer)
             .await
             .map_err(|e| CliError::CommandFailed(e.to_string()))?;
 
-        let method = if is_local {
-            "local"
-        } else if is_source {
-            "from source"
-        } else {
-            "prebuilt"
-        };
+        let method = method.summary();
         renderer.finish_line(&format!(
-            "{} {} installed ({} plugin, {})",
+            "{} {} installed ({} plugin, {method})",
             outcome.name,
             pin.label(&outcome.version),
             outcome.plugin_type,
-            method
         ));
 
         if !outcome.missing_deps.is_empty() {
@@ -230,4 +239,22 @@ impl Command for InstallCommand {
 
         Ok(())
     }
+}
+
+fn warn_no_prebuilt(name: &str, platform: &Platform) {
+    println!(
+        "  {} No prebuilt asset for {} on {}",
+        Brand::warning().apply_to("\u{26a0}"),
+        name,
+        platform.asset_suffix()
+    );
+}
+
+/// Asks whether to fall back to a source build; `false` means the user declined.
+fn confirm_build_from_source() -> Result<bool> {
+    dialoguer::Confirm::new()
+        .with_prompt("  Build from source?")
+        .default(false)
+        .interact()
+        .map_err(|e| CliError::CommandFailed(e.to_string()))
 }

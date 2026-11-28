@@ -1,4 +1,4 @@
-//! VtablePlugin adapter -- bridges the C vtable to the Rust `HostPlugin` trait.
+//! `VtablePlugin` adapter -- bridges the C vtable to the Rust `HostPlugin` trait.
 //!
 //! `VtablePlugin` holds a `MalboxPluginVtable` and implements the unified
 //! `HostPlugin` trait from `malbox_plugin_sdk::plugin`.  Each trait method
@@ -17,7 +17,7 @@ use malbox_plugin_transport::messages::events::Event;
 use crate::error::last_error_string;
 use crate::ffi_events::rust_event_to_c;
 use crate::ffi_result::ResultBuilder;
-use crate::ffi_types::{MalboxContext, MalboxHealthStatus};
+use crate::ffi_types::{MalboxContext, MalboxHealthStatus, MalboxResultBuilder};
 
 /// Rust plugin adapter that wraps a C [`MalboxPluginVtable`](crate::ffi_types::MalboxPluginVtable)
 /// and implements the `HostPlugin` trait.
@@ -38,37 +38,48 @@ impl VtablePlugin {
     }
 }
 
-// SAFETY: The C++ HostPlugin object and vtable function pointers are required to be
-// thread-safe per the SDK contract (documented in the spec).
+// SAFETY: The vtable only holds `plugin_ptr` and C function pointers. The SDK
+// contract (see `malbox_run_host_plugin`) requires the C++ plugin object and its
+// callbacks to be callable from any thread, so moving the adapter is sound.
 unsafe impl Send for VtablePlugin {}
+// SAFETY: Same contract as `Send`: the C++ callbacks must tolerate concurrent
+// invocation through a shared `&VtablePlugin`; the adapter has no Rust-side state.
 unsafe impl Sync for VtablePlugin {}
 
-/// Helper to convert a non-zero return code to SdkError::Plugin
+/// Error carrying the message a C++ callback reported via the last-error slot.
+#[derive(Debug)]
+struct PluginCallbackError(String);
+
+impl std::fmt::Display for PluginCallbackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for PluginCallbackError {}
+
+/// Helper to convert a non-zero return code to `SdkError::Plugin`.
 fn check_rc(rc: i32) -> Result<()> {
     if rc == 0 {
         Ok(())
     } else {
         let msg =
             last_error_string().unwrap_or_else(|| format!("plugin callback failed (rc={rc})"));
-
-        #[derive(Debug)]
-        struct PluginCallbackError(String);
-        impl std::fmt::Display for PluginCallbackError {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.0)
-            }
-        }
-        impl std::error::Error for PluginCallbackError {}
-
         Err(SdkError::Plugin(Box::new(PluginCallbackError(msg))))
     }
 }
 
+/// Convert `s` to a `CString`, substituting `placeholder` if `s` contains a NUL byte.
+fn cstring_or(s: &str, placeholder: &'static str) -> CString {
+    CString::new(s).unwrap_or_else(|_| {
+        CString::new(placeholder).expect("placeholder literal contains no NUL byte")
+    })
+}
+
 impl Plugin for VtablePlugin {
     fn health_check(&self) -> HealthStatus {
-        let health_check = match self.vtable.health_check {
-            Some(f) => f,
-            None => return HealthStatus::ready(),
+        let Some(health_check) = self.vtable.health_check else {
+            return HealthStatus::ready();
         };
 
         let mut status = MalboxHealthStatus {
@@ -76,8 +87,9 @@ impl Plugin for VtablePlugin {
             reason: std::ptr::null(),
         };
 
-        // SAFETY: plugin_ptr is valid; &mut status is valid for the call duration.
-        let rc = unsafe { health_check(self.vtable.plugin_ptr, &mut status) };
+        // SAFETY: plugin_ptr is valid for the vtable's lifetime per the runtime
+        // contract; `status` is a live local, writable for the call duration.
+        let rc = unsafe { health_check(self.vtable.plugin_ptr, &raw mut status) };
 
         if rc != 0 {
             return HealthStatus::not_ready("health_check callback failed");
@@ -86,6 +98,8 @@ impl Plugin for VtablePlugin {
         let reason = if status.reason.is_null() {
             String::new()
         } else {
+            // SAFETY: a non-null `reason` must point to a NUL-terminated string
+            // that stays valid until `health_check` returns to us (vtable contract).
             unsafe { std::ffi::CStr::from_ptr(status.reason) }
                 .to_string_lossy()
                 .into_owned()
@@ -101,15 +115,13 @@ impl Plugin for VtablePlugin {
 
 impl HostPlugin for VtablePlugin {
     fn on_task(&self, ctx: &Context) -> Result<()> {
-        let on_task = match self.vtable.on_task {
-            Some(f) => f,
-            None => return Ok(()),
+        let Some(on_task) = self.vtable.on_task else {
+            return Ok(());
         };
 
         let mut builder = ResultBuilder::new();
-        let ctx_ptr = (ctx as *const Context) as *const MalboxContext;
-        let builder_ptr =
-            (&mut builder as *mut ResultBuilder) as *mut crate::ffi_types::MalboxResultBuilder;
+        let ctx_ptr = std::ptr::from_ref(ctx).cast::<MalboxContext>();
+        let builder_ptr = (&raw mut builder).cast::<MalboxResultBuilder>();
 
         // SAFETY: ctx_ptr was created from &Context in this frame;
         // builder_ptr is valid for the duration of this call.
@@ -127,26 +139,19 @@ impl HostPlugin for VtablePlugin {
     }
 
     fn on_start(&self, raw_config: HashMap<String, String>) -> Result<()> {
-        let on_start = match self.vtable.on_start {
-            Some(f) => f,
-            None => return Ok(()),
+        let Some(on_start) = self.vtable.on_start else {
+            return Ok(());
         };
 
         // Build parallel Vec<CString> for keys and values.
         let keys: Vec<CString> = raw_config
             .keys()
-            .map(|k| {
-                CString::new(k.as_str())
-                    .unwrap_or_else(|_| CString::new("(key contained null byte)").unwrap())
-            })
+            .map(|k| cstring_or(k, "(key contained null byte)"))
             .collect();
 
         let values: Vec<CString> = raw_config
             .values()
-            .map(|v| {
-                CString::new(v.as_str())
-                    .unwrap_or_else(|_| CString::new("(value contained null byte)").unwrap())
-            })
+            .map(|v| cstring_or(v, "(value contained null byte)"))
             .collect();
 
         let key_ptrs: Vec<*const std::ffi::c_char> = keys.iter().map(|cs| cs.as_ptr()).collect();
@@ -169,9 +174,8 @@ impl HostPlugin for VtablePlugin {
     }
 
     fn on_stop(&self) -> Result<()> {
-        let on_stop = match self.vtable.on_stop {
-            Some(f) => f,
-            None => return Ok(()),
+        let Some(on_stop) = self.vtable.on_stop else {
+            return Ok(());
         };
 
         // SAFETY: plugin_ptr is valid for the lifetime of the vtable.
@@ -180,9 +184,8 @@ impl HostPlugin for VtablePlugin {
     }
 
     fn on_event(&self, event: Event) -> Result<()> {
-        let on_event = match self.vtable.on_event {
-            Some(f) => f,
-            None => return Ok(()),
+        let Some(on_event) = self.vtable.on_event else {
+            return Ok(());
         };
 
         let c_event = rust_event_to_c(&event);
@@ -229,6 +232,8 @@ mod tests {
         ON_TASK_CALLED.store(true, Ordering::SeqCst);
         let name = CString::new("result").unwrap();
         let data: &[u8] = b"{}";
+        // SAFETY: the runtime passes a live `ResultBuilder` pointer; `name` and
+        // `data` are locals that outlive the call.
         unsafe {
             crate::ffi_result::malbox_result_builder_push_json(
                 builder,
@@ -287,11 +292,18 @@ mod tests {
     ) -> i32 {
         ON_START_CALLED.store(true, Ordering::SeqCst);
         assert_eq!(count, 1, "expected 1 config entry");
-        let key = unsafe { std::ffi::CStr::from_ptr(*keys) }
+        // SAFETY: count == 1 (asserted above), so `keys` points to one valid
+        // element, which the adapter set to a live NUL-terminated CString.
+        let key_ptr = unsafe { *keys };
+        // SAFETY: `key_ptr` comes from a CString kept alive by the adapter.
+        let key = unsafe { std::ffi::CStr::from_ptr(key_ptr) }
             .to_str()
             .unwrap()
             .to_owned();
-        let val = unsafe { std::ffi::CStr::from_ptr(*vals) }
+        // SAFETY: as for `keys`: one valid element pointing to a live CString.
+        let val_ptr = unsafe { *vals };
+        // SAFETY: `val_ptr` comes from a CString kept alive by the adapter.
+        let val = unsafe { std::ffi::CStr::from_ptr(val_ptr) }
             .to_str()
             .unwrap()
             .to_owned();

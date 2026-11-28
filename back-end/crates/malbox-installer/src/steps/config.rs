@@ -4,6 +4,13 @@ use malbox_config::core::{DATABASE_NAME, DatabaseConfig};
 use malbox_config::{CliConfig, Config, Environment, PathConfig};
 use std::path::{Path, PathBuf};
 
+/// Writes the default daemon `malbox.toml` (and CLI config) into `config_dir`, returning
+/// the daemon config path.
+///
+/// # Errors
+///
+/// Returns [`InstallError::StepFailed`] when paths cannot be resolved, the config cannot
+/// be serialized, or files cannot be written.
 pub async fn execute(
     config_dir: &Path,
     providers: &[String],

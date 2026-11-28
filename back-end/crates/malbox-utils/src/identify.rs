@@ -6,10 +6,14 @@ use std::sync::Once;
 use magic::cookie::{DatabasePaths, Flags, Load};
 use tracing::warn;
 
+/// Result of identifying a file: artifact type plus raw libmagic output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identification {
+    /// Malbox artifact type, e.g. `executable/windows/pe32`.
     pub artifact_type: String,
+    /// MIME type reported by libmagic.
     pub mime: String,
+    /// Human-readable libmagic description.
     pub description: String,
 }
 
@@ -20,7 +24,7 @@ thread_local! {
 
 static WARN_ONCE: Once = Once::new();
 
-fn warn_once(msg: String) {
+fn warn_once(msg: &str) {
     WARN_ONCE.call_once(|| warn!("{msg}"));
 }
 
@@ -28,14 +32,14 @@ fn load_cookie(flags: Flags) -> Option<magic::Cookie<Load>> {
     let cookie = match magic::Cookie::open(flags) {
         Ok(c) => c,
         Err(e) => {
-            warn_once(format!("failed to open libmagic cookie: {e}"));
+            warn_once(&format!("failed to open libmagic cookie: {e}"));
             return None;
         }
     };
     match cookie.load(&DatabasePaths::default()) {
         Ok(c) => Some(c),
         Err(e) => {
-            warn_once(format!("failed to load libmagic database: {e}"));
+            warn_once(&format!("failed to load libmagic database: {e}"));
             None
         }
     }
@@ -51,10 +55,9 @@ fn unknown() -> Identification {
 
 /// Identify `data`. Blocking (libmagic); call inside `spawn_blocking`.
 pub fn identify(data: &[u8], file_name: Option<&str>) -> Identification {
-    let ext = file_name.and_then(extension);
     if data.is_empty() {
         return Identification {
-            artifact_type: classify("", "", ext.as_deref(), true).to_string(),
+            artifact_type: "empty".to_string(),
             mime: "application/x-empty".to_string(),
             description: "empty".to_string(),
         };
@@ -64,16 +67,16 @@ pub fn identify(data: &[u8], file_name: Option<&str>) -> Identification {
     let (description, mime) = match (description, mime) {
         (Some(Ok(d)), Some(Ok(m))) => (d, m),
         (Some(Err(e)), _) | (_, Some(Err(e))) => {
-            warn_once(format!("libmagic failed to analyse buffer: {e}"));
+            warn_once(&format!("libmagic failed to analyse buffer: {e}"));
             return unknown();
         }
         _ => return unknown(),
     };
+    let ext = file_name.and_then(extension);
     let artifact_type = classify(
         &mime.to_lowercase(),
         &description.to_lowercase(),
         ext.as_deref(),
-        false,
     );
     let artifact_type = if artifact_type == IMAGE_MARKER {
         let m = mime.to_lowercase();
@@ -99,12 +102,13 @@ fn extension(name: &str) -> Option<String> {
 const IMAGE_MARKER: &str = "image/";
 
 /// Mapping rules over lowercased MIME (`m`), description (`d`) and extension
-/// (`e`). First match wins.
-fn classify(m: &str, d: &str, e: Option<&str>, empty: bool) -> &'static str {
+/// (`e`). First match wins. Empty input is handled by `identify` before this.
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat, ordered rule table; splitting would obscure first-match-wins precedence"
+)]
+fn classify(m: &str, d: &str, e: Option<&str>) -> &'static str {
     let e = e.unwrap_or("");
-    if empty {
-        return "empty";
-    }
     if d.contains("mono/.net assembly") {
         return "executable/windows/dotnet";
     }
@@ -252,6 +256,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "test case table")]
     fn classify_rules() {
         // (row, mime, description, ext, empty, expected)
         type Case = (
@@ -583,7 +588,8 @@ mod tests {
         ];
         assert_eq!(cases.len(), 44);
         for (row, m, d, e, empty, want) in cases {
-            assert_eq!(classify(m, d, *e, *empty), *want, "row {row}");
+            let got = if *empty { "empty" } else { classify(m, d, *e) };
+            assert_eq!(got, *want, "row {row}");
         }
     }
 
@@ -594,7 +600,6 @@ mod tests {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "microsoft word 2007+",
                 Some("docx"),
-                false
             ),
             "document/office/word"
         );

@@ -7,6 +7,10 @@ use crate::provider::TomlValue;
 /// This helper allows providers to deserialize their configuration without
 /// depending on the toml crate directly.
 ///
+/// # Errors
+///
+/// Fails if `config` cannot be re-serialized or does not match the shape of `T`.
+///
 /// # Example
 ///
 /// ```ignore

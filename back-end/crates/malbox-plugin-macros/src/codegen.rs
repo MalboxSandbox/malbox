@@ -10,8 +10,12 @@ use syn::Ident;
 /// For unit structs (`struct Foo;`) the plugin is constructed directly.
 /// For structs with fields the generated code uses `Default::default()`,
 /// so the struct must implement `Default`.
-pub fn generate_main(struct_name: &Ident, kind: PluginKind, is_unit_struct: bool) -> TokenStream {
-    let plugin_init = if is_unit_struct {
+pub(crate) fn generate_main(
+    struct_name: &Ident,
+    kind: PluginKind,
+    fields: &syn::Fields,
+) -> TokenStream {
+    let plugin_init = if matches!(fields, syn::Fields::Unit) {
         quote! { #struct_name }
     } else {
         quote! { <#struct_name as ::std::default::Default>::default() }

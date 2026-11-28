@@ -8,13 +8,49 @@ use crate::grpc::proto;
 use crate::grpc::proto::guest_plugin_service_client::GuestPluginServiceClient;
 use std::collections::HashMap;
 
+/// Whether a guest plugin should finish in-flight work before shutting down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShutdownMode {
+    /// Let in-flight tasks finish before exiting.
+    Graceful,
+    /// Exit immediately, abandoning in-flight tasks.
+    Immediate,
+}
+
+/// Whether a log stream first replays the guest's buffered history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LogReplay {
+    /// Send already-buffered log entries before live ones.
+    IncludeBuffered,
+    /// Send only entries produced after the stream opens.
+    LiveOnly,
+}
+
+/// Whether a guest command runs to completion or is detached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecMode {
+    /// Wait for the command to exit and report its output.
+    Wait,
+    /// Spawn the command detached and return immediately.
+    Background,
+}
+
 /// Daemon-side gRPC client wrapping the generated tonic stub.
+#[derive(Debug)]
 pub struct GrpcClient {
     inner: GuestPluginServiceClient<tonic::transport::Channel>,
 }
 
 impl GrpcClient {
     /// Connect to a guest plugin gRPC server at the given address.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcTransport`] if the address is invalid or
+    /// the connection cannot be established.
     pub async fn connect(addr: impl Into<String>) -> Result<Self> {
         let inner = GuestPluginServiceClient::connect(addr.into())
             .await
@@ -23,6 +59,10 @@ impl GrpcClient {
     }
 
     /// Send an `InitializeRequest` and return the response.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn initialize(
         &mut self,
         plugin_id: i32,
@@ -38,6 +78,10 @@ impl GrpcClient {
     }
 
     /// Send a `TaskRequest` and return the server-streaming response.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn execute_task(
         &mut self,
         task_id: i32,
@@ -58,6 +102,10 @@ impl GrpcClient {
     }
 
     /// Ask the guest plugin to stop observing the given task early.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn stop_task(&mut self, task_id: i32) -> Result<proto::StopTaskResponse> {
         let response = self
             .inner
@@ -68,6 +116,10 @@ impl GrpcClient {
     }
 
     /// Perform a health check against the guest plugin.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn health_check(&mut self) -> Result<proto::HealthCheckResponse> {
         let response = self
             .inner
@@ -78,8 +130,14 @@ impl GrpcClient {
     }
 
     /// Request the guest plugin to shut down.
-    pub async fn shutdown(&mut self, graceful: bool) -> Result<proto::ShutdownResponse> {
-        let request = proto::ShutdownRequest { graceful };
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
+    pub async fn shutdown(&mut self, mode: ShutdownMode) -> Result<proto::ShutdownResponse> {
+        let request = proto::ShutdownRequest {
+            graceful: matches!(mode, ShutdownMode::Graceful),
+        };
         let response = self
             .inner
             .shutdown(request)
@@ -89,6 +147,10 @@ impl GrpcClient {
     }
 
     /// Push a file to the guest via streaming chunks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn push_file(
         &mut self,
         dest: &str,
@@ -119,6 +181,11 @@ impl GrpcClient {
     /// Pull a file from the guest, collecting streamed chunks.
     ///
     /// Rejects files larger than 256 MB to prevent unbounded memory growth.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC or stream fails, or
+    /// [`TransportError::Grpc`] if the file exceeds the size limit.
     pub async fn pull_file(&mut self, source: &str) -> Result<Vec<u8>> {
         const MAX_FILE_SIZE: usize = 256 * 1024 * 1024;
 
@@ -148,11 +215,17 @@ impl GrpcClient {
     ///
     /// Returns a streaming response of `LogEntry` messages. The stream stays
     /// open for the plugin's lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn stream_logs(
         &mut self,
-        include_buffered: bool,
+        replay: LogReplay,
     ) -> Result<tonic::Streaming<proto::LogEntry>> {
-        let request = proto::LogStreamRequest { include_buffered };
+        let request = proto::LogStreamRequest {
+            include_buffered: matches!(replay, LogReplay::IncludeBuffered),
+        };
         let response = self
             .inner
             .stream_logs(request)
@@ -166,6 +239,10 @@ impl GrpcClient {
     /// Returns a streaming response of `ResultChunk` messages. The caller
     /// concatenates `chunk.data` in `index` order until a chunk with
     /// `is_last == true` is received.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn pull_result(
         &mut self,
         handle: String,
@@ -180,6 +257,10 @@ impl GrpcClient {
     }
 
     /// Execute a command on the guest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::GrpcStatus`] if the RPC fails.
     pub async fn execute_command(
         &mut self,
         command: &str,
@@ -187,15 +268,15 @@ impl GrpcClient {
         cwd: Option<&str>,
         env: &[(String, String)],
         timeout_ms: Option<u64>,
-        background: bool,
+        mode: ExecMode,
     ) -> Result<proto::ExecResponse> {
         let request = proto::ExecRequest {
             command: command.to_string(),
             args: args.to_vec(),
-            cwd: cwd.map(|s| s.to_string()),
+            cwd: cwd.map(ToString::to_string),
             env: env.iter().cloned().collect(),
             timeout_ms,
-            background,
+            background: matches!(mode, ExecMode::Background),
         };
         let response = self
             .inner
@@ -211,7 +292,6 @@ mod tests {
     use super::*;
 
     // Compile-time check: pull_result exists with the expected signature.
-    #[allow(dead_code)]
     fn _pull_result_signature_compiles(client: &mut GrpcClient) {
         let _fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<tonic::Streaming<proto::ResultChunk>>>>,

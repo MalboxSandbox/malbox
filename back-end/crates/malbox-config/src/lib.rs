@@ -1,19 +1,34 @@
+//! Configuration schema, discovery, and loading for the malbox daemon, CLI, and installer.
+
 use std::path::PathBuf;
 use tokio::sync::OnceCell;
 use tracing::debug;
 
+/// CLI client configuration (`cli.toml`).
 pub mod cli;
+/// Top-level daemon configuration and its general, HTTP, and database sections.
 pub mod core;
+/// Errors produced while locating, parsing, or validating configuration.
 pub mod error;
+/// Guest communication transport settings.
 pub mod guest_access;
+/// Managed image store settings.
 pub mod images;
+/// Provider-independent machinery settings.
 pub mod machinery;
+/// Declarative analysis machine definitions and their validation.
 pub mod machines;
+/// Task orchestration limits and detonation profiles.
 pub mod orchestration;
+/// Plugin directory and plugin registry settings.
 pub mod plugins;
+/// Per-provider configuration tables.
 pub mod providers;
+/// Machine provisioning pipeline steps.
 pub mod provisioning;
+/// XDG-derived filesystem layout used by malbox.
 pub mod storage;
+/// Shared enums such as platform, environment, and log level.
 pub mod types;
 
 pub use cli::CliConfig;
@@ -33,8 +48,18 @@ pub use provisioning::ProvisionStep;
 pub use storage::PathConfig;
 pub use types::*;
 
+/// Process-wide daemon configuration, populated once by [`load_config`].
 pub static CONFIG: OnceCell<Config> = OnceCell::const_new();
 
+/// Loads the daemon configuration once and returns the cached instance afterwards.
+///
+/// Discovery order: `MALBOX_CONFIG`, then the user config, then `/etc/malbox/malbox.toml`.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::NotFound`] when no config exists, [`ConfigError::PathError`] when
+/// `MALBOX_CONFIG` points to a missing file or directories cannot be created, and
+/// [`ConfigError::Parse`] when the file cannot be read or is not valid TOML for the schema.
 pub async fn load_config() -> Result<&'static Config, ConfigError> {
     CONFIG
         .get_or_try_init(|| async { load_config_internal().await })

@@ -9,8 +9,11 @@
 //! declared as empty enums; C code sees them only through pointers and must
 //! never dereference them directly.
 
+/// C-ABI enums for plugin lifetime and scheduling policies.
 pub mod enums;
+/// C-ABI structs for plugin metadata, health status and guest runtime configuration.
 pub mod structs;
+/// Plugin vtables, opaque handle types and the ABI version constant.
 pub mod vtable;
 
 pub use enums::{MalboxExecutionContext, MalboxPluginState};

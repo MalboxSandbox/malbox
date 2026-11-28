@@ -1,3 +1,5 @@
+//! Tests that install choices are recorded correctly in the initial manifest.
+
 use malbox_installer::Channel;
 use malbox_installer::config::{DaemonSource, FrontendSource, InstallConfig, PostgresStrategy};
 use malbox_installer::install::build_initial_manifest;

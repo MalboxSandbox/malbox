@@ -7,18 +7,18 @@
 // These imports are used in the commented-out test bodies. They verify that the
 // public API surface compiles and will be active once a live iceoryx2 environment
 // is available in the test harness.
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "used by the commented-out scenario bodies")]
 use malbox_plugin_internal::manager::PluginManager;
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "used by the commented-out scenario bodies")]
 use malbox_plugin_internal::manager::error::ManagerError;
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "used by the commented-out scenario bodies")]
 use malbox_plugin_internal::manager::ipc_reactor::{IpcReactor, IpcReactorHandle};
 use malbox_plugin_internal::registry::PluginRegistry;
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "used by the commented-out scenario bodies")]
 use malbox_plugin_internal::registry::types::PluginId;
 use std::sync::Arc;
 use tempfile::TempDir;
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "used by the commented-out scenario bodies")]
 use tokio::time::Duration;
 
 /// Verify that acquiring an unknown plugin from an empty registry returns
@@ -26,10 +26,10 @@ use tokio::time::Duration;
 #[tokio::test]
 async fn acquire_unknown_plugin_returns_not_found() {
     let tmp = TempDir::new().unwrap();
-    let _registry = Arc::new(PluginRegistry::new(tmp.path().to_path_buf()).unwrap());
+    let registry = Arc::new(PluginRegistry::new(tmp.path().to_path_buf()).unwrap());
 
     // Confirm the registry is empty before proceeding.
-    assert!(_registry.snapshot().is_empty());
+    assert!(registry.snapshot().is_empty());
 
     // TODO: Uncomment once tests can spawn a reactor against a live iceoryx2
     // environment.

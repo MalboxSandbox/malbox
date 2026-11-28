@@ -32,8 +32,17 @@ pub struct ProviderHandle {
     clone: Option<Arc<dyn Clone>>,
     /// Migrate capability (optional).
     migrate: Option<Arc<dyn Migrate>>,
-    /// GuestAccess capability (optional).
+    /// `GuestAccess` capability (optional).
     guest_access: Option<Arc<dyn GuestAccess>>,
+}
+
+impl std::fmt::Debug for ProviderHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderHandle")
+            .field("name", &self.name)
+            .field("capabilities", &self.list_capabilities())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProviderHandle {
@@ -68,7 +77,7 @@ impl ProviderHandle {
     ///
     /// This is always available since all providers must implement Allocate.
     pub fn allocate(&self) -> Arc<dyn Allocate> {
-        self.allocate.clone()
+        Arc::clone(&self.allocate)
     }
 
     /// Get the Snapshot capability if available.
@@ -86,7 +95,7 @@ impl ProviderHandle {
         self.migrate.clone()
     }
 
-    /// Get the GuestAccess capability if available.
+    /// Get the `GuestAccess` capability if available.
     pub fn guest_access(&self) -> Option<Arc<dyn GuestAccess>> {
         self.guest_access.clone()
     }
@@ -125,12 +134,13 @@ impl ProviderHandle {
 /// Metadata about a registered provider.
 ///
 /// This struct is submitted to the inventory by provider crates.
-/// It contains the provider name and a function to create a ProviderHandle.
+/// It contains the provider name and a function to create a `ProviderHandle`.
+#[derive(Debug)]
 pub struct ProviderMetadata {
     /// Unique name for this provider (e.g., "libvirt", "vmware").
     pub name: &'static str,
     /// Function to create a provider handle with capabilities.
-    /// Takes provider-specific configuration as TOML value and returns a ProviderHandle.
+    /// Takes provider-specific configuration as TOML value and returns a `ProviderHandle`.
     pub create: fn(&TomlValue) -> Result<ProviderHandle, Box<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -153,6 +163,11 @@ pub fn list_providers() -> Vec<&'static str> {
 ///
 /// This looks up the provider in the registry and calls its create function
 /// with the provider-specific configuration.
+///
+/// # Errors
+///
+/// Fails if no provider named `name` is registered, or if the provider's
+/// factory rejects `config`.
 pub fn create_provider(
     name: &str,
     config: &TomlValue,

@@ -1,5 +1,10 @@
+//! Content-addressed sample storage plus plugin report storage.
+
+/// Storage error type and result alias.
 pub mod error;
+/// Filesystem path helpers for storage locations.
 pub mod paths;
+/// Filesystem storage for plugin reports.
 pub mod results;
 
 use error::{Result, StorageError};
@@ -10,6 +15,7 @@ use tracing::{debug, info};
 ///
 /// Files are stored at `{base_dir}/{sha256[0:2]}/{sha256[2:4]}/{sha256}`.
 /// Writes are atomic (tempfile + rename) and idempotent (skip if exists).
+#[derive(Debug)]
 pub struct SampleStore {
     base_dir: PathBuf,
 }
@@ -23,6 +29,10 @@ impl SampleStore {
     }
 
     /// Resolve the on-disk path for a given SHA256 hash.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::InvalidHash`] if `sha256` is shorter than 4 characters.
     pub fn path(&self, sha256: &str) -> Result<PathBuf> {
         if sha256.len() < 4 {
             return Err(StorageError::InvalidHash(sha256.len()));
@@ -35,6 +45,10 @@ impl SampleStore {
     }
 
     /// Check whether a sample exists on disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::InvalidHash`] if `sha256` is shorter than 4 characters.
     pub async fn exists(&self, sha256: &str) -> Result<bool> {
         let path = self.path(sha256)?;
         Ok(tokio::fs::try_exists(&path).await.unwrap_or(false))
@@ -44,6 +58,15 @@ impl SampleStore {
     ///
     /// Idempotent: if a file with this hash already exists, the write is skipped.
     /// Atomic: writes to a tempfile first, then renames into place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::InvalidHash`] for hashes shorter than 4 characters
+    /// and [`StorageError::Io`] if creating directories, writing or renaming fails.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: a content-addressed path always has a parent directory.
     pub async fn store(&self, sha256: &str, data: &[u8]) -> Result<PathBuf> {
         let dest = self.path(sha256)?;
 

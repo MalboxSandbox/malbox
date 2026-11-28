@@ -5,6 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tempfile::TempDir;
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test fixture setup; a failure should abort the test"
+)]
 fn create_plugin(parent: &Path, name: &str) {
     let dir = parent.join(name);
     std::fs::create_dir_all(&dir).unwrap();

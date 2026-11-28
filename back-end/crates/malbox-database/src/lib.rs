@@ -1,3 +1,6 @@
+//! Postgres persistence layer for the malbox daemon: connection setup,
+//! embedded migrations, and per-table repository functions.
+
 use malbox_config::core::{DATABASE_NAME, DatabaseConfig};
 pub use sqlx::Error;
 pub use sqlx::PgPool;
@@ -12,6 +15,14 @@ pub mod repositories;
 /// here - the installer and dev tooling own that - so a missing database
 /// fails with instructions. Errors are returned rather than panicking so
 /// daemon startup can fail with an actionable message.
+///
+/// # Errors
+///
+/// Returns a configuration error when `host` holds a legacy connection URL
+/// or the database does not exist, a driver error when connecting fails,
+/// and [`error::DatabaseError::IncompatibleSchema`],
+/// [`error::DatabaseError::NewerSchema`] or [`error::DatabaseError::Migrate`]
+/// when the migrations cannot be applied.
 pub async fn init_database(config: &DatabaseConfig) -> error::Result<sqlx::Pool<sqlx::Postgres>> {
     // Configs from before the [database] section was split into discrete
     // fields put a full connection URL here; fail with directions instead
@@ -56,6 +67,11 @@ pub async fn init_database(config: &DatabaseConfig) -> error::Result<sqlx::Pool<
 
 /// Connect to `url` and apply the embedded migrations. Used by tests that
 /// create their own throwaway databases.
+///
+/// # Errors
+///
+/// Returns a driver error when connecting fails, and the schema or migrate
+/// errors of [`init_database`] when the migrations cannot be applied.
 pub async fn connect_and_migrate(url: &str) -> error::Result<PgPool> {
     let pool = PgPoolOptions::new()
         .max_connections(10)
@@ -115,7 +131,7 @@ fn os_user() -> Option<String> {
 
 fn error_code(err: &sqlx::Error) -> Option<String> {
     match err {
-        sqlx::Error::Database(db_err) => db_err.code().map(|code| code.into_owned()),
+        sqlx::Error::Database(db_err) => db_err.code().map(std::borrow::Cow::into_owned),
         _ => None,
     }
 }

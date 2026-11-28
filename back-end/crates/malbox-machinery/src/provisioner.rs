@@ -19,7 +19,7 @@ pub use toml::Value as TomlValue;
 ///
 /// Provisioners receive a [`ProvisionContext`] with the machine's network
 /// endpoint and provisioner-specific configuration. They handle their own
-/// connectivity (WinRM, SSH, etc.).
+/// connectivity (`WinRM`, SSH, etc.).
 #[async_trait]
 pub trait Provisioner: Send + Sync {
     /// Provision a machine.
@@ -58,8 +58,11 @@ pub struct ProvisionResult {
 
 /// Status of a provisioning operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProvisionStatus {
+    /// Provisioning completed without errors.
     Success,
+    /// Provisioning failed; see the result output for details.
     Failed,
 }
 
@@ -70,6 +73,7 @@ pub type ProvisionerFactory =
 /// Metadata about a registered provisioner.
 ///
 /// Submitted to the `inventory` registry by provisioner crates.
+#[derive(Debug)]
 pub struct ProvisionerMetadata {
     /// Unique name for this provisioner (e.g., "ansible").
     pub name: &'static str,
@@ -93,6 +97,11 @@ pub fn list_provisioners() -> Vec<&'static str> {
 }
 
 /// Create a provisioner by name with configuration.
+///
+/// # Errors
+///
+/// Fails if no provisioner named `name` is registered, or if its factory
+/// rejects `config`.
 pub fn create_provisioner(
     name: &str,
     config: &toml::Value,

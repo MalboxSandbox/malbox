@@ -5,6 +5,7 @@
 //! when none is specified and forwards provisioner-specific configuration
 //! as extra variables.
 
+/// Error type for Ansible provisioning failures.
 pub mod error;
 
 use std::collections::HashMap;
@@ -54,7 +55,7 @@ struct AnsibleConfig {
 
     /// Resolved plugins from the server's plugin registry.
     /// Each key is a plugin name, value has `binary` and `manifest` paths.
-    /// These are flattened into extra_vars as `{name}_binary` and `{name}_toml`.
+    /// These are flattened into `extra_vars` as `{name}_binary` and `{name}_toml`.
     #[serde(default)]
     plugins: HashMap<String, PluginInfo>,
 
@@ -84,6 +85,7 @@ fn default_ansible_bin() -> String {
 /// Runs an Ansible playbook against the target machine using
 /// `ansible-playbook`. When the inventory is set to `"dynamic"`, a temporary
 /// inventory file is generated containing only the machine's IP address.
+#[derive(Debug)]
 pub struct AnsibleProvisioner {
     config: AnsibleConfig,
 }
@@ -92,6 +94,11 @@ impl AnsibleProvisioner {
     /// Create a new Ansible provisioner from a TOML configuration value.
     ///
     /// Validates that the configured playbook path exists.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `config` does not deserialize into an Ansible configuration
+    /// or the configured playbook does not exist.
     pub fn new(
         config: &malbox_machinery::provisioner::TomlValue,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -207,12 +214,13 @@ impl Provisioner for AnsibleProvisioner {
         cmd.stderr(std::process::Stdio::piped());
 
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout);
-        let mut child = cmd.spawn().map_err(|e| {
-            Box::new(AnsibleError::Execution(format!(
-                "Failed to spawn ansible-playbook: {}",
-                e
-            ))) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(AnsibleError::Execution(format!(
+                    "Failed to spawn ansible-playbook: {e}"
+                )))
+            })?;
 
         // Take stdout/stderr handles before waiting.
         let stdout_handle = child.stdout.take();
@@ -239,7 +247,7 @@ impl Provisioner for AnsibleProvisioner {
                 } else {
                     String::new()
                 };
-                let combined = format!("{}{}", stdout, stderr);
+                let combined = format!("{stdout}{stderr}");
 
                 if status.success() {
                     info!("Ansible provisioning completed successfully");
@@ -250,8 +258,7 @@ impl Provisioner for AnsibleProvisioner {
                 } else {
                     let code = status
                         .code()
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                        .map_or_else(|| "unknown".to_string(), |c| c.to_string());
                     warn!(exit_code = %code, "Ansible provisioning failed");
                     Ok(ProvisionResult {
                         status: ProvisionStatus::Failed,
@@ -262,8 +269,7 @@ impl Provisioner for AnsibleProvisioner {
             Ok(Err(e)) => {
                 warn!(error = %e, "Failed to execute ansible-playbook");
                 Err(Box::new(AnsibleError::Execution(format!(
-                    "Failed to execute ansible-playbook: {}",
-                    e
+                    "Failed to execute ansible-playbook: {e}"
                 ))))
             }
             Err(_) => {
@@ -286,7 +292,7 @@ impl Provisioner for AnsibleProvisioner {
         }
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ansible"
     }
 }
@@ -313,7 +319,7 @@ mod tests {
                 id: "u1".into(),
                 platform,
             },
-            config: TomlValue::Table(Default::default()),
+            config: TomlValue::from(std::collections::BTreeMap::<String, TomlValue>::new()),
             access,
         }
     }

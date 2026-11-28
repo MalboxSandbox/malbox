@@ -14,7 +14,7 @@ pub use machine::{
 };
 pub use provider::capabilities::{
     Allocate, Clone, ExecOptions, ExecResult, GuestAccess, GuestSession, GuestStatus, Migrate,
-    Snapshot, SnapshotId, SnapshotInfo,
+    Snapshot, SnapshotId, SnapshotInfo, StopMode,
 };
 pub use provider::{
     ProviderHandle, ProviderMetadata, create_provider, get_provider_metadata, list_providers,

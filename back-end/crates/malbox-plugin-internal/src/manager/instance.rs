@@ -29,7 +29,7 @@ use crate::registry::types::PluginEntry;
 /// Any state can transition to Failed on crash or timeout.
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PluginLifecycle {
+pub(crate) enum PluginLifecycle {
     /// Process has been spawned; waiting for the ready signal (health check or
     /// gRPC handshake).
     Starting,
@@ -53,35 +53,37 @@ pub enum PluginLifecycle {
 
 impl PluginLifecycle {
     /// Returns `true` if the plugin is in the [`Starting`](Self::Starting) state.
-    pub fn is_starting(&self) -> bool {
+    pub(crate) fn is_starting(&self) -> bool {
         matches!(self, Self::Starting)
     }
 
     /// Returns `true` if the plugin is in the [`Ready`](Self::Ready) state.
-    pub fn is_ready(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_ready(&self) -> bool {
         matches!(self, Self::Ready)
     }
 
     /// Returns `true` if the plugin is in the [`Busy`](Self::Busy) state.
-    pub fn is_busy(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_busy(&self) -> bool {
         matches!(self, Self::Busy { .. })
     }
 
     /// Returns `true` if the plugin is in the [`Failed`](Self::Failed) state.
-    pub fn is_failed(&self) -> bool {
+    pub(crate) fn is_failed(&self) -> bool {
         matches!(self, Self::Failed { .. })
     }
 
     /// Returns `true` if the plugin is actively running — either [`Ready`](Self::Ready)
     /// or [`Busy`](Self::Busy).
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         matches!(self, Self::Ready | Self::Busy { .. })
     }
 
     /// Returns `true` if a new task can be assigned to this plugin.
     ///
     /// Only plugins in the [`Ready`](Self::Ready) state accept work.
-    pub fn can_acquire(&self) -> bool {
+    pub(crate) fn can_acquire(&self) -> bool {
         matches!(self, Self::Ready)
     }
 }
@@ -91,10 +93,10 @@ impl fmt::Display for PluginLifecycle {
         match self {
             Self::Starting => write!(f, "starting"),
             Self::Ready => write!(f, "ready"),
-            Self::Busy { task_id } => write!(f, "busy (task {})", task_id),
+            Self::Busy { task_id } => write!(f, "busy (task {task_id})"),
             Self::Stopping => write!(f, "stopping"),
             Self::Stopped => write!(f, "stopped"),
-            Self::Failed { reason } => write!(f, "failed: {}", reason),
+            Self::Failed { reason } => write!(f, "failed: {reason}"),
         }
     }
 }
@@ -105,19 +107,19 @@ impl fmt::Display for PluginLifecycle {
 /// Created by the plugin manager when a plugin process is spawned. The
 /// `grpc_client` field is only present for guest plugins compiled with the
 /// `guest` feature.
-pub struct PluginInstance {
+pub(crate) struct PluginInstance {
     /// Static registry entry this instance was created from.
-    pub entry: Arc<PluginEntry>,
+    pub(crate) entry: Arc<PluginEntry>,
     /// Current lifecycle state.
-    pub lifecycle: PluginLifecycle,
+    pub(crate) lifecycle: PluginLifecycle,
     /// Type-discriminated runtime state (host process or guest gRPC client).
-    pub runtime: PluginRuntime,
+    pub(crate) runtime: PluginRuntime,
     /// Wall-clock time when the plugin process was started.
-    pub started_at: Option<Instant>,
+    pub(crate) started_at: Option<Instant>,
     /// Wall-clock time of the most recent successful health check.
-    pub last_health_check: Option<Instant>,
+    pub(crate) last_health_check: Option<Instant>,
     /// Path to the log file for this plugin instance's log stream.
-    pub log_file_path: Option<PathBuf>,
+    pub(crate) log_file_path: Option<PathBuf>,
 }
 
 impl fmt::Debug for PluginInstance {

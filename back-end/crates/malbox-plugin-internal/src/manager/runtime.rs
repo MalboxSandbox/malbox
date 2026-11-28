@@ -1,8 +1,9 @@
+//! Host (IPC) and guest (gRPC) runtime backends behind a plugin instance.
+
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::oneshot;
 use tracing::{debug, info};
 
 use crate::manager::error::{ManagerError, Result};
@@ -18,9 +19,12 @@ use crate::transport::grpc::proto;
 /// Not used as `dyn PluginExecution` - the `PluginRuntime` enum delegates
 /// via match arms. The trait enforces signature parity between impls and
 /// documents the contract.
-#[allow(async_fn_in_trait)]
-pub trait PluginExecution: Send {
-    #[allow(clippy::too_many_arguments)]
+pub(crate) trait PluginExecution: Send {
+    /// Run one task to completion and return every output the plugin produced.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the full task dispatch context; both runtimes need each piece"
+    )]
     async fn execute_task(
         &mut self,
         plugin_id: &PluginId,
@@ -32,27 +36,30 @@ pub trait PluginExecution: Send {
         ready: Option<oneshot::Sender<()>>,
     ) -> Result<Vec<PluginOutput>>;
 
+    /// Whether the plugin is alive and responsive.
     async fn check_health(&mut self) -> bool;
 }
 
 /// Host plugin runtime: child process + a handle to the IPC reactor.
-pub struct HostRuntime {
-    pub process: tokio::process::Child,
-    pub ipc: IpcReactorHandle,
+pub(crate) struct HostRuntime {
+    /// Spawned plugin child process.
+    pub(crate) process: tokio::process::Child,
+    /// Handle used to dispatch tasks through the daemon IPC reactor.
+    pub(crate) ipc: IpcReactorHandle,
 }
 
-/// Guest plugin runtime: gRPC client connection.
-pub struct GuestRuntime {
-    /// Client used for the task stream, health checks and result pulls.
-    pub grpc_client: GrpcClient,
-    /// Second connection to the same guest, used for control RPCs
-    /// (`StopTask`) while `grpc_client` is held by a running task stream.
-    pub control_client: Arc<Mutex<GrpcClient>>,
+/// Guest plugin runtime: gRPC client connection used for the task stream,
+/// health checks and result pulls. Control RPCs (`StopTask`) go through the
+/// second connection held by the [`PluginHandle`](crate::manager::handle::PluginHandle).
+pub(crate) struct GuestRuntime {
+    pub(crate) grpc_client: GrpcClient,
 }
 
 /// Type-discriminated runtime state for a plugin instance.
-pub enum PluginRuntime {
+pub(crate) enum PluginRuntime {
+    /// Native process on the daemon host, driven over IPC.
     Host(HostRuntime),
+    /// Plugin inside a VM, driven over gRPC.
     Guest(GuestRuntime),
 }
 
@@ -172,7 +179,7 @@ impl GuestRuntime {
                 Err(status) => {
                     return Err(ManagerError::ExecutionFailed(
                         plugin_id.clone(),
-                        format!("gRPC stream error: {}", status),
+                        format!("gRPC stream error: {status}"),
                     ));
                 }
             }
@@ -223,8 +230,12 @@ impl PluginExecution for GuestRuntime {
 }
 
 impl PluginRuntime {
-    #[allow(clippy::too_many_arguments)]
-    pub async fn execute_task(
+    /// Dispatch a task to whichever runtime backs this instance.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "forwards the full PluginExecution::execute_task context"
+    )]
+    pub(crate) async fn execute_task(
         &mut self,
         plugin_id: &PluginId,
         entry: &PluginEntry,
@@ -262,7 +273,8 @@ impl PluginRuntime {
         }
     }
 
-    pub async fn check_health(&mut self) -> bool {
+    /// Whether the plugin is alive and responsive.
+    pub(crate) async fn check_health(&mut self) -> bool {
         match self {
             Self::Host(h) => h.check_health().await,
             Self::Guest(g) => g.check_health().await,
@@ -288,7 +300,8 @@ async fn pull_result_chunks(
             )
         })?;
 
-    let mut buf: Vec<u8> = Vec::with_capacity(ref_msg.size_bytes as usize);
+    // The size is only a capacity hint; skip preallocation if it does not fit.
+    let mut buf: Vec<u8> = Vec::with_capacity(usize::try_from(ref_msg.size_bytes).unwrap_or(0));
     loop {
         match stream.message().await {
             Ok(Some(chunk)) => {

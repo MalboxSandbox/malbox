@@ -21,18 +21,31 @@ const DEFAULT_ANALYZER_TIMEOUT_SECS: u64 = 300;
 /// A host plugin as the orchestrator sees it.
 #[derive(Debug, Clone)]
 pub struct AnalyzerSpec {
+    /// Plugin name; also the job's `analyzer`.
     pub name: String,
+    /// Plugin version, part of the result-cache key.
     pub version: String,
+    /// Pipeline stage the plugin runs in.
     pub stage: Stage,
+    /// Category used by recursion prevention to forbid plugins on descendants.
     pub category: String,
+    /// Artifact types the plugin runs on (anchored regex).
     pub accepts: Regex,
+    /// Artifact types excluded even when `accepts` matches.
     pub rejects: Option<Regex>,
+    /// Plugins whose outputs this plugin must not analyse.
     pub sources_exclude: Vec<String>,
+    /// Per-job time limit.
     pub timeout: Duration,
+    /// Whether results may be cached and replayed.
     pub cacheable: bool,
+    /// Categories forbidden on artifacts this plugin produces.
     pub recursion_prevention: Vec<String>,
+    /// Whether the plugin reads task-wide indicators (makes results uncacheable).
     pub uses_indicators: bool,
+    /// Shared-data keys whose change re-runs this plugin.
     pub monitored_keys: Vec<String>,
+    /// Declared submission parameters, by name.
     pub parameters: BTreeMap<String, ParameterConfig>,
 }
 
@@ -50,16 +63,25 @@ impl AnalyzerSpec {
 /// A configured detonation profile.
 #[derive(Debug, Clone)]
 pub struct DetonationProfile {
+    /// Profile name, referenced by submissions and stored in jobs.
     pub name: String,
+    /// Artifact types this profile detonates (anchored regex).
     pub accepts: Regex,
+    /// Guest operating system of matching machines.
     pub platform: MachinePlatform,
+    /// Required CPU architecture, if any.
     pub arch: Option<MachineArch>,
+    /// Snapshot to restore before detonation.
     pub snapshot: Option<String>,
+    /// Tags a machine must carry.
     pub tags: Vec<String>,
+    /// Guest plugins run during detonation.
     pub guest_plugins: Vec<String>,
+    /// Detonation time limit.
     pub timeout: Duration,
 }
 
+/// Lookup of host analyzers, guest plugins and detonation profiles.
 #[derive(Debug, Clone, Default)]
 pub struct RoutingTable {
     analyzers: BTreeMap<String, AnalyzerSpec>,
@@ -68,11 +90,17 @@ pub struct RoutingTable {
 }
 
 /// Compile a routing expression anchored to the whole artifact type.
+///
+/// # Errors
+///
+/// Fails when `expr` is not a valid regular expression.
 pub fn anchored(expr: &str) -> Result<Regex, regex::Error> {
     Regex::new(&format!("^(?:{expr})$"))
 }
 
 impl RoutingTable {
+    /// Build a table from already-resolved analyzers, guest plugin names and profiles.
+    #[must_use]
     pub fn new(
         analyzers: Vec<AnalyzerSpec>,
         guest_plugins: BTreeSet<String>,
@@ -87,6 +115,11 @@ impl RoutingTable {
 
     /// Build the table from the registered plugins and the configured
     /// detonation profiles.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a plugin's `accepts`/`rejects` or a profile's `accepts` is an
+    /// invalid regular expression.
     pub fn from_registry(
         snap: &PluginSnapshot,
         profiles: &[DetonationProfileConfig],
@@ -167,6 +200,7 @@ impl RoutingTable {
         Ok(Self::new(analyzers, guest_plugins, profiles))
     }
 
+    /// Host analyzer with the given plugin name.
     pub fn analyzer(&self, name: &str) -> Option<&AnalyzerSpec> {
         self.analyzers.get(name)
     }
@@ -176,10 +210,12 @@ impl RoutingTable {
         self.analyzers.values()
     }
 
+    /// Whether `name` is a registered guest plugin.
     pub fn is_guest_plugin(&self, name: &str) -> bool {
         self.guest_plugins.contains(name)
     }
 
+    /// Detonation profile with the given name.
     pub fn profile(&self, name: &str) -> Option<&DetonationProfile> {
         self.profiles.iter().find(|p| p.name == name)
     }

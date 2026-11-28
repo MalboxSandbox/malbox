@@ -9,7 +9,7 @@ use malbox_installer::manifest::Manifest;
 
 #[derive(Parser)]
 #[command(about = "Rebuild daemon with current provider configuration")]
-pub struct RebuildCommand {}
+pub(crate) struct RebuildCommand {}
 
 impl Command for RebuildCommand {
     async fn execute(self, _ctx: &Context) -> Result<()> {

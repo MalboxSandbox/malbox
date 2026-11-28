@@ -3,15 +3,18 @@
 use malbox_database::repositories::machinery::MachinePlatform;
 use malbox_utils::identify::canonical_extension;
 
+/// Program and arguments that start a sample inside the guest.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LaunchCommand {
-    pub command: String,
-    pub args: Vec<String>,
+pub(crate) struct LaunchCommand {
+    /// Executable to run in the guest.
+    pub(crate) command: String,
+    /// Arguments passed to `command`.
+    pub(crate) args: Vec<String>,
 }
 
 /// Every package name. Windows accepts the first eight, Linux
 /// `elf, shell, python, open`.
-pub const PACKAGES: &[&str] = &[
+pub(crate) const PACKAGES: &[&str] = &[
     "exe",
     "dll",
     "msi",
@@ -43,7 +46,7 @@ const MAX_NAME_CHARS: usize = 100;
 fn cmd(command: &str, args: &[&str]) -> LaunchCommand {
     LaunchCommand {
         command: command.to_string(),
-        args: args.iter().map(|a| a.to_string()).collect(),
+        args: args.iter().map(ToString::to_string).collect(),
     }
 }
 
@@ -71,9 +74,13 @@ fn default_package(artifact_type: &str, platform: &MachinePlatform) -> &'static 
 }
 
 /// The command that starts `target` (a file name in the guest sample dir).
-pub fn launch_command(
+///
+/// # Errors
+///
+/// Returns a message when `package` is not a package supported on `platform`.
+pub(crate) fn launch_command(
     artifact_type: &str,
-    platform: MachinePlatform,
+    platform: &MachinePlatform,
     target: &str,
     package: Option<&str>,
     dll_function: Option<&str>,
@@ -85,11 +92,11 @@ pub fn launch_command(
     let package = match package {
         Some(p) if allowed.contains(&p) => p,
         Some(p) => return Err(format!("unknown package {p} for {}", platform.as_str())),
-        None => default_package(artifact_type, &platform),
+        None => default_package(artifact_type, platform),
     };
     let t = target;
-    Ok(match (&platform, package) {
-        (MachinePlatform::Windows, "exe") => cmd("cmd.exe", &["/c", t]),
+    Ok(match (platform, package) {
+        (MachinePlatform::Windows, "exe" | "batch") => cmd("cmd.exe", &["/c", t]),
         (MachinePlatform::Windows, "dll") => {
             let function = dll_function.unwrap_or("DllMain");
             cmd("rundll32.exe", &[&format!("{t},{function}")])
@@ -100,7 +107,6 @@ pub fn launch_command(
             &["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", t],
         ),
         (MachinePlatform::Windows, "wscript") => cmd("wscript.exe", &[t]),
-        (MachinePlatform::Windows, "batch") => cmd("cmd.exe", &["/c", t]),
         (MachinePlatform::Windows, "hta") => cmd("mshta.exe", &[t]),
         (MachinePlatform::Windows, _) => cmd("cmd.exe", &["/c", "start", "", t]),
         (MachinePlatform::Linux, "elf") => cmd("sh", &["-c", &format!("chmod +x ./{t} && ./{t}")]),
@@ -128,7 +134,7 @@ pub fn sanitize_file_name(name: &str) -> String {
 /// File name the sample gets inside the guest: the sanitised artifact name
 /// (or the first 16 hex chars of its SHA-256), plus the canonical extension
 /// of its type when missing.
-pub fn guest_file_name(
+pub(crate) fn guest_file_name(
     name: Option<&str>,
     sha256: &str,
     artifact_type: &str,
@@ -151,18 +157,18 @@ mod tests {
     use super::*;
 
     fn win(t: &str, package: Option<&str>) -> LaunchCommand {
-        launch_command(t, MachinePlatform::Windows, "s.bin", package, None).unwrap()
+        launch_command(t, &MachinePlatform::Windows, "s.bin", package, None).unwrap()
     }
 
     fn linux(t: &str, package: Option<&str>) -> LaunchCommand {
-        launch_command(t, MachinePlatform::Linux, "s.bin", package, None).unwrap()
+        launch_command(t, &MachinePlatform::Linux, "s.bin", package, None).unwrap()
     }
 
     #[test]
     fn windows_exe_uses_cmd() {
         let c = launch_command(
             "executable/windows/pe32",
-            MachinePlatform::Windows,
+            &MachinePlatform::Windows,
             "sample.exe",
             None,
             None,
@@ -175,7 +181,7 @@ mod tests {
     fn linux_elf_uses_sh_with_chmod() {
         let c = launch_command(
             "executable/linux/elf64",
-            MachinePlatform::Linux,
+            &MachinePlatform::Linux,
             "sample.elf",
             None,
             None,
@@ -203,7 +209,7 @@ mod tests {
         );
         let c = launch_command(
             "executable/windows/dll64",
-            MachinePlatform::Windows,
+            &MachinePlatform::Windows,
             "s.dll",
             None,
             Some("Run"),
@@ -276,10 +282,16 @@ mod tests {
 
     #[test]
     fn package_invalid_for_platform() {
-        let e = launch_command("code/shell", MachinePlatform::Linux, "s", Some("msi"), None)
-            .unwrap_err();
+        let e = launch_command(
+            "code/shell",
+            &MachinePlatform::Linux,
+            "s",
+            Some("msi"),
+            None,
+        )
+        .unwrap_err();
         assert_eq!(e, "unknown package msi for linux");
-        assert!(launch_command("x", MachinePlatform::Windows, "s", Some("elf"), None).is_err());
+        assert!(launch_command("x", &MachinePlatform::Windows, "s", Some("elf"), None).is_err());
     }
 
     #[test]

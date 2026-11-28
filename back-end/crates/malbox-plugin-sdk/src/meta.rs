@@ -36,24 +36,28 @@ impl PluginMeta {
     }
 
     /// Set a human-readable description of what the plugin does.
+    #[must_use]
     pub fn with_description(mut self, d: impl Into<String>) -> Self {
         self.description = d.into();
         self
     }
 
     /// Set the plugin author(s), typically sourced from `Cargo.toml`.
+    #[must_use]
     pub fn with_authors(mut self, a: impl Into<String>) -> Self {
         self.authors = a.into();
         self
     }
 
     /// Set the plugin's lifecycle behavior (persistent, ephemeral, or scoped).
+    #[must_use]
     pub fn with_state(mut self, s: PluginState) -> Self {
         self.state = s;
         self
     }
 
     /// Set the concurrency model the daemon should use when dispatching tasks.
+    #[must_use]
     pub fn with_execution(mut self, e: ExecutionContext) -> Self {
         self.execution = e;
         self
@@ -92,6 +96,7 @@ impl PluginMeta {
 
 /// Lifecycle behavior of the plugin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum PluginState {
     /// Stays running between tasks.
     Persistent,
@@ -103,6 +108,7 @@ pub enum PluginState {
 
 /// Concurrency model for task execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ExecutionContext {
     /// Only one instance runs at a time across the entire daemon.
     Exclusive,

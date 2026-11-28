@@ -9,13 +9,23 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub use malbox_installer::build_parse::{parse_cargo_artifact, parse_cmake_progress};
 
+/// Build system detected in a plugin source tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BuildSystem {
+    /// Rust crate built with `cargo` (`Cargo.toml`).
     Cargo,
+    /// C/C++ project built with `cmake` (`CMakeLists.txt`).
     CMake,
+    /// Python project (`setup.py` or `pyproject.toml`); needs no build tool.
     Python,
 }
 
+/// Detect the build system of `repo_dir` from its marker files.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::BuildFailed`] if no supported marker file is present.
 pub fn detect_build_system(repo_dir: &Path) -> Result<BuildSystem> {
     if repo_dir.join("Cargo.toml").exists() {
         Ok(BuildSystem::Cargo)
@@ -31,6 +41,11 @@ pub fn detect_build_system(repo_dir: &Path) -> Result<BuildSystem> {
     }
 }
 
+/// Locate the executable `name` on `PATH`.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::ToolNotFound`] if it is not on `PATH`.
 pub fn check_tool(name: &str) -> Result<PathBuf> {
     which::which(name).map_err(|_| RegistryError::ToolNotFound(name.to_string()))
 }
@@ -49,12 +64,25 @@ fn validate_toolchain(build_system: BuildSystem) -> Result<()> {
     Ok(())
 }
 
+/// Result of building and installing a plugin from a git source.
+#[derive(Debug)]
 pub struct SourceBuildOutcome {
+    /// Directory the plugin was installed into.
     pub plugin_dir: PathBuf,
+    /// Plugin type label from the manifest (`host` or `guest`).
     pub plugin_type: String,
+    /// Commit SHA that was built; empty if it could not be determined.
     pub commit: String,
 }
 
+/// Clone `clone_url` at `source_ref`, build it, and install it into
+/// `plugins_dir/<plugin_name>`.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::BuildFailed`] if a git step or the build fails or no
+/// build system is detected, [`RegistryError::ToolNotFound`] for a missing
+/// toolchain, and I/O or manifest errors while staging the result.
 pub async fn build_from_source(
     clone_url: &str,
     source_ref: &SourceRef,
@@ -109,7 +137,7 @@ pub async fn build_from_source(
     observer.step_completed("Detecting build system", &format!("{build_system:?}"));
 
     // git source builds use the plugin name as the binary name (unchanged).
-    let (plugin_type, plugin_dir) = build_and_stage(
+    let (plugin_type, installed_dir) = build_and_stage(
         clone_dir.path(),
         build_system,
         plugin_name,
@@ -124,8 +152,8 @@ pub async fn build_from_source(
         .unwrap_or_default();
 
     Ok(SourceBuildOutcome {
+        plugin_dir: installed_dir,
         plugin_type,
-        plugin_dir,
         commit,
     })
 }
@@ -255,8 +283,8 @@ async fn run_command_streaming(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -323,8 +351,8 @@ async fn run_cargo_build(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -409,8 +437,7 @@ async fn count_cargo_packages(cwd: &Path) -> Result<usize> {
     let count = val
         .get("packages")
         .and_then(|p| p.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, Vec::len);
     Ok(count)
 }
 
@@ -426,8 +453,8 @@ async fn run_cmake_build(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stderr = child.stderr.take().expect("stderr is piped");
 
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -551,6 +578,11 @@ async fn capture_head_commit(cwd: &Path) -> Result<String> {
 
 /// Current HEAD commit of a remote branch, read cheaply over the network
 /// without cloning. Used by `update` to decide whether a branch pin moved.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::Io`] if git cannot be spawned, or
+/// [`RegistryError::BuildFailed`] if `git ls-remote` fails or the branch is absent.
 pub async fn remote_branch_head(clone_url: &str, branch: &str) -> Result<String> {
     let output = tokio::process::Command::new("git")
         .args(["ls-remote", clone_url, &format!("refs/heads/{branch}")])
@@ -586,6 +618,12 @@ pub async fn remote_branch_head(clone_url: &str, branch: &str) -> Result<String>
 /// in place (reusing the caller's build cache) and stage the artifact; otherwise
 /// treat the directory as an already-built plugin and copy it. Returns
 /// `(plugin_type, plugin_dir)`.
+///
+/// # Errors
+///
+/// Returns [`RegistryError::InvalidPlugin`] if `path` is not a directory or lacks
+/// `plugin.toml`, manifest errors, toolchain and build failures, and I/O errors
+/// while copying or staging.
 pub async fn install_from_local(
     path: &Path,
     plugin_name: &str,
@@ -613,25 +651,22 @@ pub async fn install_from_local(
         .unwrap_or_else(|| plugin_name.to_string());
 
     observer.step_started("Detecting build system");
-    match detect_build_system(path) {
-        Ok(build_system) => {
-            validate_toolchain(build_system)
-                .inspect_err(|e| observer.step_failed("Detecting build system", &e.to_string()))?;
-            observer.step_completed("Detecting build system", &format!("{build_system:?}"));
-            build_and_stage(
-                path,
-                build_system,
-                plugin_name,
-                &binary,
-                plugins_dir,
-                observer,
-            )
-            .await
-        }
-        Err(_) => {
-            observer.step_completed("Detecting build system", "prebuilt");
-            copy_prebuilt_local(path, plugin_name, plugins_dir, observer)
-        }
+    if let Ok(build_system) = detect_build_system(path) {
+        validate_toolchain(build_system)
+            .inspect_err(|e| observer.step_failed("Detecting build system", &e.to_string()))?;
+        observer.step_completed("Detecting build system", &format!("{build_system:?}"));
+        build_and_stage(
+            path,
+            build_system,
+            plugin_name,
+            &binary,
+            plugins_dir,
+            observer,
+        )
+        .await
+    } else {
+        observer.step_completed("Detecting build system", "prebuilt");
+        copy_prebuilt_local(path, plugin_name, plugins_dir, observer)
     }
 }
 

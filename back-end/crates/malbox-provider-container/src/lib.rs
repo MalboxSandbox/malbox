@@ -57,6 +57,15 @@ pub struct ContainerProvider {
     image_lock: tokio::sync::Mutex<()>,
 }
 
+impl std::fmt::Debug for ContainerProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContainerProvider")
+            .field("config", &self.config)
+            .field("subnet", &self.subnet)
+            .finish_non_exhaustive()
+    }
+}
+
 /// `[providers.container]` configuration.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,6 +116,11 @@ impl ContainerProvider {
     /// Create the provider from its TOML configuration.
     ///
     /// Makes no engine calls; the client is version-negotiated on first use.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `config` is not a valid `[providers.container]` table, its
+    /// subnet is invalid, or the engine client cannot be constructed.
     pub fn new(config: &TomlValue) -> Result<Self, ContainerError> {
         let config: ContainerProviderConfig =
             malbox_machinery::provider::config::deserialize(config).map_err(|e| {

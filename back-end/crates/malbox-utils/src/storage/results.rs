@@ -10,11 +10,13 @@ const REPORT_FILE: &str = "report.json";
 /// Reports are stored at
 /// `{data_dir}/results/{task_id}/{artifact_id}/{plugin_name}/report.json`.
 /// Writes are atomic (tempfile + rename).
+#[derive(Debug)]
 pub struct ResultStore {
     data_dir: PathBuf,
 }
 
 impl ResultStore {
+    /// Create a store that writes reports beneath `data_dir`.
     pub fn new(data_dir: &Path) -> Self {
         Self {
             data_dir: data_dir.to_path_buf(),
@@ -27,6 +29,11 @@ impl ResultStore {
 
     /// Store a plugin's report JSON and return its path relative to the
     /// data directory (the value kept in `plugin_reports.report_path`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Io`] if creating directories, writing the
+    /// tempfile or renaming it into place fails.
     pub async fn store_report(
         &self,
         task_id: i32,

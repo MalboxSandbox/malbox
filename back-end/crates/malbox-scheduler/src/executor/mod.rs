@@ -34,18 +34,18 @@ pub(crate) struct Executors {
 }
 
 impl Executors {
-    pub fn notify(&self, kind: JobKindPlan) {
+    pub(crate) fn notify(&self, kind: JobKindPlan) {
         match kind {
             JobKindPlan::Host => self.host_notify.notify_one(),
             JobKindPlan::Detonation => self.detonation_notify.notify_one(),
         }
     }
 
-    pub fn host_notify(&self) -> &Arc<Notify> {
+    pub(crate) fn host_notify(&self) -> &Arc<Notify> {
         &self.host_notify
     }
 
-    pub fn detonation_notify(&self) -> &Arc<Notify> {
+    pub(crate) fn detonation_notify(&self) -> &Arc<Notify> {
         &self.detonation_notify
     }
 }
@@ -223,44 +223,53 @@ async fn finish_inner(
     } else {
         launch_error.map(|e| format!("launch failed: {e}"))
     };
-    match failure {
-        Some(f) => {
-            messages.insert(0, f);
-            jobs::set_job_state(
-                db,
-                job.id,
-                "failed",
-                Some(ErrorClass::Nonrecoverable.as_str()),
-                Some(&messages.join("; ")),
-            )
-            .await?;
-        }
-        None => {
-            let message = (!messages.is_empty()).then(|| messages.join("; "));
-            jobs::set_job_state(db, job.id, "completed", None, message.as_deref()).await?;
-            if let (Some(spec), Some(key)) = (cache_spec, &job.cache_key) {
-                let params = task_params(&ctx.task);
-                if is_cacheable(spec, &params)
-                    && job.reruns == 0
-                    && !job.ignore_cache
-                    && summary.changed_shared_keys.is_empty()
-                    && !summary.drop_requested
-                    && !summary.budget_limited
-                {
-                    let empty = !summary.had_report && summary.new_artifacts.is_empty();
-                    let ttl = if empty {
-                        core.settings.empty_result_cache_ttl_secs
-                    } else {
-                        core.settings.cache_ttl_secs
-                    };
-                    if let Err(e) = result_cache::store(db, key, job.id, empty, to_i64(ttl)).await {
-                        warn!(job_id = job.id, error = %e, "failed to store cache entry");
-                    }
-                }
-            }
+    if let Some(f) = failure {
+        messages.insert(0, f);
+        jobs::set_job_state(
+            db,
+            job.id,
+            "failed",
+            Some(ErrorClass::Nonrecoverable.as_str()),
+            Some(&messages.join("; ")),
+        )
+        .await?;
+    } else {
+        let message = (!messages.is_empty()).then(|| messages.join("; "));
+        jobs::set_job_state(db, job.id, "completed", None, message.as_deref()).await?;
+        if let (Some(spec), Some(key)) = (cache_spec, &job.cache_key) {
+            store_cache_entry(core, &ctx, spec, key, &summary).await;
         }
     }
     Ok(Some(JobOutcome::Completed(summary)))
+}
+
+/// Store a completed host job's result in the cache when the run qualifies for caching.
+async fn store_cache_entry(
+    core: &crate::OrchestratorCore,
+    ctx: &IngestContext,
+    spec: &AnalyzerSpec,
+    key: &str,
+    summary: &IngestSummary,
+) {
+    let job = &ctx.job;
+    let params = task_params(&ctx.task);
+    if is_cacheable(spec, &params)
+        && job.reruns == 0
+        && !job.ignore_cache
+        && summary.changed_shared_keys.is_empty()
+        && !summary.drop_requested
+        && !summary.budget_limited
+    {
+        let empty = !summary.had_report && summary.new_artifacts.is_empty();
+        let ttl = if empty {
+            core.settings.empty_result_cache_ttl_secs
+        } else {
+            core.settings.cache_ttl_secs
+        };
+        if let Err(e) = result_cache::store(&core.db, key, job.id, empty, to_i64(ttl)).await {
+            warn!(job_id = job.id, error = %e, "failed to store cache entry");
+        }
+    }
 }
 
 async fn handle_error(shared: &Shared, job: &Job, e: JobRunError) -> Result<Option<JobOutcome>> {
@@ -272,7 +281,7 @@ async fn handle_error(shared: &Shared, job: &Job, e: JobRunError) -> Result<Opti
             .core
             .settings
             .retry_backoff_secs
-            .saturating_mul(job.attempts.max(0) as u64);
+            .saturating_mul(u64::from(job.attempts.max(0).unsigned_abs()));
         let not_before = OffsetDateTime::now_utc() + time::Duration::seconds(to_i64(backoff));
         jobs::schedule_retry(db, job.id, class.as_str(), &message, not_before).await?;
         warn!(job_id = job.id, attempts = job.attempts, error = %message, "job failed, retrying");

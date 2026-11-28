@@ -20,7 +20,7 @@ use crate::http::report_service::{
 };
 use crate::http::{Result, error::Error};
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/tasks/{id}/report", get(get_task_report))
         .route(
@@ -88,7 +88,7 @@ async fn get_task_report(
         .map(|v| v.plugin_name.as_str())
         .chain(reports.iter().map(|r| r.plugin_name.as_str()))
         .collect();
-    let plugin_count = plugin_names.len() as u32;
+    let plugin_count = u32::try_from(plugin_names.len()).unwrap_or(u32::MAX);
     let aggregate = aggregate_plugin_reports(reports, plugin_count);
     let task_dto = attach_one_task(&state.pool, task).await;
 

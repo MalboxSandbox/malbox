@@ -25,6 +25,10 @@ impl CleanupReport {
 
 /// Remove the stale resources of every dead iceoryx2 node, returning the
 /// counts. Run once at startup, before any node or service is created.
+///
+/// # Errors
+///
+/// Returns [`TransportError::Ipc`] if iceoryx2 cannot enumerate the nodes.
 pub fn cleanup_stale_resources() -> Result<CleanupReport> {
     let mut report = CleanupReport::default();
 

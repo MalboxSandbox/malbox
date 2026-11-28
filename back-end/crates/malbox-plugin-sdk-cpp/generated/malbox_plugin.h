@@ -32,17 +32,53 @@ enum MalboxEventTag
   : int32_t
 #endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
  {
+    /**
+     * A task was created; `id` is the task ID.
+     */
     MALBOX_EVENT_TAG_TASK_CREATED = 0,
+    /**
+     * A task is about to start running; `id` is the task ID.
+     */
     MALBOX_EVENT_TAG_TASK_STARTING = 1,
+    /**
+     * A task finished successfully; `id` is the task ID.
+     */
     MALBOX_EVENT_TAG_TASK_COMPLETED = 2,
+    /**
+     * A task finished with an error; `id` is the task ID.
+     */
     MALBOX_EVENT_TAG_TASK_FAILED = 3,
+    /**
+     * A task was canceled before completion; `id` is the task ID.
+     */
     MALBOX_EVENT_TAG_TASK_CANCELED = 4,
+    /**
+     * A plugin process came up; `id` is the plugin ID.
+     */
     MALBOX_EVENT_TAG_PLUGIN_STARTED = 5,
+    /**
+     * A plugin process shut down; `id` is the plugin ID.
+     */
     MALBOX_EVENT_TAG_PLUGIN_STOPPED = 6,
+    /**
+     * Analysis of a sample began; `id` is the sample ID.
+     */
     MALBOX_EVENT_TAG_SAMPLE_STARTED = 8,
+    /**
+     * Analysis of a sample ended; `id` is the sample ID.
+     */
     MALBOX_EVENT_TAG_SAMPLE_STOPPED = 9,
+    /**
+     * A result was produced for a sample; `id` is the sample ID.
+     */
     MALBOX_EVENT_TAG_SAMPLE_RESULT_PRODUCED = 10,
+    /**
+     * The daemon is shutting down; `id` is unused.
+     */
     MALBOX_EVENT_TAG_DAEMON_SHUTDOWN = 11,
+    /**
+     * The daemon reloaded its configuration; `id` is unused.
+     */
     MALBOX_EVENT_TAG_CONFIG_RELOADED = 12,
 };
 #ifndef __cplusplus
@@ -144,7 +180,13 @@ typedef struct MalboxResultBuilder MalboxResultBuilder;
  * - Daemon events: `id` is unused (set to `0`).
  */
 typedef struct MalboxEvent {
+    /**
+     * Which kind of event this is.
+     */
     MalboxEventTag tag;
+    /**
+     * Task, plugin or sample ID selected by `tag`; `0` for daemon events.
+     */
     int32_t id;
 } MalboxEvent;
 
@@ -261,14 +303,39 @@ typedef struct MalboxPluginMeta {
 } MalboxPluginMeta;
 
 /**
- * Function-pointer table for a C++ guest plugin.
+ * Function-pointer table filled in by a C++ guest plugin and passed to
+ * [`malbox_run_guest_plugin`](crate::ffi_runtime::malbox_run_guest_plugin).
+ *
+ * A `None` callback opts out: lifecycle hooks become successful no-ops,
+ * `execute_sample` falls back to the default launcher and `health_check`
+ * reports ready.
  */
 typedef struct MalboxGuestPluginVtable {
+    /**
+     * Must equal [`MALBOX_ABI_VERSION`]; the runtime rejects mismatches.
+     */
     uint32_t abi_version;
+    /**
+     * Opaque pointer passed as the first argument to every callback (typically
+     * the C++ plugin object pointer).
+     */
     void *plugin_ptr;
+    /**
+     * Called once when the guest runtime starts, with the runtime context.
+     */
     int32_t (*on_start)(void*, const struct MalboxContext*);
+    /**
+     * Called once when the guest runtime shuts down, with the runtime context.
+     */
     int32_t (*on_stop)(void*, const struct MalboxContext*);
+    /**
+     * Launches the sample at the given NUL-terminated path: return `0` to use
+     * the default launcher, `1` if the plugin launched it, anything else on error.
+     */
     int32_t (*execute_sample)(void*, const char*);
+    /**
+     * Called periodically to fill in a [`MalboxHealthStatus`].
+     */
     int32_t (*health_check)(void*, struct MalboxHealthStatus*);
 } MalboxGuestPluginVtable;
 
@@ -280,11 +347,29 @@ typedef struct MalboxGuestPluginVtable {
  * default), 0 (false) or 1 (true).
  */
 typedef struct MalboxAutoCollectRule {
+    /**
+     * Array of `include_count` NUL-terminated glob patterns a file must match.
+     */
     const char *const *include;
+    /**
+     * Number of entries in `include`.
+     */
     uintptr_t include_count;
+    /**
+     * Array of `exclude_count` NUL-terminated glob patterns that veto a match.
+     */
     const char *const *exclude;
+    /**
+     * Number of entries in `exclude`.
+     */
     uintptr_t exclude_count;
+    /**
+     * `ArtifactRelation` wire value (1-7) assigned to collected files.
+     */
     int32_t relation;
+    /**
+     * Analysis override: -1 uses the relation default, 0 disables, 1 enables.
+     */
     int32_t analyze;
 } MalboxAutoCollectRule;
 
@@ -292,13 +377,37 @@ typedef struct MalboxAutoCollectRule {
  * Auto-collection configuration for a single directory.
  */
 typedef struct MalboxAutoCollectConfig {
+    /**
+     * Whether auto-collection runs for this directory at all.
+     */
     bool enabled;
+    /**
+     * Array of `include_count` NUL-terminated glob patterns for files to collect.
+     */
     const char *const *include;
+    /**
+     * Number of entries in `include`.
+     */
     uintptr_t include_count;
+    /**
+     * Array of `exclude_count` NUL-terminated glob patterns for files to skip.
+     */
     const char *const *exclude;
+    /**
+     * Number of entries in `exclude`.
+     */
     uintptr_t exclude_count;
+    /**
+     * Files larger than this many bytes are never collected.
+     */
     uint64_t max_file_size;
+    /**
+     * Array of `rule_count` per-pattern artifact rules (artifact directory only).
+     */
     const struct MalboxAutoCollectRule *rules;
+    /**
+     * Number of entries in `rules`.
+     */
     uintptr_t rule_count;
 } MalboxAutoCollectConfig;
 
@@ -310,17 +419,53 @@ typedef struct MalboxAutoCollectConfig {
  * whose storage lives at least for the duration of that call.
  */
 typedef struct MalboxGuestRuntimeConfig {
+    /**
+     * TCP port the guest gRPC server listens on (bound on all IPv4 interfaces).
+     */
     uint16_t port;
+    /**
+     * Directory where the daemon pushes sample files.
+     */
     const char *sample_dir;
+    /**
+     * Directory where the plugin writes artifact files for collection.
+     */
     const char *artifact_dir;
+    /**
+     * Directory backing the disk stash for oversized results.
+     */
     const char *stash_dir;
+    /**
+     * Directory for log overflow files written when the ring buffer is full.
+     */
     const char *log_dir;
+    /**
+     * Directory of external log files collected after analysis.
+     */
     const char *external_log_dir;
+    /**
+     * Results larger than this many bytes are stashed to disk instead of sent inline.
+     */
     uintptr_t stash_threshold_bytes;
+    /**
+     * Seconds a stashed result may stay un-pulled before it is cleaned up.
+     */
     uint64_t stash_ttl_secs;
+    /**
+     * `tracing` filter directive such as `"info"` or `"my_plugin=debug"`.
+     */
     const char *log_filter;
+    /**
+     * Default analysis timeout in seconds when the daemon does not send one.
+     */
     uint64_t analysis_timeout;
+    /**
+     * Auto-collection settings for `artifact_dir`.
+     */
     struct MalboxAutoCollectConfig auto_collect_artifacts;
+    /**
+     * Auto-collection settings for `external_log_dir`.
+     */
     struct MalboxAutoCollectConfig auto_collect_external_logs;
 } MalboxGuestRuntimeConfig;
 
@@ -462,7 +607,7 @@ int32_t malbox_context_warn(const struct MalboxContext *ctx, const char *message
 int32_t malbox_context_mark_collected(const struct MalboxContext *ctx, const char *path);
 
 /**
- * Flush a batch of results to the daemon immediately during on_task.
+ * Flush a batch of results to the daemon immediately during `on_task`.
  *
  * `names`, `datas`, `data_lens`, and `formats` are parallel arrays of length `count`.
  * Each entry describes one result to flush.

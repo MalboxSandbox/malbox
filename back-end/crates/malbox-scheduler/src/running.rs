@@ -12,13 +12,13 @@ struct RunningInner {
     pending_cancel: HashSet<i64>,
 }
 
-pub struct RunningJobs {
+pub(crate) struct RunningJobs {
     parent: CancellationToken,
     inner: Mutex<RunningInner>,
 }
 
 impl RunningJobs {
-    pub fn new(parent: CancellationToken) -> Self {
+    pub(crate) fn new(parent: CancellationToken) -> Self {
         Self {
             parent,
             inner: Mutex::new(RunningInner::default()),
@@ -26,12 +26,14 @@ impl RunningJobs {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, RunningInner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Token for a job that is about to run. Already cancelled when a cancel
     /// for it arrived first.
-    pub fn register(&self, job_id: i64) -> CancellationToken {
+    pub(crate) fn register(&self, job_id: i64) -> CancellationToken {
         let token = self.parent.child_token();
         let mut inner = self.lock();
         if inner.pending_cancel.remove(&job_id) {
@@ -43,27 +45,24 @@ impl RunningJobs {
 
     /// Cancel a job's token, or remember the cancel until it registers.
     /// Returns `true` when a registered token was cancelled.
-    pub fn cancel(&self, job_id: i64) -> bool {
+    pub(crate) fn cancel(&self, job_id: i64) -> bool {
         let mut inner = self.lock();
-        match inner.tokens.get(&job_id) {
-            Some(token) => {
-                token.cancel();
-                true
-            }
-            None => {
-                inner.pending_cancel.insert(job_id);
-                false
-            }
+        if let Some(token) = inner.tokens.get(&job_id) {
+            token.cancel();
+            true
+        } else {
+            inner.pending_cancel.insert(job_id);
+            false
         }
     }
 
-    pub fn remove(&self, job_id: i64) {
+    pub(crate) fn remove(&self, job_id: i64) {
         let mut inner = self.lock();
         inner.tokens.remove(&job_id);
         inner.pending_cancel.remove(&job_id);
     }
 
-    pub fn cancel_all(&self) {
+    pub(crate) fn cancel_all(&self) {
         for token in self.lock().tokens.values() {
             token.cancel();
         }

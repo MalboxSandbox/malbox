@@ -3,6 +3,7 @@ use thiserror::Error;
 
 /// Main error type for libvirt provider operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum LibvirtError {
     /// Error from libvirt library itself.
     #[error("Libvirt error: {0}")]
@@ -10,7 +11,9 @@ pub enum LibvirtError {
     /// Timeout error.
     #[error("Operation `{operation}` timed out after {duration:?}")]
     Timeout {
+        /// Name of the operation that timed out.
         operation: String,
+        /// How long the operation was allowed to run.
         duration: Duration,
     },
     /// JSON serialization error.

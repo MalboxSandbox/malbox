@@ -15,6 +15,11 @@ use super::{DbMachine, MachinePool};
 
 impl MachinePool {
     /// Reconcile DB state against the provider on startup.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine list cannot be read from the database or the
+    /// provider cannot list its machines.
     #[instrument(skip_all, fields(machine_count = tracing::field::Empty), err)]
     pub async fn reconcile(&self) -> Result<()> {
         info!("Reconciling machine pool with provider");
@@ -32,7 +37,7 @@ impl MachinePool {
 
         let db_machines = machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         tracing::Span::current().record("machine_count", db_machines.len());
 
@@ -48,122 +53,137 @@ impl MachinePool {
             .map_err(|e| ResourceError::Provider(e.to_string()))?;
 
         for db_machine in &db_machines {
-            let machine_id = match db_machine.id {
-                Some(id) => id,
-                None => continue,
+            let Some(machine_id) = db_machine.id else {
+                continue;
             };
             let _span = debug_span!("reconcile.machine", machine_id).entered();
+            self.reconcile_machine_status(machine_id, db_machine, &provider_vms)
+                .await;
+        }
 
-            match db_machine.status {
-                MachineStatusDb::Creating => {
-                    warn!(machine_id, "Interrupted creation, marking failed");
+        self.delete_stale_provider_snapshots(&db_machines, &provider_vms)
+            .await;
+
+        info!("Reconciliation complete");
+        Ok(())
+    }
+
+    /// Recover or clean up one machine based on the status it had at shutdown.
+    async fn reconcile_machine_status(
+        &self,
+        machine_id: i32,
+        db_machine: &DbMachine,
+        provider_vms: &[malbox_machinery::Machine],
+    ) {
+        match db_machine.status {
+            MachineStatusDb::Creating => {
+                warn!(machine_id, "Interrupted creation, marking failed");
+                let _ = machinery::update_machine_status(
+                    &self.db,
+                    machine_id,
+                    MachineStatusDb::Failed,
+                    Some("Interrupted by restart"),
+                )
+                .await;
+            }
+
+            MachineStatusDb::Provisioning => {
+                warn!(machine_id, "Interrupted provisioning, restoring to ready");
+                let _ = machinery::update_machine_status(
+                    &self.db,
+                    machine_id,
+                    MachineStatusDb::Ready,
+                    None,
+                )
+                .await;
+            }
+
+            MachineStatusDb::Assigned | MachineStatusDb::Reverting => {
+                warn!(machine_id, status = ?db_machine.status, "Machine was in-flight, attempting recovery");
+                let _ = machinery::release_machine(&self.db, machine_id).await;
+
+                if self
+                    .try_snapshot_revert(machine_id, db_machine, provider_vms)
+                    .await
+                {
+                    info!(machine_id, "Recovered machine via snapshot revert");
+                } else {
+                    warn!(machine_id, "Could not recover, marking failed");
                     let _ = machinery::update_machine_status(
                         &self.db,
                         machine_id,
                         MachineStatusDb::Failed,
-                        Some("Interrupted by restart"),
+                        Some("Could not recover after restart"),
                     )
                     .await;
-                }
-
-                MachineStatusDb::Provisioning => {
-                    warn!(machine_id, "Interrupted provisioning, restoring to ready");
-                    let _ = machinery::update_machine_status(
-                        &self.db,
-                        machine_id,
-                        MachineStatusDb::Ready,
-                        None,
-                    )
-                    .await;
-                }
-
-                MachineStatusDb::Assigned | MachineStatusDb::Reverting => {
-                    warn!(machine_id, status = ?db_machine.status, "Machine was in-flight, attempting recovery");
-                    let _ = machinery::release_machine(&self.db, machine_id).await;
-
-                    if self
-                        .try_snapshot_revert(machine_id, db_machine, &provider_vms)
-                        .await
-                    {
-                        info!(machine_id, "Recovered machine via snapshot revert");
-                    } else {
-                        warn!(machine_id, "Could not recover, marking failed");
-                        let _ = machinery::update_machine_status(
-                            &self.db,
-                            machine_id,
-                            MachineStatusDb::Failed,
-                            Some("Could not recover after restart"),
-                        )
-                        .await;
-                    }
-                }
-
-                MachineStatusDb::Ready => {
-                    self.reconcile_ready_machine(machine_id, db_machine, &provider_vms)
-                        .await;
-                }
-
-                MachineStatusDb::Deleting => {
-                    warn!(machine_id, "Machine was mid-deletion, finishing cleanup");
-                    if let Some(ref provider_id) = db_machine.provider_id {
-                        let _ = destroy_by_provider_id(&self.provider, provider_id).await;
-                    }
-                    let _ = machinery::delete_machine(&self.db, machine_id).await;
-                }
-
-                MachineStatusDb::Failed => {
-                    debug!(machine_id, "Machine already failed, skipping");
                 }
             }
+
+            MachineStatusDb::Ready => {
+                self.reconcile_ready_machine(machine_id, db_machine, provider_vms)
+                    .await;
+            }
+
+            MachineStatusDb::Deleting => {
+                warn!(machine_id, "Machine was mid-deletion, finishing cleanup");
+                if let Some(provider_id) = &db_machine.provider_id {
+                    let _ = destroy_by_provider_id(&self.provider, provider_id).await;
+                }
+                let _ = machinery::delete_machine(&self.db, machine_id).await;
+            }
+
+            MachineStatusDb::Failed => {
+                debug!(machine_id, "Machine already failed, skipping");
+            }
         }
+    }
 
-        // Clean up stale provider snapshots not tracked in the DB.
-        if let Some(snapshot_cap) = self.provider.snapshot() {
-            for db_machine in &db_machines {
-                let machine_id = match db_machine.id {
-                    Some(id) => id,
-                    None => continue,
-                };
-                let provider_id = match db_machine.provider_id.as_deref() {
-                    Some(id) => id,
-                    None => continue,
-                };
-                let runtime_vm = match provider_vms.iter().find(|vm| vm.id.0 == provider_id) {
-                    Some(vm) => vm,
-                    None => continue,
-                };
+    /// Delete provider snapshots that have no matching DB record.
+    async fn delete_stale_provider_snapshots(
+        &self,
+        db_machines: &[DbMachine],
+        provider_vms: &[malbox_machinery::Machine],
+    ) {
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            return;
+        };
+        for db_machine in db_machines {
+            let Some(machine_id) = db_machine.id else {
+                continue;
+            };
+            let Some(provider_id) = db_machine.provider_id.as_deref() else {
+                continue;
+            };
+            let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == provider_id) else {
+                continue;
+            };
 
-                let provider_snaps = match snapshot_cap.list_snapshots(runtime_vm).await {
-                    Ok(snaps) => snaps,
-                    Err(_) => continue,
-                };
-                let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
-                    .await
-                    .unwrap_or_default();
+            let Ok(provider_snaps) = snapshot_cap.list_snapshots(runtime_vm).await else {
+                continue;
+            };
+            let db_snaps = snapshots::fetch_snapshots_for_machine(&self.db, machine_id)
+                .await
+                .unwrap_or_default();
 
-                for ps in &provider_snaps {
-                    if !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0) {
+            for ps in &provider_snaps {
+                if !db_snaps.iter().any(|ds| ds.provider_snapshot_id == ps.id.0) {
+                    warn!(
+                        machine_id,
+                        snapshot = ps.name.as_str(),
+                        provider_id = %ps.id,
+                        "Deleting stale provider snapshot not tracked in DB"
+                    );
+                    if let Err(e) = snapshot_cap.delete_snapshot(&ps.id).await {
                         warn!(
                             machine_id,
                             snapshot = ps.name.as_str(),
-                            provider_id = %ps.id,
-                            "Deleting stale provider snapshot not tracked in DB"
+                            error = %e,
+                            "Failed to delete stale provider snapshot"
                         );
-                        if let Err(e) = snapshot_cap.delete_snapshot(&ps.id).await {
-                            warn!(
-                                machine_id,
-                                snapshot = ps.name.as_str(),
-                                error = %e,
-                                "Failed to delete stale provider snapshot"
-                            );
-                        }
                     }
                 }
             }
         }
-
-        info!("Reconciliation complete");
-        Ok(())
     }
 
     async fn reconcile_ready_machine(
@@ -172,22 +192,19 @@ impl MachinePool {
         db_machine: &DbMachine,
         provider_vms: &[malbox_machinery::Machine],
     ) {
-        let provider_id = match &db_machine.provider_id {
-            Some(id) => id,
-            None => {
-                warn!(
-                    machine_id,
-                    "Ready machine missing provider_id, marking failed"
-                );
-                let _ = machinery::update_machine_status(
-                    &self.db,
-                    machine_id,
-                    MachineStatusDb::Failed,
-                    Some("Missing provider_id"),
-                )
-                .await;
-                return;
-            }
+        let Some(provider_id) = &db_machine.provider_id else {
+            warn!(
+                machine_id,
+                "Ready machine missing provider_id, marking failed"
+            );
+            let _ = machinery::update_machine_status(
+                &self.db,
+                machine_id,
+                MachineStatusDb::Failed,
+                Some("Missing provider_id"),
+            )
+            .await;
+            return;
         };
 
         let vm_exists = provider_vms.iter().any(|vm| vm.id.0 == *provider_id);
@@ -205,15 +222,14 @@ impl MachinePool {
 
         // Verify the active snapshot still exists in the provider
         if let Some(snapshot_cap) = self.provider.snapshot() {
-            let active_snap = match snapshots::fetch_active_snapshot(&self.db, machine_id).await {
-                Ok(Some(snap)) => snap,
-                Ok(None) => return,
-                Err(_) => return,
+            let Ok(Some(active_snap)) =
+                snapshots::fetch_active_snapshot(&self.db, machine_id).await
+            else {
+                return;
             };
 
-            let runtime_vm = match provider_vms.iter().find(|vm| vm.id.0 == *provider_id) {
-                Some(vm) => vm,
-                None => return,
+            let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == *provider_id) else {
+                return;
             };
 
             match snapshot_cap.list_snapshots(runtime_vm).await {
@@ -257,14 +273,13 @@ impl MachinePool {
         db_machine: &DbMachine,
         provider_vms: &[malbox_machinery::Machine],
     ) -> bool {
-        let snapshot_cap = match self.provider.snapshot() {
-            Some(cap) => cap,
-            None => return false,
+        let Some(snapshot_cap) = self.provider.snapshot() else {
+            return false;
         };
 
-        let active_snap = match snapshots::fetch_active_snapshot(&self.db, machine_id).await {
-            Ok(Some(snap)) => snap,
-            _ => return false,
+        let Ok(Some(active_snap)) = snapshots::fetch_active_snapshot(&self.db, machine_id).await
+        else {
+            return false;
         };
 
         let provider_id = match &db_machine.provider_id {
@@ -272,9 +287,8 @@ impl MachinePool {
             _ => return false,
         };
 
-        let runtime_vm = match provider_vms.iter().find(|vm| vm.id.0 == *provider_id) {
-            Some(vm) => vm,
-            None => return false,
+        let Some(runtime_vm) = provider_vms.iter().find(|vm| vm.id.0 == *provider_id) else {
+            return false;
         };
 
         if snapshot_cap
@@ -297,8 +311,19 @@ impl MachinePool {
     }
 
     /// Reconcile DB machines against config-declared machines.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine list cannot be read from the database.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provider-config lock was poisoned by a panicking writer.
     pub async fn reconcile_config(&self, declared: &[MachineConfig]) -> Result<()> {
-        *self.provider_configs.write().unwrap() = declared
+        *self
+            .provider_configs
+            .write()
+            .expect("provider config lock poisoned") = declared
             .iter()
             .filter_map(|m| m.provider_config.clone().map(|c| (m.name.clone(), c)))
             .collect();
@@ -309,7 +334,7 @@ impl MachinePool {
 
         let db_machines = machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let declared_by_name: std::collections::HashMap<&str, &MachineConfig> =
             declared.iter().map(|m| (m.name.as_str(), m)).collect();
@@ -322,16 +347,15 @@ impl MachinePool {
             if declared_by_name.contains_key(db_machine.name.as_str()) {
                 continue;
             }
-            let machine_id = match db_machine.id {
-                Some(id) => id,
-                None => continue,
+            let Some(machine_id) = db_machine.id else {
+                continue;
             };
             if db_machine.status == MachineStatusDb::Assigned {
                 warn!(machine_id, name = %db_machine.name, "Machine not in config but assigned, skipping");
                 continue;
             }
             info!(machine_id, name = %db_machine.name, "Machine not in config, destroying");
-            if let Some(ref provider_id) = db_machine.provider_id {
+            if let Some(provider_id) = &db_machine.provider_id {
                 let _ = destroy_by_provider_id(&self.provider, provider_id).await;
             }
             let _ = machinery::delete_machine(&self.db, machine_id).await;
@@ -345,11 +369,10 @@ impl MachinePool {
                     self.create_from_config(config).await;
                 }
                 Some(db_machine) => {
-                    let machine_id = match db_machine.id {
-                        Some(id) => id,
-                        None => continue,
+                    let Some(machine_id) = db_machine.id else {
+                        continue;
                     };
-                    if self.specs_match(config, db_machine) {
+                    if Self::specs_match(config, db_machine) {
                         // Tags never trigger a recreate; sync them in place.
                         let db_tags = db_machine.tags.as_deref().unwrap_or_default();
                         if db_tags != config.tags.as_slice()
@@ -371,7 +394,7 @@ impl MachinePool {
                             continue;
                         }
                         info!(machine_id, name = %config.name, "Specs changed, destroying and recreating");
-                        if let Some(ref provider_id) = db_machine.provider_id {
+                        if let Some(provider_id) = &db_machine.provider_id {
                             let _ = destroy_by_provider_id(&self.provider, provider_id).await;
                         }
                         let _ = machinery::delete_machine(&self.db, machine_id).await;
@@ -385,17 +408,17 @@ impl MachinePool {
         Ok(())
     }
 
-    fn specs_match(&self, config: &MachineConfig, db: &DbMachine) -> bool {
+    fn specs_match(config: &MachineConfig, db: &DbMachine) -> bool {
         let config_platform: machinery::MachinePlatform = config.platform.into();
         let config_arch: MachineArch = config.arch.into();
-        let config_hash = hash_provider_config(&config.provider_config);
+        let config_hash = hash_provider_config(config.provider_config.as_ref());
 
         db.platform == config_platform
             && db.arch == config_arch
             && db.image_name.as_deref() == Some(&config.image)
-            && db.cpus == Some(config.cpus as i32)
-            && db.memory_mb == Some(config.memory as i32)
-            && db.disk_size_mb == Some(config.disk_size as i64)
+            && db.cpus == i32::try_from(config.cpus).ok()
+            && db.memory_mb == i32::try_from(config.memory).ok()
+            && db.disk_size_mb == i64::try_from(config.disk_size).ok()
             && db.provider_config_hash.as_deref() == Some(&config_hash)
     }
 
@@ -412,7 +435,16 @@ impl MachinePool {
             }
         };
 
-        let config_hash = hash_provider_config(&config.provider_config);
+        let config_hash = hash_provider_config(config.provider_config.as_ref());
+
+        let (Ok(cpus), Ok(memory_mb), Ok(disk_size_mb)) = (
+            i32::try_from(config.cpus),
+            i32::try_from(config.memory),
+            i64::try_from(config.disk_size),
+        ) else {
+            error!(name = %config.name, "Machine specs exceed database limits, skipping machine");
+            return;
+        };
 
         let db_machine = match machinery::insert_machine(
             &self.db,
@@ -421,9 +453,9 @@ impl MachinePool {
             config.arch.into(),
             image.id,
             &config.image,
-            config.cpus as i32,
-            config.memory as i32,
-            config.disk_size as i64,
+            cpus,
+            memory_mb,
+            disk_size_mb,
             Some(&config_hash),
             &config.tags,
         )
@@ -476,7 +508,7 @@ impl MachinePool {
         config: &MachineConfig,
     ) {
         // Destroy leftover provider VM if any
-        if let Some(ref provider_id) = db_machine.provider_id {
+        if let Some(provider_id) = &db_machine.provider_id {
             let _ = destroy_by_provider_id(&self.provider, provider_id).await;
         }
 

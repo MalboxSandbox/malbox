@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 /// Severity level for a log entry.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum LogLevel {
     /// Verbose trace-level output (usually disabled in production).
     Trace = 0,
@@ -41,6 +42,19 @@ impl From<&tracing::Level> for LogLevel {
             tracing::Level::INFO => LogLevel::Info,
             tracing::Level::WARN => LogLevel::Warn,
             tracing::Level::ERROR => LogLevel::Error,
+        }
+    }
+}
+
+impl From<LogLevel> for i32 {
+    /// Protobuf wire value of the level (the `repr(i32)` discriminant).
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Trace => 0,
+            LogLevel::Debug => 1,
+            LogLevel::Info => 2,
+            LogLevel::Warn => 3,
+            LogLevel::Error => 4,
         }
     }
 }
@@ -81,6 +95,12 @@ pub struct LogBus {
     notify: Notify,
 }
 
+impl std::fmt::Debug for LogBus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogBus").finish_non_exhaustive()
+    }
+}
+
 impl LogBus {
     /// Create a new log bus that buffers up to `capacity` entries.
     pub fn new(capacity: usize) -> Self {
@@ -113,14 +133,22 @@ impl LogBus {
 
     /// Push a log entry into the bus. Drops the oldest entry if at capacity.
     /// No-op if the bus is closed.
+    #[expect(
+        clippy::print_stderr,
+        reason = "called from the tracing layer with the bus locked; logging via tracing here would recurse and deadlock"
+    )]
     pub fn push(&self, entry: LogEntry) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if inner.closed {
             return;
         }
-        if inner.buffer.len() >= inner.capacity {
+        if inner.buffer.len() >= inner.capacity
+            && let Some(evicted) = inner.buffer.pop_front()
+        {
             // Evict the oldest entry. Spill to overflow file if configured.
-            let evicted = inner.buffer.pop_front().unwrap();
             if inner.overflow_path.is_some()
                 && let Err(e) = write_overflow(&mut inner, &evicted)
             {
@@ -137,7 +165,10 @@ impl LogBus {
 
     /// Drain all buffered entries and return them.
     pub fn drain(&self) -> Vec<LogEntry> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.buffer.drain(..).collect()
     }
 
@@ -145,7 +176,10 @@ impl LogBus {
     /// returning all entries in strict chronological order. The overflow
     /// file is truncated/removed after a successful drain.
     pub fn drain_atomic(&self) -> Vec<LogEntry> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 1. Flush the BufWriter so the file reflects the full producer state.
         if let Some(ref mut w) = inner.overflow_writer {
@@ -188,13 +222,12 @@ impl LogBus {
     pub async fn recv_atomic(&self) -> Vec<LogEntry> {
         loop {
             {
-                let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let inner = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let has_ring = !inner.buffer.is_empty();
-                let has_overflow = inner
-                    .overflow_path
-                    .as_ref()
-                    .map(|p| p.exists())
-                    .unwrap_or(false);
+                let has_overflow = inner.overflow_path.as_ref().is_some_and(|p| p.exists());
                 if has_ring || has_overflow {
                     drop(inner);
                     return self.drain_atomic();
@@ -212,7 +245,10 @@ impl LogBus {
     pub async fn recv(&self) -> Option<LogEntry> {
         loop {
             {
-                let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let mut inner = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if let Some(entry) = inner.buffer.pop_front() {
                     return Some(entry);
                 }
@@ -226,7 +262,10 @@ impl LogBus {
 
     /// Mark the bus as closed and wake all waiters.
     pub fn close(&self) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.closed = true;
         drop(inner);
         self.notify.notify_waiters();
@@ -247,7 +286,10 @@ fn write_overflow(inner: &mut LogBusInner, entry: &LogEntry) -> std::io::Result<
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         inner.overflow_writer = Some(BufWriter::new(file));
     }
-    let writer = inner.overflow_writer.as_mut().unwrap();
+    let writer = inner
+        .overflow_writer
+        .as_mut()
+        .expect("overflow writer was initialized above");
     let line = serde_json::to_string(entry)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     writeln!(writer, "{line}")?;

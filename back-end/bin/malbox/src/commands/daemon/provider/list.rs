@@ -8,7 +8,7 @@ use malbox_installer::manifest::Manifest;
 
 #[derive(Parser)]
 #[command(about = "List providers compiled into daemon")]
-pub struct ListCommand {}
+pub(crate) struct ListCommand {}
 
 impl Command for ListCommand {
     async fn execute(self, _ctx: &Context) -> Result<()> {
@@ -34,7 +34,7 @@ impl Command for ListCommand {
                 if config.providers.get_default() == Some(provider.as_str()) {
                     println!("  {} {} (default)", success.apply_to("\u{2713}"), provider);
                 } else {
-                    println!("  - {}", provider);
+                    println!("  - {provider}");
                 }
             }
             format::total(config.providers.enabled.len(), "provider");

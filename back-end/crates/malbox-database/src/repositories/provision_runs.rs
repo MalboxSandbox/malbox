@@ -1,34 +1,60 @@
+//! `provision_runs`: history of provisioner executions against machines.
+
 use crate::error::{ProvisionRunError, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Outcome of a provision run (`provision_run_status` Postgres enum).
 #[derive(sqlx::Type, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[sqlx(type_name = "provision_run_status", rename_all = "lowercase")]
+#[expect(
+    clippy::exhaustive_enums,
+    reason = "mirrors the `provision_run_status` Postgres enum; the variant set is fixed by \
+              the schema"
+)]
 pub enum ProvisionRunStatus {
+    /// The provisioner is still executing.
     Running,
+    /// The provisioner finished successfully.
     Success,
+    /// The provisioner failed or was interrupted.
     Failed,
 }
 
+/// A row of the `provision_runs` table.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct ProvisionRun {
+    /// Database primary key.
     pub id: Uuid,
+    /// Machine the provisioner ran against.
     pub machine_id: i32,
+    /// Name of the provisioner that ran.
     pub provisioner: String,
+    /// Outcome of the run.
     pub status: ProvisionRunStatus,
+    /// Provisioner configuration the run used.
     pub config: Option<serde_json::Value>,
+    /// Output captured from the provisioner.
     pub output: Option<serde_json::Value>,
+    /// Failure reason, for failed runs.
     pub error_message: Option<String>,
+    /// Snapshot taken after a successful run.
     pub snapshot_id: Option<Uuid>,
+    /// When the run started.
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    /// When the run row was last modified.
     #[serde(with = "time::serde::rfc3339::option")]
     pub updated_at: Option<OffsetDateTime>,
 }
 
 /// Insert a new provision run in 'running' status.
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::InsertFailed`] when the insert fails.
 pub async fn insert_provision_run(
     pool: &PgPool,
     machine_id: i32,
@@ -57,6 +83,11 @@ pub async fn insert_provision_run(
 }
 
 /// Mark a provision run as successful.
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::UpdateFailed`] when the update fails or the
+/// run does not exist.
 pub async fn update_provision_run_success(
     pool: &PgPool,
     run_id: Uuid,
@@ -86,6 +117,11 @@ pub async fn update_provision_run_success(
 }
 
 /// Mark a provision run as failed.
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::UpdateFailed`] when the update fails or the
+/// run does not exist.
 pub async fn update_provision_run_failed(
     pool: &PgPool,
     run_id: Uuid,
@@ -115,6 +151,10 @@ pub async fn update_provision_run_failed(
 }
 
 /// Fetch all provision runs for a machine, newest first.
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::FetchFailed`] when the query fails.
 pub async fn fetch_provision_runs_for_machine(
     pool: &PgPool,
     machine_id: i32,
@@ -133,6 +173,10 @@ pub async fn fetch_provision_runs_for_machine(
 }
 
 /// Delete all provision runs that reference a given snapshot.
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::DeleteFailed`] when the delete fails.
 pub async fn delete_provision_runs_for_snapshot(pool: &PgPool, snapshot_id: Uuid) -> Result<u64> {
     let result = sqlx::query(
         r#"
@@ -147,6 +191,10 @@ pub async fn delete_provision_runs_for_snapshot(pool: &PgPool, snapshot_id: Uuid
 }
 
 /// Mark all 'running' provision runs as 'failed' (interrupted by restart).
+///
+/// # Errors
+///
+/// Returns [`ProvisionRunError::UpdateFailed`] when the update fails.
 pub async fn mark_interrupted_runs(pool: &PgPool) -> Result<u64> {
     let result = sqlx::query(
         r#"

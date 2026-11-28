@@ -2,7 +2,7 @@
 //!
 //! Service name: `malbox/events/plugin/{plugin_id}` (per-plugin)
 //! Service name: `malbox/events/daemon` (shared, daemon -> all plugins)
-//! Pattern: publish_subscribe::<[u8]>() with user_header::<EventHeader>()
+//! Pattern: `publish_subscribe::<[u8]>()` with `user_header::<EventHeader>()`
 //!
 //! Events are ultra-lightweight signals. The payload is typically empty or
 //! contains a minimal postcard-encoded struct.
@@ -46,27 +46,27 @@ impl TryFrom<&EventHeader> for Event {
 
 impl From<&Event> for EventHeader {
     fn from(event: &Event) -> Self {
-        let (event_type, associated_id) = match event {
-            Event::TaskCreated { task_id } => (EventKind::TaskCreated as u16, *task_id),
-            Event::TaskStarting { task_id } => (EventKind::TaskStarting as u16, *task_id),
-            Event::TaskCompleted { task_id } => (EventKind::TaskCompleted as u16, *task_id),
-            Event::TaskFailed { task_id } => (EventKind::TaskFailed as u16, *task_id),
-            Event::TaskCanceled { task_id } => (EventKind::TaskCanceled as u16, *task_id),
-            Event::PluginStarted { plugin_id } => (EventKind::PluginStarted as u16, *plugin_id),
-            Event::PluginStopped { plugin_id } => (EventKind::PluginStopped as u16, *plugin_id),
-            Event::SampleStarted { sample_id } => (EventKind::SampleStarted as u16, *sample_id),
-            Event::SampleStopped { sample_id } => (EventKind::SampleStopped as u16, *sample_id),
+        let (kind, associated_id) = match event {
+            Event::TaskCreated { task_id } => (EventKind::TaskCreated, *task_id),
+            Event::TaskStarting { task_id } => (EventKind::TaskStarting, *task_id),
+            Event::TaskCompleted { task_id } => (EventKind::TaskCompleted, *task_id),
+            Event::TaskFailed { task_id } => (EventKind::TaskFailed, *task_id),
+            Event::TaskCanceled { task_id } => (EventKind::TaskCanceled, *task_id),
+            Event::PluginStarted { plugin_id } => (EventKind::PluginStarted, *plugin_id),
+            Event::PluginStopped { plugin_id } => (EventKind::PluginStopped, *plugin_id),
+            Event::SampleStarted { sample_id } => (EventKind::SampleStarted, *sample_id),
+            Event::SampleStopped { sample_id } => (EventKind::SampleStopped, *sample_id),
             Event::SampleResultProduced { sample_id } => {
-                (EventKind::SampleResultProduced as u16, *sample_id)
+                (EventKind::SampleResultProduced, *sample_id)
             }
-            Event::DaemonShutdown => (EventKind::DaemonShutdown as u16, 0),
-            Event::ConfigReloaded => (EventKind::ConfigReloaded as u16, 0),
+            Event::DaemonShutdown => (EventKind::DaemonShutdown, 0),
+            Event::ConfigReloaded => (EventKind::ConfigReloaded, 0),
         };
         EventHeader {
-            event_type,
+            event_type: u16::from(kind),
             source_plugin_id: 0,
             associated_id,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         }
     }
 }
@@ -85,6 +85,7 @@ const DAEMON_EVENT_SERVICE_NAME: &str = "malbox/events/daemon";
 
 /// Publisher for a plugin's own event channel.
 /// Each plugin owns exactly one of these.
+#[derive(Debug)]
 pub struct PluginEventPublisher {
     publisher: Publisher<IpcServiceType, [u8], EventHeader>,
     /// Wakes the daemon after each emit (mandatory notify contract).
@@ -92,6 +93,13 @@ pub struct PluginEventPublisher {
 }
 
 impl PluginEventPublisher {
+    /// Open (or create) the plugin's event service and attach the publisher
+    /// plus the daemon wakeup notifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service name is invalid or any
+    /// iceoryx2 port cannot be created.
     pub fn new(node: &Node<IpcServiceType>, plugin_id: &str) -> Result<Self> {
         let name = plugin_event_service_name(plugin_id);
         let service = node
@@ -126,6 +134,10 @@ impl PluginEventPublisher {
     }
 
     /// Emit a lightweight event with an optional small payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if loaning or sending the sample fails.
     pub fn emit(&self, header: &EventHeader, payload: &[u8]) -> Result<()> {
         let mut sample = self
             .publisher
@@ -143,6 +155,10 @@ impl PluginEventPublisher {
     }
 
     /// Emit a signal-only event (no payload).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if loaning or sending the sample fails.
     pub fn emit_signal(&self, header: &EventHeader) -> Result<()> {
         self.emit(header, &[])
     }
@@ -150,11 +166,18 @@ impl PluginEventPublisher {
 
 /// Subscriber to a specific plugin's event channel.
 /// Used by daemon and chaining plugins.
+#[derive(Debug)]
 pub struct PluginEventSubscriber {
     subscriber: Subscriber<IpcServiceType, [u8], EventHeader>,
 }
 
 impl PluginEventSubscriber {
+    /// Open (or create) the given plugin's event service and attach a subscriber.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service name is invalid or the
+    /// subscriber cannot be created.
     pub fn new(node: &Node<IpcServiceType>, plugin_id: &str) -> Result<Self> {
         let name = plugin_event_service_name(plugin_id);
         let service = node
@@ -182,6 +205,10 @@ impl PluginEventSubscriber {
     }
 
     /// Non-blocking receive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the subscriber fails.
     pub fn try_recv(&self) -> Result<Option<ReceivedEvent>> {
         match self
             .subscriber
@@ -198,6 +225,10 @@ impl PluginEventSubscriber {
     }
 
     /// Drain all pending events.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the subscriber fails.
     pub fn drain(&self) -> Result<Vec<ReceivedEvent>> {
         let mut events = Vec::new();
         while let Some(ev) = self.try_recv()? {
@@ -209,11 +240,17 @@ impl PluginEventSubscriber {
 
 /// Publisher for the shared daemon event channel.
 /// Only the daemon creates one of these.
+#[derive(Debug)]
 pub struct DaemonEventPublisher {
     publisher: Publisher<IpcServiceType, [u8], EventHeader>,
 }
 
 impl DaemonEventPublisher {
+    /// Open (or create) the shared daemon event service and attach the publisher.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service or publisher cannot be created.
     pub fn new(node: &Node<IpcServiceType>) -> Result<Self> {
         let service = node
             .service_builder(
@@ -241,6 +278,10 @@ impl DaemonEventPublisher {
     }
 
     /// Broadcast a daemon event to all plugins with a specific header and payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if loaning or sending the sample fails.
     pub fn emit_with_header(&self, header: &EventHeader, payload: &[u8]) -> Result<()> {
         let mut sample = self
             .publisher
@@ -256,6 +297,10 @@ impl DaemonEventPublisher {
     }
 
     /// Broadcast a signal-only daemon event (no payload).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if loaning or sending the sample fails.
     pub fn emit_signal(&self, header: &EventHeader) -> Result<()> {
         self.emit_with_header(header, &[])
     }
@@ -269,11 +314,17 @@ impl TransportEmitter for DaemonEventPublisher {
 
 /// Subscriber to the shared daemon event channel.
 /// Every plugin creates one of these.
+#[derive(Debug)]
 pub struct DaemonEventSubscriber {
     subscriber: Subscriber<IpcServiceType, [u8], EventHeader>,
 }
 
 impl DaemonEventSubscriber {
+    /// Open (or create) the shared daemon event service and attach a subscriber.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if the service or subscriber cannot be created.
     pub fn new(node: &Node<IpcServiceType>) -> Result<Self> {
         let service = node
             .service_builder(
@@ -299,6 +350,10 @@ impl DaemonEventSubscriber {
     }
 
     /// Non-blocking receive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the subscriber fails.
     pub fn try_recv(&self) -> Result<Option<ReceivedEvent>> {
         match self
             .subscriber
@@ -315,6 +370,10 @@ impl DaemonEventSubscriber {
     }
 
     /// Drain all pending daemon events.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportError::Ipc`] if receiving from the subscriber fails.
     pub fn drain(&self) -> Result<Vec<ReceivedEvent>> {
         let mut events = Vec::new();
         while let Some(ev) = self.try_recv()? {
@@ -325,13 +384,20 @@ impl DaemonEventSubscriber {
 }
 
 /// A received event with header and optional payload.
+#[derive(Debug)]
 pub struct ReceivedEvent {
+    /// Zero-copy header copied out of the shared-memory sample.
     pub header: EventHeader,
+    /// Payload bytes copied out of the sample (often empty).
     pub payload: Vec<u8>,
 }
 
 impl ReceivedEvent {
     /// Convert to an [`Event`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the raw `event_type` if it names no known [`EventKind`].
     pub fn to_event(&self) -> std::result::Result<Event, u16> {
         Event::try_from(&self.header)
     }
@@ -350,16 +416,16 @@ mod tests {
         let subscriber = PluginEventSubscriber::new(&node, "test-ev").expect("sub");
 
         let header = EventHeader {
-            event_type: EventKind::PluginStarted as u16,
+            event_type: u16::from(EventKind::PluginStarted),
             source_plugin_id: 5,
             associated_id: 42,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         };
 
         publisher.emit_signal(&header).expect("emit");
 
         let ev = subscriber.try_recv().expect("recv").expect("event");
-        assert_eq!(ev.header.event_type, EventKind::PluginStarted as u16);
+        assert_eq!(ev.header.event_type, u16::from(EventKind::PluginStarted));
         assert_eq!(ev.header.source_plugin_id, 5);
         assert_eq!(ev.header.associated_id, 42);
         assert!(ev.payload.is_empty());
@@ -374,10 +440,10 @@ mod tests {
         let subscriber = PluginEventSubscriber::new(&node, "test-ev-pl").expect("sub");
 
         let header = EventHeader {
-            event_type: EventKind::SampleResultProduced as u16,
+            event_type: u16::from(EventKind::SampleResultProduced),
             source_plugin_id: 1,
             associated_id: 7,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         };
         let path = b"/tmp/results/output.json";
 
@@ -396,18 +462,18 @@ mod tests {
         let sub2 = DaemonEventSubscriber::new(&node).expect("sub2");
 
         let header = EventHeader {
-            event_type: EventKind::DaemonShutdown as u16,
+            event_type: u16::from(EventKind::DaemonShutdown),
             source_plugin_id: 0,
             associated_id: 0,
-            _reserved: [0; 6],
+            reserved: [0; 6],
         };
 
         publisher.emit_signal(&header).expect("emit");
 
         let ev1 = sub1.try_recv().expect("recv1").expect("event1");
         let ev2 = sub2.try_recv().expect("recv2").expect("event2");
-        assert_eq!(ev1.header.event_type, EventKind::DaemonShutdown as u16);
-        assert_eq!(ev2.header.event_type, EventKind::DaemonShutdown as u16);
+        assert_eq!(ev1.header.event_type, u16::from(EventKind::DaemonShutdown));
+        assert_eq!(ev2.header.event_type, u16::from(EventKind::DaemonShutdown));
     }
 
     #[test]
@@ -420,10 +486,10 @@ mod tests {
 
         for i in 0..5i32 {
             let header = EventHeader {
-                event_type: EventKind::TaskCompleted as u16,
+                event_type: u16::from(EventKind::TaskCompleted),
                 source_plugin_id: 1,
                 associated_id: i,
-                _reserved: [0; 6],
+                reserved: [0; 6],
             };
             publisher.emit_signal(&header).expect("emit");
         }
@@ -445,10 +511,10 @@ mod tests {
         // Publish more events than the buffer can hold (buffer = 32)
         for i in 0..64i32 {
             let header = EventHeader {
-                event_type: EventKind::TaskCreated as u16,
+                event_type: u16::from(EventKind::TaskCreated),
                 source_plugin_id: 0,
                 associated_id: i,
-                _reserved: [0; 6],
+                reserved: [0; 6],
             };
             publisher.emit_signal(&header).expect("emit");
         }

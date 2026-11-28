@@ -14,9 +14,15 @@ use crate::types::health::PyHealthStatus;
 /// Python base class for plugins. Users subclass this.
 /// All handler methods have default no-op implementations.
 #[pyclass(name = "Plugin", module = "malbox_plugin_sdk", subclass)]
-pub struct PyPlugin;
+#[derive(Debug)]
+pub(crate) struct PyPlugin;
 
 #[pymethods]
+#[expect(
+    clippy::unused_self,
+    clippy::unnecessary_wraps,
+    reason = "default Python handler methods: instance methods returning None/raising, overridden by subclasses"
+)]
 impl PyPlugin {
     #[new]
     fn new() -> Self {
@@ -45,32 +51,28 @@ impl PyPlugin {
 }
 
 /// Adapter that wraps a Python Plugin subclass and implements the Rust Plugin trait.
-pub struct PythonPlugin {
+pub(crate) struct PythonPlugin {
     py_plugin: Py<PyAny>,
 }
 
 impl PythonPlugin {
-    pub fn new(py_plugin: Py<PyAny>) -> Self {
+    pub(crate) fn new(py_plugin: Py<PyAny>) -> Self {
         Self { py_plugin }
-    }
-
-    fn maybe_await(&self, py: Python<'_>, result: &Bound<'_, PyAny>) -> PyResult<()> {
-        let asyncio = py.import("asyncio")?;
-        let is_coro: bool = asyncio.call_method1("iscoroutine", (result,))?.extract()?;
-        if is_coro {
-            let event_loop = asyncio.call_method0("new_event_loop")?;
-            let run_result = event_loop.call_method1("run_until_complete", (result,));
-            event_loop.call_method0("close")?;
-            run_result?;
-        }
-        Ok(())
     }
 }
 
-// SAFETY: Py<PyAny> is Send. All access to the Python object goes through
-// Python::attach, which acquires the GIL before touching any Python state.
-unsafe impl Send for PythonPlugin {}
-unsafe impl Sync for PythonPlugin {}
+/// Drive `result` to completion on a fresh event loop if the handler returned a coroutine.
+fn maybe_await(py: Python<'_>, result: &Bound<'_, PyAny>) -> PyResult<()> {
+    let asyncio = py.import("asyncio")?;
+    let is_coro: bool = asyncio.call_method1("iscoroutine", (result,))?.extract()?;
+    if is_coro {
+        let event_loop = asyncio.call_method0("new_event_loop")?;
+        let run_result = event_loop.call_method1("run_until_complete", (result,));
+        event_loop.call_method0("close")?;
+        run_result?;
+    }
+    Ok(())
+}
 
 impl Plugin for PythonPlugin {
     fn health_check(&self) -> HealthStatus {
@@ -96,13 +98,16 @@ impl Plugin for PythonPlugin {
 impl HostPlugin for PythonPlugin {
     fn on_task(&self, ctx: &Context) -> Result<()> {
         Python::attach(|py| {
+            // SAFETY: `valid` is cleared right after the handler call returns,
+            // while `ctx` is still borrowed, so the PyContext never dereferences
+            // the pointer after `ctx` is gone.
             let (py_ctx, valid) = unsafe { PyContext::from_ref(ctx) };
 
             let result = self.py_plugin.call_method1(py, "on_task", (py_ctx,));
             valid.store(false, std::sync::atomic::Ordering::Release);
 
             let result = result?;
-            self.maybe_await(py, result.bind(py))?;
+            maybe_await(py, result.bind(py))?;
             Ok(())
         })
         .map_err(|e: PyErr| SdkError::Plugin(Box::new(PythonError(e.to_string()))))
@@ -116,7 +121,7 @@ impl HostPlugin for PythonPlugin {
             }
 
             let result = self.py_plugin.call_method1(py, "on_start", (dict,))?;
-            self.maybe_await(py, result.bind(py))?;
+            maybe_await(py, result.bind(py))?;
             Ok(())
         })
         .map_err(|e: PyErr| SdkError::Plugin(Box::new(PythonError(e.to_string()))))
@@ -125,7 +130,7 @@ impl HostPlugin for PythonPlugin {
     fn on_stop(&self) -> Result<()> {
         Python::attach(|py| {
             let result = self.py_plugin.call_method0(py, "on_stop")?;
-            self.maybe_await(py, result.bind(py))?;
+            maybe_await(py, result.bind(py))?;
             Ok(())
         })
         .map_err(|e: PyErr| SdkError::Plugin(Box::new(PythonError(e.to_string()))))
@@ -137,14 +142,14 @@ impl HostPlugin for PythonPlugin {
 
             let result = self.py_plugin.call_method1(py, "on_event", (py_event,))?;
 
-            self.maybe_await(py, result.bind(py))?;
+            maybe_await(py, result.bind(py))?;
             Ok(())
         })
         .map_err(|e: PyErr| SdkError::Plugin(Box::new(PythonError(e.to_string()))))
     }
 }
 
-/// Wraps a Python exception string for use as a std::error::Error.
+/// Wraps a Python exception string for use as a `std::error::Error`.
 #[derive(Debug)]
 struct PythonError(String);
 

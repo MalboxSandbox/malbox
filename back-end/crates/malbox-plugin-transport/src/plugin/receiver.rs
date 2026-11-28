@@ -9,6 +9,8 @@ use crate::messages::events::Event;
 use crate::traits::TransportReceiver;
 use core::time::Duration;
 
+/// Placeholder receiver for guest plugins; gRPC delivers work via RPC handlers, not polling.
+#[derive(Debug)]
 pub struct GrpcReceiver {
     _private: (),
 }
@@ -20,6 +22,7 @@ impl Default for GrpcReceiver {
 }
 
 impl GrpcReceiver {
+    /// Create the placeholder receiver.
     pub fn new() -> Self {
         Self { _private: () }
     }

@@ -1,3 +1,6 @@
+//! Native Python extension module (`malbox_plugin_sdk._native`) exposing the
+//! malbox plugin SDK to plugins written in Python.
+
 use pyo3::prelude::*;
 
 mod log;

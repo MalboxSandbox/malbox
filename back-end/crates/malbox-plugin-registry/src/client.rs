@@ -6,15 +6,24 @@ use std::time::Duration;
 const RAW_GITHUB_BASE: &str = "https://raw.githubusercontent.com";
 const DEFAULT_BRANCH: &str = "main";
 
+/// File cache for registry responses, storing each body with its `ETag` alongside.
+#[derive(Debug)]
 pub struct Cache {
     dir: PathBuf,
 }
 
 impl Cache {
+    /// Create a cache rooted at `dir`; the directory is created lazily on write.
+    #[must_use]
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
     }
 
+    /// Store `content` under `key`, replacing or removing its stored `ETag`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::Io`] if the cache directory or files cannot be written.
     pub fn write(&self, key: &str, content: &[u8], etag: Option<&str>) -> Result<()> {
         let path = self.dir.join(key);
         if let Some(parent) = path.parent() {
@@ -31,6 +40,11 @@ impl Cache {
         Ok(())
     }
 
+    /// Read the cached body and `ETag` for `key`, or `None` if not cached.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::Io`] if the cached file exists but cannot be read.
     pub fn read(&self, key: &str) -> Result<Option<(Vec<u8>, Option<String>)>> {
         let path = self.dir.join(key);
         if !path.exists() {
@@ -51,6 +65,8 @@ impl Cache {
     }
 }
 
+/// Client for the GitHub-hosted plugin registry with conditional, cached fetches.
+#[derive(Debug)]
 pub struct RegistryClient {
     http: reqwest::Client,
     owner: String,
@@ -59,6 +75,12 @@ pub struct RegistryClient {
 }
 
 impl RegistryClient {
+    /// Create a client for registry repository `owner/repo`, caching under `cache_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::GitHub`] if `repository` is not `owner/repo`, or
+    /// [`RegistryError::Network`] if the HTTP client cannot be built.
     pub fn new(repository: &str, cache_dir: PathBuf) -> Result<Self> {
         let (owner, repo) = repository
             .split_once('/')
@@ -78,12 +100,24 @@ impl RegistryClient {
         })
     }
 
+    /// Fetch and parse the registry `index.json`, revalidating the cached copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the file is missing or returns a
+    /// non-success status, the cache cannot be accessed, or the JSON is invalid.
     pub async fn fetch_index(&self) -> Result<RegistryIndex> {
         let bytes = self.fetch_cached("index.json").await?;
         serde_json::from_slice(&bytes)
             .map_err(|e| RegistryError::GitHub(format!("failed to parse registry index: {e}")))
     }
 
+    /// Fetch and parse metadata for plugin `name`, revalidating the cached copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::InvalidSpecifier`] for an unsafe name, and otherwise
+    /// the same failures as [`Self::fetch_index`].
     pub async fn fetch_plugin_metadata(&self, name: &str) -> Result<PluginMetadata> {
         crate::error::validate_plugin_name(name)?;
         let key = format!("plugins/{name}.json");

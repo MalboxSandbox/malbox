@@ -1,3 +1,5 @@
+//! Tests for specifier parsing and release asset matching.
+
 use malbox_installer::github::{Release, ReleaseAsset};
 use malbox_plugin_registry::resolve::{
     Platform, RefSelector, SpecifierSource, find_matching_asset, parse_specifier,

@@ -21,7 +21,7 @@ use crate::http::dto::{Aggregate, PluginReportView};
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Clone)]
-pub struct ArtifactLink {
+pub(crate) struct ArtifactLink {
     pub result_name: String,
     pub format: String,
     pub size_bytes: i64,
@@ -38,7 +38,7 @@ pub struct ArtifactLink {
 /// reports so each row's `indicators`/`ttps` JSONB is moved out and parsed once
 /// (no clone). `plugin_count` is supplied by the caller (declared plugins for a
 /// task; distinct reported plugins for a sample).
-pub fn aggregate_plugin_reports(reports: Vec<PluginReport>, plugin_count: u32) -> Aggregate {
+pub(crate) fn aggregate_plugin_reports(reports: Vec<PluginReport>, plugin_count: u32) -> Aggregate {
     let mut out = Aggregate {
         plugin_count,
         ..Default::default()
@@ -63,7 +63,8 @@ pub fn aggregate_plugin_reports(reports: Vec<PluginReport>, plugin_count: u32) -
         }
 
         if let Some(s) = r.score {
-            let s = s as u8;
+            // Scores are 0..=100; clamp anything out of range into `u8`.
+            let s = u8::try_from(s.clamp(0, i16::from(u8::MAX))).expect("clamped into u8 range");
             max_score = Some(max_score.map_or(s, |m| m.max(s)));
         }
 
@@ -91,7 +92,7 @@ pub fn aggregate_plugin_reports(reports: Vec<PluginReport>, plugin_count: u32) -
     out
 }
 
-pub fn build_plugin_report_envelope(report: &PluginReport) -> serde_json::Value {
+pub(crate) fn build_plugin_report_envelope(report: &PluginReport) -> serde_json::Value {
     let mut envelope = serde_json::json!({
         "schema_version": SCHEMA_VERSION,
         "plugin": {
@@ -138,7 +139,7 @@ pub fn build_plugin_report_envelope(report: &PluginReport) -> serde_json::Value 
 // ---------------------------------------------------------------------------
 
 /// Read a plugin's full report JSON. `report_path` is relative to the data dir.
-pub async fn load_full_report(data_dir: &Path, report_path: &str) -> Option<Report> {
+pub(crate) async fn load_full_report(data_dir: &Path, report_path: &str) -> Option<Report> {
     let stored = Path::new(report_path);
     let path = if stored.is_absolute() {
         stored.to_path_buf()
@@ -157,7 +158,10 @@ fn is_json(child: &TaskArtifact) -> bool {
     child.mime == "application/json"
 }
 
-pub fn synthesize_report(plugin_name: &str, artifacts: &[(ArtifactEdge, TaskArtifact)]) -> Report {
+pub(crate) fn synthesize_report(
+    plugin_name: &str,
+    artifacts: &[(ArtifactEdge, TaskArtifact)],
+) -> Report {
     let sections = artifacts
         .iter()
         .map(|(edge, child)| {
@@ -170,7 +174,7 @@ pub fn synthesize_report(plugin_name: &str, artifacts: &[(ArtifactEdge, TaskArti
             } else {
                 Block::Download {
                     artifact: name.clone(),
-                    label: format!("Download {}", name),
+                    label: format!("Download {name}"),
                 }
             };
             Section {
@@ -208,7 +212,7 @@ pub fn synthesize_report(plugin_name: &str, artifacts: &[(ArtifactEdge, TaskArti
 // ---------------------------------------------------------------------------
 
 /// The edges `plugin_name` emitted, keeping only those with stored content.
-pub fn plugin_edges(
+pub(crate) fn plugin_edges(
     edges: &[(ArtifactEdge, TaskArtifact)],
     plugin_name: &str,
 ) -> Vec<(ArtifactEdge, TaskArtifact)> {
@@ -221,7 +225,10 @@ pub fn plugin_edges(
         .collect()
 }
 
-pub fn artifact_links(task_id: i32, edges: &[(ArtifactEdge, TaskArtifact)]) -> Vec<ArtifactLink> {
+pub(crate) fn artifact_links(
+    task_id: i32,
+    edges: &[(ArtifactEdge, TaskArtifact)],
+) -> Vec<ArtifactLink> {
     edges
         .iter()
         .map(|(edge, child)| ArtifactLink {
@@ -258,7 +265,7 @@ fn job_failed_for_plugin(job: &Job, plugin_name: &str) -> bool {
 /// job, and per detonation job one view per guest plugin with a report plus,
 /// once the job has finished, a failed view for every guest plugin it ran
 /// without producing one.
-pub async fn plugin_views_for_artifact(
+pub(crate) async fn plugin_views_for_artifact(
     pool: &PgPool,
     task_id: i32,
     artifact_id: i64,
@@ -303,7 +310,7 @@ pub async fn plugin_views_for_artifact(
 
 /// Single-plugin view for one artifact: the full report (or a synthesized one)
 /// plus the plugin's emitted artifacts. `None` when the plugin never ran on it.
-pub async fn single_plugin_view(
+pub(crate) async fn single_plugin_view(
     pool: &PgPool,
     data_dir: &Path,
     task_id: i32,
@@ -367,7 +374,7 @@ pub async fn single_plugin_view(
 }
 
 /// Body of a single-plugin report, shared by the task and sample surfaces.
-pub struct SinglePluginView {
+pub(crate) struct SinglePluginView {
     pub report: Option<serde_json::Value>,
     pub synthesized: bool,
     pub failed: bool,
@@ -383,8 +390,8 @@ mod tests {
         plugin: &str,
         classification: Option<DbClassification>,
         score: Option<i16>,
-        indicators: Vec<Indicator>,
-        ttps: Vec<Ttp>,
+        indicators: &[Indicator],
+        ttps: &[Ttp],
     ) -> PluginReport {
         PluginReport {
             id: 0,
@@ -399,8 +406,8 @@ mod tests {
             score,
             confidence: None,
             labels: vec![],
-            indicators: serde_json::to_value(&indicators).unwrap(),
-            ttps: serde_json::to_value(&ttps).unwrap(),
+            indicators: serde_json::to_value(indicators).unwrap(),
+            ttps: serde_json::to_value(ttps).unwrap(),
             summary: None,
             section_count: 0,
             artifact_count: 0,
@@ -411,21 +418,9 @@ mod tests {
     #[test]
     fn aggregate_picks_worst_verdict() {
         let reports = vec![
-            make_report("a", Some(DbClassification::Clean), Some(10), vec![], vec![]),
-            make_report(
-                "b",
-                Some(DbClassification::Malicious),
-                Some(80),
-                vec![],
-                vec![],
-            ),
-            make_report(
-                "c",
-                Some(DbClassification::Suspicious),
-                Some(50),
-                vec![],
-                vec![],
-            ),
+            make_report("a", Some(DbClassification::Clean), Some(10), &[], &[]),
+            make_report("b", Some(DbClassification::Malicious), Some(80), &[], &[]),
+            make_report("c", Some(DbClassification::Suspicious), Some(50), &[], &[]),
         ];
         let agg = aggregate_plugin_reports(reports, 3);
         assert_eq!(agg.verdict.as_deref(), Some("malicious"));
@@ -443,21 +438,21 @@ mod tests {
                 "a",
                 None,
                 None,
-                vec![
+                &[
                     Indicator::new("sha256", "deadbeef"),
                     Indicator::new("ipv4", "1.2.3.4"),
                 ],
-                vec![Ttp::new("T1055", "Process Injection")],
+                &[Ttp::new("T1055", "Process Injection")],
             ),
             make_report(
                 "b",
                 None,
                 None,
-                vec![
+                &[
                     Indicator::new("sha256", "deadbeef"), // dup
                     Indicator::new("domain", "evil.tld"),
                 ],
-                vec![
+                &[
                     Ttp::new("T1055", "Process Injection (dup)"), // dup by id
                     Ttp::new("T1027", "Obfuscated Files"),
                 ],
@@ -473,7 +468,7 @@ mod tests {
 
     #[test]
     fn aggregate_handles_no_verdicts() {
-        let reports = vec![make_report("a", None, None, vec![], vec![])];
+        let reports = vec![make_report("a", None, None, &[], &[])];
         let agg = aggregate_plugin_reports(reports, 1);
         assert!(agg.verdict.is_none());
         assert!(agg.score.is_none());
@@ -490,6 +485,10 @@ mod tests {
 
     #[test]
     fn synthesize_produces_valid_envelope() {
+        #[expect(
+            clippy::fn_params_excessive_bools,
+            reason = "test fixture builder; the flag maps directly onto storage_path presence"
+        )]
         fn pair(
             id: i64,
             name: &str,

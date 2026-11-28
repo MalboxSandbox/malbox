@@ -1,3 +1,5 @@
+//! Tests for cargo and `CMake` build output parsers.
+
 use malbox_installer::build_parse::{parse_cargo_artifact, parse_cmake_progress};
 
 #[test]

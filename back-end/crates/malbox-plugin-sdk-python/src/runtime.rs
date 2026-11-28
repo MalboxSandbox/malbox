@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 /// your plugin script with your Plugin subclass instance.
 #[pyfunction]
 #[pyo3(signature = (plugin, name=None, version=None))]
-pub fn run(
+pub(crate) fn run(
     py: Python<'_>,
     plugin: Py<PyAny>,
     name: Option<String>,

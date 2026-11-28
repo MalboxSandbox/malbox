@@ -10,12 +10,12 @@ use malbox_installer::github::{Channel, Release};
 use malbox_installer::steps::daemon::release_arch;
 
 /// The resolved daemon installation strategy and selected features.
-pub struct DaemonChoice {
+pub(crate) struct DaemonChoice {
     pub features: Vec<String>,
     pub source: DaemonSource,
 }
 
-pub fn prompt_channel(current: Channel) -> Result<Channel> {
+pub(crate) fn prompt_channel(current: Channel) -> Result<Channel> {
     let default_idx = match current {
         Channel::Stable => 0,
         Channel::Nightly => 1,
@@ -33,13 +33,12 @@ pub fn prompt_channel(current: Channel) -> Result<Channel> {
 }
 
 /// Default choice for `--yes`: prebuilt binary with all default features.
-pub fn default_daemon_choice(release: &Release) -> DaemonChoice {
+pub(crate) fn default_daemon_choice(release: &Release) -> DaemonChoice {
     let source = release_arch()
         .and_then(|arch| release.find_daemon_asset(arch))
-        .map(|asset| DaemonSource::Prebuilt {
+        .map_or(DaemonSource::Compile, |asset| DaemonSource::Prebuilt {
             url: asset.browser_download_url.clone(),
-        })
-        .unwrap_or(DaemonSource::Compile);
+        });
     DaemonChoice {
         features: default_features(),
         source,
@@ -48,41 +47,38 @@ pub fn default_daemon_choice(release: &Release) -> DaemonChoice {
 
 /// Ask the user: prebuilt binary (all features) or compile from source
 /// (choose specific providers and provisioners).
-pub fn prompt_daemon_choice(release: &Release, current: &[String]) -> Result<DaemonChoice> {
+pub(crate) fn prompt_daemon_choice(release: &Release, current: &[String]) -> Result<DaemonChoice> {
     let prebuilt_asset = release_arch().and_then(|arch| release.find_daemon_asset(arch));
 
-    match prebuilt_asset {
-        Some(asset) => {
-            let theme = malbox_theme();
-            let choice = Select::with_theme(&theme)
-                .with_prompt("Daemon source")
-                .items(["Download prebuilt binary", "Compile from source"])
-                .default(0)
-                .interact()?;
+    if let Some(asset) = prebuilt_asset {
+        let theme = malbox_theme();
+        let choice = Select::with_theme(&theme)
+            .with_prompt("Daemon source")
+            .items(["Download prebuilt binary", "Compile from source"])
+            .default(0)
+            .interact()?;
 
-            match choice {
-                0 => Ok(DaemonChoice {
-                    features: default_features(),
-                    source: DaemonSource::Prebuilt {
-                        url: asset.browser_download_url.clone(),
-                    },
-                }),
-                _ => Ok(DaemonChoice {
-                    features: prompt_custom_features(current)?,
-                    source: DaemonSource::Compile,
-                }),
-            }
-        }
-        None => {
-            println!(
-                "  {} No prebuilt binary available for this platform - compiling from source",
-                Brand::warning().apply_to("!")
-            );
-            Ok(DaemonChoice {
+        match choice {
+            0 => Ok(DaemonChoice {
+                features: default_features(),
+                source: DaemonSource::Prebuilt {
+                    url: asset.browser_download_url.clone(),
+                },
+            }),
+            _ => Ok(DaemonChoice {
                 features: prompt_custom_features(current)?,
                 source: DaemonSource::Compile,
-            })
+            }),
         }
+    } else {
+        println!(
+            "  {} No prebuilt binary available for this platform - compiling from source",
+            Brand::warning().apply_to("!")
+        );
+        Ok(DaemonChoice {
+            features: prompt_custom_features(current)?,
+            source: DaemonSource::Compile,
+        })
     }
 }
 
@@ -120,7 +116,7 @@ fn prompt_custom_features(current: &[String]) -> Result<Vec<String>> {
 
 /// Front-end source: the prebuilt SPA bundle when the release ships one,
 /// otherwise build from source.
-pub fn resolve_frontend_source(release: &Release) -> FrontendSource {
+pub(crate) fn resolve_frontend_source(release: &Release) -> FrontendSource {
     match release.find_web_asset() {
         Some(asset) => FrontendSource::Prebuilt {
             url: asset.browser_download_url.clone(),

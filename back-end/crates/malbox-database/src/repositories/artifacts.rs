@@ -20,58 +20,101 @@ pub(crate) const ARTIFACT_COLUMNS: &str = "id, task_id, sha256, size_bytes, stor
 const EDGE_COLUMNS: &str = "task_id, parent_artifact_id, child_artifact_id, \
     relation::text as relation, source_job_id, source_plugin, name, created_on";
 
+/// One node of a task's artifact DAG: a blob seen during analysis.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct TaskArtifact {
+    /// Database primary key.
     pub id: i64,
+    /// Task whose DAG this artifact belongs to.
     pub task_id: i32,
+    /// Hex SHA-256 of the blob contents.
     pub sha256: String,
+    /// Blob size in bytes.
     pub size_bytes: i64,
     /// Blob path relative to the data directory; `None` when the
     /// `max_total_bytes` limit refused the blob.
     pub storage_path: Option<String>,
+    /// Whether the artifact is analysed as a sample rather than only stored.
     pub analyze: bool,
+    /// Sample row created for the artifact once it is analysed.
     pub sample_id: Option<i64>,
+    /// Distance from the task's root artifact (the root is depth 0).
     pub depth: i32,
+    /// Detected artifact type label.
     pub artifact_type: String,
+    /// Detected MIME type.
     pub mime: String,
+    /// Lifecycle state (`artifact_state` enum as text, e.g. `"stored"`).
     pub state: String,
+    /// Why the artifact was dropped, when `state` is `"dropped"`.
     pub drop_reason: Option<String>,
+    /// Scheduling priority; higher runs first.
     pub priority: i64,
+    /// Time after which pending analysis of the artifact is abandoned.
     pub deadline: Option<OffsetDateTime>,
+    /// Who canceled the artifact's analysis, if anyone.
     pub canceled_by: Option<String>,
+    /// Task created when the artifact was promoted to its own analysis.
     pub promoted_task_id: Option<i32>,
+    /// Whether dynamic analysis may run despite the recursion limit.
     pub dynamic_recursion_bypass: bool,
+    /// Whether a plugin explicitly asked for this artifact to be analysed.
     pub analyze_requested: bool,
+    /// When the row was inserted.
     pub created_on: OffsetDateTime,
 }
 
+/// Parent-to-child link between two artifacts of the same task.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct ArtifactEdge {
+    /// Task both artifacts belong to.
     pub task_id: i32,
+    /// Artifact the child was derived from.
     pub parent_artifact_id: i64,
+    /// Artifact derived from the parent.
     pub child_artifact_id: i64,
+    /// How the child relates to the parent (`artifact_relation` as text).
     pub relation: String,
+    /// Job that emitted the edge, if a job did.
     pub source_job_id: Option<i64>,
+    /// Plugin that emitted the edge, if a plugin did.
     pub source_plugin: Option<String>,
+    /// Name the child had inside the parent, e.g. an archive entry path.
     pub name: Option<String>,
+    /// When the edge was inserted.
     pub created_on: OffsetDateTime,
 }
 
+/// Column values for inserting a [`TaskArtifact`]; see its fields for meanings.
 #[derive(Debug, Clone)]
 pub struct NewArtifact<'a> {
+    /// Owning task.
     pub task_id: i32,
+    /// Hex SHA-256 of the blob contents.
     pub sha256: &'a str,
+    /// Blob size in bytes.
     pub size_bytes: i64,
+    /// Blob path relative to the data directory; `None` when not stored.
     pub storage_path: Option<&'a str>,
+    /// Whether the artifact is analysed as a sample.
     pub analyze: bool,
+    /// Sample row for analysed artifacts.
     pub sample_id: Option<i64>,
+    /// Distance from the task's root artifact.
     pub depth: i32,
+    /// Detected artifact type label.
     pub artifact_type: &'a str,
+    /// Detected MIME type.
     pub mime: &'a str,
+    /// Initial `artifact_state` literal.
     pub state: &'a str,
+    /// Why the artifact was dropped, for dropped artifacts.
     pub drop_reason: Option<&'a str>,
+    /// Scheduling priority; higher runs first.
     pub priority: i64,
+    /// Whether a plugin explicitly asked for analysis.
     pub analyze_requested: bool,
+    /// Whether dynamic analysis may run despite the recursion limit.
     pub dynamic_recursion_bypass: bool,
 }
 
@@ -101,6 +144,11 @@ fn update_err(target: fmt::Arguments<'_>, source: sqlx::Error) -> DatabaseError 
 
 /// Insert an artifact, or return the existing row with the same
 /// `(task_id, sha256)`. The boolean is `true` when the row was created.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::InsertFailed`] or [`ArtifactError::FetchFailed`]
+/// when the insert or the follow-up lookup fails.
 pub async fn insert_or_get_artifact(
     conn: &mut PgConnection,
     a: &NewArtifact<'_>,
@@ -155,7 +203,15 @@ pub async fn insert_or_get_artifact(
     Ok((existing, false))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Link `parent` to `child` in a task's DAG; an existing identical edge is kept.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::InsertFailed`] when the insert fails.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one parameter per column of artifact_edges"
+)]
 pub async fn insert_edge(
     conn: impl PgExecutor<'_>,
     task_id: i32,
@@ -186,6 +242,14 @@ pub async fn insert_edge(
 
 /// Record that a plugin asked for this artifact to be analysed. `bypass`
 /// only ever turns `dynamic_recursion_bypass` on.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "`bypass` is the value OR-ed into the boolean column, not a mode switch"
+)]
 pub async fn set_analyze_requested(conn: impl PgExecutor<'_>, id: i64, bypass: bool) -> Result<()> {
     sqlx::query(
         "update task_artifacts set analyze_requested = true, \
@@ -200,6 +264,10 @@ pub async fn set_analyze_requested(conn: impl PgExecutor<'_>, id: i64, bypass: b
 }
 
 /// Root artifact id per task, for the given task ids.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_root_artifact_ids(pool: &PgPool, task_ids: &[i32]) -> Result<HashMap<i32, i64>> {
     let rows: Vec<(i32, i64)> = sqlx::query_as(
         "select task_id, id from task_artifacts where task_id = any($1) and depth = 0",
@@ -211,6 +279,11 @@ pub async fn fetch_root_artifact_ids(pool: &PgPool, task_ids: &[i32]) -> Result<
     Ok(rows.into_iter().collect())
 }
 
+/// Fetch one artifact by id, `None` when it does not exist.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_artifact(pool: &PgPool, id: i64) -> Result<Option<TaskArtifact>> {
     let sql = format!("select {ARTIFACT_COLUMNS} from task_artifacts where id = $1");
     sqlx::query_as::<_, TaskArtifact>(AssertSqlSafe(sql))
@@ -220,6 +293,11 @@ pub async fn fetch_artifact(pool: &PgPool, id: i64) -> Result<Option<TaskArtifac
         .map_err(|e| fetch_err(format_args!("artifact {id}"), e))
 }
 
+/// Every artifact of a task, in insertion order.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_task_artifacts(pool: &PgPool, task_id: i32) -> Result<Vec<TaskArtifact>> {
     let sql =
         format!("select {ARTIFACT_COLUMNS} from task_artifacts where task_id = $1 order by id");
@@ -231,6 +309,10 @@ pub async fn fetch_task_artifacts(pool: &PgPool, task_id: i32) -> Result<Vec<Tas
 }
 
 /// Every edge of a task, oldest first.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_task_edges(pool: &PgPool, task_id: i32) -> Result<Vec<ArtifactEdge>> {
     let sql = format!(
         "select {EDGE_COLUMNS} from artifact_edges where task_id = $1 \
@@ -244,6 +326,10 @@ pub async fn fetch_task_edges(pool: &PgPool, task_id: i32) -> Result<Vec<Artifac
 }
 
 /// Edges emitted by a job, each paired with its child artifact.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when either query fails.
 pub async fn fetch_edges_from_job(
     pool: &PgPool,
     job_id: i64,
@@ -282,6 +368,11 @@ pub async fn fetch_edges_from_job(
         .collect())
 }
 
+/// The task's root (depth 0) artifact, `None` when it has none yet.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_root_artifact(pool: &PgPool, task_id: i32) -> Result<Option<TaskArtifact>> {
     let sql = format!(
         "select {ARTIFACT_COLUMNS} from task_artifacts where task_id = $1 and depth = 0 \
@@ -296,6 +387,10 @@ pub async fn fetch_root_artifact(pool: &PgPool, task_id: i32) -> Result<Option<T
 
 /// Set an artifact's state together with its drop reason and canceled-by
 /// marker (both written as given).
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn update_artifact_state(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -318,6 +413,10 @@ pub async fn update_artifact_state(
 }
 
 /// Turn a stored artifact into an analysed one.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn upgrade_artifact_to_analysed(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -338,6 +437,10 @@ pub async fn upgrade_artifact_to_analysed(
 }
 
 /// A limit refused analysis; `analyze` stays false.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn set_artifact_admission_dropped(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -354,6 +457,11 @@ pub async fn set_artifact_admission_dropped(
 
 /// Lock the task row and return its shared data. Use inside a transaction
 /// together with [`set_task_shared_data`].
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails or the task
+/// does not exist.
 pub async fn fetch_task_shared_data_for_update(
     conn: impl PgExecutor<'_>,
     task_id: i32,
@@ -367,6 +475,11 @@ pub async fn fetch_task_shared_data_for_update(
     .map_err(|e| fetch_err(format_args!("shared data of task {task_id}"), e))
 }
 
+/// Overwrite the task's plugin-shared JSON data.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn set_task_shared_data(
     conn: impl PgExecutor<'_>,
     task_id: i32,
@@ -381,6 +494,11 @@ pub async fn set_task_shared_data(
     Ok(())
 }
 
+/// Set an artifact's scheduling priority.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn set_artifact_priority(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -395,6 +513,11 @@ pub async fn set_artifact_priority(
     Ok(())
 }
 
+/// Set or clear the time after which the artifact's analysis is abandoned.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn set_artifact_deadline(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -409,6 +532,11 @@ pub async fn set_artifact_deadline(
     Ok(())
 }
 
+/// Record the task the artifact was promoted into.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::UpdateFailed`] when the update fails.
 pub async fn set_promoted_task(conn: impl PgExecutor<'_>, id: i64, task_id: i32) -> Result<()> {
     sqlx::query("update task_artifacts set promoted_task_id = $2 where id = $1")
         .bind(id)
@@ -444,6 +572,10 @@ pub async fn lock_task_artifact_bytes(conn: &mut PgConnection, task_id: i32) -> 
 }
 
 /// Where a sample appears as a non-root artifact: `(task_id, artifact_id, depth)`.
+///
+/// # Errors
+///
+/// Returns [`ArtifactError::FetchFailed`] when the query fails.
 pub async fn fetch_sample_appearances(
     pool: &PgPool,
     sample_id: i64,

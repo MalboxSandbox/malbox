@@ -1,6 +1,9 @@
+//! Debounced filesystem watcher that queues plugin directory changes for the
+//! registry to apply.
+
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tracing::error;
 
@@ -9,20 +12,20 @@ use super::types::PluginId;
 
 /// A pending change detected by the filesystem watcher.
 #[derive(Debug, Clone)]
-pub enum PendingChange {
+pub(crate) enum PendingChange {
     Added(PathBuf),
     Modified(PathBuf),
     Removed(PluginId),
 }
 
 /// Filesystem watcher that monitors the plugin directory for changes.
-pub struct Watcher {
+pub(crate) struct Watcher {
     _watcher: RecommendedWatcher,
     pending: Arc<Mutex<Vec<PendingChange>>>,
 }
 
 impl Watcher {
-    pub fn start(plugin_dir: &Path) -> Result<Self, WatcherError> {
+    pub(crate) fn start(plugin_dir: &Path) -> Result<Self, WatcherError> {
         let pending: Arc<Mutex<Vec<PendingChange>>> = Arc::new(Mutex::new(Vec::new()));
         let pending_clone = Arc::clone(&pending);
         let plugin_dir_owned = plugin_dir.to_path_buf();
@@ -41,13 +44,14 @@ impl Watcher {
             };
 
             for path in &event.paths {
-                let plugin_subdir = match resolve_plugin_dir(path, &plugin_dir_owned) {
-                    Some(d) => d,
-                    None => continue,
+                let Some(plugin_subdir) = resolve_plugin_dir(path, &plugin_dir_owned) else {
+                    continue;
                 };
 
                 {
-                    let mut state = debounce_state.lock().unwrap();
+                    let mut state = debounce_state
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
                     let now = Instant::now();
                     if let Some(last) = state.get(&plugin_subdir)
                         && now.duration_since(*last) < debounce_window
@@ -70,7 +74,7 @@ impl Watcher {
                     _ => continue,
                 };
 
-                let mut pending = pending_clone.lock().unwrap();
+                let mut pending = pending_clone.lock().unwrap_or_else(PoisonError::into_inner);
                 pending.push(change);
             }
         })?;
@@ -83,8 +87,8 @@ impl Watcher {
         })
     }
 
-    pub fn drain_pending(&self) -> Vec<PendingChange> {
-        let mut pending = self.pending.lock().unwrap();
+    pub(crate) fn drain_pending(&self) -> Vec<PendingChange> {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
         std::mem::take(&mut *pending)
     }
 }

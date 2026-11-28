@@ -1,3 +1,5 @@
+//! Immutable point-in-time views of the plugin registry.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -16,7 +18,17 @@ pub(crate) struct PluginSnapshotInner {
     pub(crate) created_at: SystemTime,
 }
 
+impl std::fmt::Debug for PluginSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginSnapshot")
+            .field("plugins", &self.inner.plugins.len())
+            .field("created_at", &self.inner.created_at)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PluginSnapshot {
+    /// Build a snapshot directly from entries, keyed by their ids.
     pub fn from_entries(entries: Vec<PluginEntry>) -> Self {
         let plugins = entries
             .into_iter()
@@ -35,14 +47,17 @@ impl PluginSnapshot {
         Self { inner }
     }
 
+    /// Look up a plugin by id.
     pub fn get(&self, id: &PluginId) -> Option<&Arc<PluginEntry>> {
         self.inner.plugins.get(id)
     }
 
+    /// Iterate over all plugins in unspecified order.
     pub fn list(&self) -> impl Iterator<Item = &Arc<PluginEntry>> {
         self.inner.plugins.values()
     }
 
+    /// All plugins of the given type (host or guest).
     pub fn by_type(&self, t: PluginTypeConfig) -> Vec<&Arc<PluginEntry>> {
         self.inner
             .plugins
@@ -51,6 +66,7 @@ impl PluginSnapshot {
             .collect()
     }
 
+    /// All plugins declaring the given execution context.
     pub fn by_execution_context(&self, ctx: ExecutionContextConfig) -> Vec<&Arc<PluginEntry>> {
         self.inner
             .plugins
@@ -59,21 +75,24 @@ impl PluginSnapshot {
             .collect()
     }
 
+    /// Number of plugins in the snapshot.
     pub fn len(&self) -> usize {
         self.inner.plugins.len()
     }
 
+    /// Whether the snapshot contains no plugins.
     pub fn is_empty(&self) -> bool {
         self.inner.plugins.is_empty()
     }
 
+    /// When this snapshot was built.
     pub fn created_at(&self) -> SystemTime {
         self.inner.created_at
     }
 }
 
 impl PluginSnapshotInner {
-    pub fn new(plugins: HashMap<PluginId, Arc<PluginEntry>>) -> Self {
+    pub(crate) fn new(plugins: HashMap<PluginId, Arc<PluginEntry>>) -> Self {
         Self {
             plugins,
             created_at: SystemTime::now(),
@@ -108,8 +127,8 @@ mod tests {
                 },
                 scope: None,
                 results: HashMap::new(),
-                routing: Default::default(),
-                parameters: Default::default(),
+                routing: malbox_plugin_manifest::RoutingConfig::default(),
+                parameters: std::collections::BTreeMap::default(),
                 runtime: RuntimeConfig {
                     state: PluginStateConfig::Ephemeral,
                     execution,
@@ -118,7 +137,7 @@ mod tests {
                     analysis_timeout: None,
                     paths: PathsConfig::default(),
                     stash: StashConfig::default(),
-                    auto_collect: Default::default(),
+                    auto_collect: malbox_plugin_manifest::AutoCollectConfig::default(),
                 },
             },
             binary_path: PathBuf::from(format!("/plugins/{name}/{name}")),

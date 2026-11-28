@@ -1,3 +1,10 @@
+//! `malbox` command-line client: talks to the malbox daemon API and manages local installs.
+#![expect(
+    clippy::print_stdout,
+    reason = "CLI writes user-facing output to stdout"
+)]
+#![expect(clippy::print_stderr, reason = "CLI writes diagnostics to stderr")]
+
 use clap::Parser;
 use color_eyre::Result;
 use malbox_cli_common::api::ApiClient;

@@ -21,55 +21,97 @@ const JOB_COLUMNS: &str = "id, task_id, artifact_id, kind::text as kind, analyze
 /// Terminal job states.
 pub const TERMINAL_STATES: [&str; 5] = ["completed", "failed", "skipped", "cached", "canceled"];
 
+/// One analyzer run over one artifact.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Job {
+    /// Database primary key.
     pub id: i64,
+    /// Task the job belongs to.
     pub task_id: i32,
+    /// Artifact the job analyses.
     pub artifact_id: i64,
+    /// Where the job runs (`job_kind` as text, e.g. `"host"`, `"detonation"`).
     pub kind: String,
+    /// Name of the analyzer plugin.
     pub analyzer: String,
+    /// Analysis stage the job belongs to (`analysis_stage` as text).
     pub stage: String,
+    /// Scheduling priority; higher runs first.
     pub priority: i64,
+    /// Lifecycle state (`job_state` as text); see [`TERMINAL_STATES`].
     pub state: String,
+    /// Attempts started so far.
     pub attempts: i16,
+    /// Attempts allowed before the job fails for good.
     pub max_attempts: i16,
+    /// Times the job was reset for a manual rerun.
     pub reruns: i16,
+    /// Whether the result cache is bypassed for this job.
     pub ignore_cache: bool,
+    /// Failure category of the last attempt (`job_error_class` as text).
     pub error_class: Option<String>,
+    /// Human-readable failure message of the last attempt.
     pub error_message: Option<String>,
+    /// Result-cache key computed for the job, when cacheable.
     pub cache_key: Option<String>,
+    /// Job whose cached result this job reused.
     pub cached_from_job_id: Option<i64>,
+    /// Whether cancellation of the running job was requested.
     pub drop_requested: bool,
+    /// Machine assigned to a detonation job.
     pub machine_id: Option<i32>,
+    /// Snapshot the detonation machine was reverted to.
     pub snapshot_id: Option<Uuid>,
+    /// Guest plugins requested for, or run by, a detonation.
     pub guest_plugins: Option<Vec<String>>,
+    /// Detonation parameters as JSON.
     pub detonation: Option<serde_json::Value>,
+    /// Earliest time the job may be claimed again after a failed attempt.
     pub not_before: Option<OffsetDateTime>,
+    /// When the current attempt started.
     pub started_on: Option<OffsetDateTime>,
+    /// When the job reached a terminal state.
     pub completed_on: Option<OffsetDateTime>,
+    /// When the row was inserted.
     pub created_on: OffsetDateTime,
 }
 
 impl Job {
+    /// Whether the job's state is one of [`TERMINAL_STATES`].
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         TERMINAL_STATES.contains(&self.state.as_str())
     }
 }
 
+/// Column values for inserting a [`Job`]; see its fields for meanings.
 #[derive(Debug, Clone)]
 pub struct NewJob<'a> {
+    /// Owning task.
     pub task_id: i32,
+    /// Artifact to analyse.
     pub artifact_id: i64,
+    /// `job_kind` literal.
     pub kind: &'a str,
+    /// Name of the analyzer plugin.
     pub analyzer: &'a str,
+    /// `analysis_stage` literal.
     pub stage: &'a str,
+    /// Scheduling priority; higher runs first.
     pub priority: i64,
+    /// Initial `job_state` literal.
     pub state: &'a str,
+    /// Attempts allowed before the job fails for good.
     pub max_attempts: i16,
+    /// Whether the result cache is bypassed.
     pub ignore_cache: bool,
+    /// Result-cache key, when cacheable.
     pub cache_key: Option<&'a str>,
+    /// Snapshot a detonation must run on.
     pub snapshot_id: Option<Uuid>,
+    /// Guest plugins requested for a detonation.
     pub guest_plugins: Option<&'a [String]>,
+    /// Detonation parameters as JSON.
     pub detonation: Option<serde_json::Value>,
 }
 
@@ -97,6 +139,11 @@ fn update_err(target: fmt::Arguments<'_>, source: sqlx::Error) -> DatabaseError 
     .into()
 }
 
+/// Insert a job and return the stored row.
+///
+/// # Errors
+///
+/// Returns [`JobError::InsertFailed`] when the insert fails.
 pub async fn insert_job(conn: impl PgExecutor<'_>, j: &NewJob<'_>) -> Result<Job> {
     let sql = format!(
         "insert into jobs (task_id, artifact_id, kind, analyzer, stage, priority, state, \
@@ -123,6 +170,11 @@ pub async fn insert_job(conn: impl PgExecutor<'_>, j: &NewJob<'_>) -> Result<Job
         .map_err(|e| insert_err(format_args!("job for artifact {}", j.artifact_id), e))
 }
 
+/// Every job of a task, in insertion order.
+///
+/// # Errors
+///
+/// Returns [`JobError::FetchFailed`] when the query fails.
 pub async fn fetch_task_jobs(pool: &PgPool, task_id: i32) -> Result<Vec<Job>> {
     let sql = format!("select {JOB_COLUMNS} from jobs where task_id = $1 order by id");
     sqlx::query_as::<_, Job>(AssertSqlSafe(sql))
@@ -132,6 +184,11 @@ pub async fn fetch_task_jobs(pool: &PgPool, task_id: i32) -> Result<Vec<Job>> {
         .map_err(|e| fetch_err(format_args!("jobs of task {task_id}"), e))
 }
 
+/// Fetch one job by id, `None` when it does not exist.
+///
+/// # Errors
+///
+/// Returns [`JobError::FetchFailed`] when the query fails.
 pub async fn fetch_job(pool: &PgPool, id: i64) -> Result<Option<Job>> {
     let sql = format!("select {JOB_COLUMNS} from jobs where id = $1");
     sqlx::query_as::<_, Job>(AssertSqlSafe(sql))
@@ -143,6 +200,10 @@ pub async fn fetch_job(pool: &PgPool, id: i64) -> Result<Option<Job>> {
 
 /// Set a job's state and error fields; terminal states also stamp
 /// `completed_on`.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_job_state(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -168,6 +229,10 @@ pub async fn set_job_state(
 }
 
 /// Move `blocked` jobs to `ready`. Returns the number released.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn release_jobs(conn: impl PgExecutor<'_>, ids: &[i64]) -> Result<u64> {
     let r = sqlx::query("update jobs set state = 'ready' where id = any($1) and state = 'blocked'")
         .bind(ids)
@@ -177,6 +242,16 @@ pub async fn release_jobs(conn: impl PgExecutor<'_>, ids: &[i64]) -> Result<u64>
     Ok(r.rows_affected())
 }
 
+/// Requeue a job for a manual rerun, clearing its error and timing fields
+/// and incrementing `reruns`.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "`ignore_cache` is the value written to the boolean column, not a mode switch"
+)]
 pub async fn reset_job_for_rerun(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -202,7 +277,11 @@ pub async fn reset_job_for_rerun(
 ///
 /// # Errors
 ///
-/// Returns a job update error when the update fails.
+/// Returns [`JobError::UpdateFailed`] when the update fails.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "`ignore_cache` is the value written to the boolean column, not a mode switch"
+)]
 pub async fn reset_job_for_rescan(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -223,6 +302,10 @@ pub async fn reset_job_for_rescan(
 }
 
 /// Put a failed attempt back in the queue, not before `not_before`.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn schedule_retry(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -244,6 +327,11 @@ pub async fn schedule_retry(
     Ok(())
 }
 
+/// Finish a job by reusing the cached result of `from_job_id`.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn mark_cached(conn: impl PgExecutor<'_>, id: i64, from_job_id: i64) -> Result<()> {
     sqlx::query(
         "update jobs set state = 'cached', cached_from_job_id = $2, completed_on = now() \
@@ -257,6 +345,11 @@ pub async fn mark_cached(conn: impl PgExecutor<'_>, id: i64, from_job_id: i64) -
     Ok(())
 }
 
+/// Ask the executor running the job to cancel it.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_drop_requested(conn: impl PgExecutor<'_>, id: i64) -> Result<()> {
     sqlx::query("update jobs set drop_requested = true where id = $1")
         .bind(id)
@@ -267,6 +360,10 @@ pub async fn set_drop_requested(conn: impl PgExecutor<'_>, id: i64) -> Result<()
 }
 
 /// Re-prioritise an artifact's unstarted jobs.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_job_priority_for_artifact(
     conn: impl PgExecutor<'_>,
     artifact_id: i64,
@@ -285,6 +382,10 @@ pub async fn set_job_priority_for_artifact(
 
 /// Claim the highest-priority ready host job whose analyzer is not busy and
 /// whose task is below its running-job limit.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the claiming update fails.
 pub async fn claim_host_job(
     pool: &PgPool,
     busy_plugins: &[String],
@@ -308,6 +409,11 @@ pub async fn claim_host_job(
         .map_err(|e| update_err(format_args!("next ready host job"), e))
 }
 
+/// Ready detonation jobs whose retry delay has passed, highest priority first.
+///
+/// # Errors
+///
+/// Returns [`JobError::FetchFailed`] when the query fails.
 pub async fn fetch_ready_detonation_jobs(pool: &PgPool, limit: i64) -> Result<Vec<Job>> {
     let sql = format!(
         "select {JOB_COLUMNS} from jobs where state = 'ready' and kind = 'detonation' \
@@ -322,6 +428,10 @@ pub async fn fetch_ready_detonation_jobs(pool: &PgPool, limit: i64) -> Result<Ve
 }
 
 /// Claim a specific job if it is still `ready`.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the claiming update fails.
 pub async fn claim_job_by_id(conn: impl PgExecutor<'_>, id: i64) -> Result<Option<Job>> {
     let sql = format!(
         "update jobs set state = 'running', attempts = attempts + 1, started_on = now() \
@@ -336,6 +446,10 @@ pub async fn claim_job_by_id(conn: impl PgExecutor<'_>, id: i64) -> Result<Optio
 
 /// Startup recovery: jobs left `running` by a previous daemon either fail
 /// (attempts exhausted) or go back to `ready`. Returns the rows touched.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when either update fails.
 pub async fn recover_running_jobs(pool: &PgPool) -> Result<u64> {
     let failed = sqlx::query(
         "update jobs set state = 'failed', error_class = 'recoverable', \
@@ -355,6 +469,11 @@ pub async fn recover_running_jobs(pool: &PgPool) -> Result<u64> {
     Ok(failed.rows_affected() + requeued.rows_affected())
 }
 
+/// Number of a task's jobs currently `running`.
+///
+/// # Errors
+///
+/// Returns [`JobError::FetchFailed`] when the query fails.
 pub async fn count_running_jobs(pool: &PgPool, task_id: i32) -> Result<i64> {
     sqlx::query_scalar::<_, i64>(
         "select count(*) from jobs where task_id = $1 and state = 'running'",
@@ -367,6 +486,10 @@ pub async fn count_running_jobs(pool: &PgPool, task_id: i32) -> Result<i64> {
 
 /// Cancel the given jobs that have not started. Returns the ids canceled;
 /// the others were claimed concurrently.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn cancel_unstarted_jobs(conn: impl PgExecutor<'_>, ids: &[i64]) -> Result<Vec<i64>> {
     sqlx::query_scalar::<_, i64>(
         "update jobs set state = 'canceled', completed_on = now() \
@@ -378,6 +501,11 @@ pub async fn cancel_unstarted_jobs(conn: impl PgExecutor<'_>, ids: &[i64]) -> Re
     .map_err(|e| update_err(format_args!("jobs {ids:?}"), e))
 }
 
+/// Record the machine and snapshot a detonation job was assigned.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_job_machine(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -395,6 +523,10 @@ pub async fn set_job_machine(
 }
 
 /// Record the guest plugins a detonation actually ran.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_job_guest_plugins(
     conn: impl PgExecutor<'_>,
     id: i64,
@@ -410,6 +542,10 @@ pub async fn set_job_guest_plugins(
 }
 
 /// Set the job's error message without changing its state.
+///
+/// # Errors
+///
+/// Returns [`JobError::UpdateFailed`] when the update fails.
 pub async fn set_job_error_message(
     conn: impl PgExecutor<'_>,
     id: i64,

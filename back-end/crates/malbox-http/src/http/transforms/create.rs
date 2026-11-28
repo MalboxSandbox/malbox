@@ -5,7 +5,7 @@ use malbox_database::repositories::custom_transforms::{
 };
 use serde::Deserialize;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/transforms", post(create_transform))
 }
 
@@ -56,7 +56,7 @@ async fn create_transform(
     // Check for duplicate transform_id
     let existing = fetch_transform_by_transform_id(&state.pool, &request.transform_id)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to check for existing transform: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to check for existing transform: {e}")))?;
 
     if existing.is_some() {
         return Err(Error::unprocessable_entity([(
@@ -77,7 +77,7 @@ async fn create_transform(
 
     let transform = insert_transform(&state.pool, new_transform)
         .await
-        .map_err(|e| Error::Internal(format!("Failed to insert transform: {}", e)))?;
+        .map_err(|e| Error::Internal(format!("Failed to insert transform: {e}")))?;
 
     Ok((StatusCode::CREATED, Json(transform)))
 }

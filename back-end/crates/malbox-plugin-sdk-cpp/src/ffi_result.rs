@@ -38,18 +38,22 @@ unsafe fn builder_from_ptr<'a>(ptr: *mut MalboxResultBuilder) -> Option<&'a mut 
         return None;
     }
     // SAFETY: MalboxResultBuilder is an opaque stand-in for ResultBuilder.
-    Some(unsafe { &mut *(ptr as *mut ResultBuilder) })
+    Some(unsafe { &mut *ptr.cast::<ResultBuilder>() })
 }
 
 /// Read a `*const c_char` into a `String`.
 ///
 /// Sets the last error and returns `None` if the pointer is null or not valid
 /// UTF-8.
+///
+/// # Safety
+/// `ptr`, if non-null, must point to a valid NUL-terminated C string.
 unsafe fn cstr_to_string(ptr: *const c_char, field: &str) -> Option<String> {
     if ptr.is_null() {
         set_last_error(&format!("{field} must not be null"));
         return None;
     }
+    // SAFETY: `ptr` is non-null and the caller guarantees it is NUL-terminated.
     match unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str() {
         Ok(s) => Some(s.to_owned()),
         Err(e) => {
@@ -81,13 +85,13 @@ pub unsafe extern "C" fn malbox_result_builder_push_json(
     data: *const u8,
     data_len: usize,
 ) -> i32 {
-    let b = match unsafe { builder_from_ptr(builder) } {
-        Some(b) => b,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `builder`.
+    let Some(b) = (unsafe { builder_from_ptr(builder) }) else {
+        return -1;
     };
-    let name = match unsafe { cstr_to_string(name, "name") } {
-        Some(n) => n,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `name`.
+    let Some(name) = (unsafe { cstr_to_string(name, "name") }) else {
+        return -1;
     };
     if data.is_null() && data_len > 0 {
         set_last_error("data must not be null when data_len > 0");
@@ -96,6 +100,8 @@ pub unsafe extern "C" fn malbox_result_builder_push_json(
     let bytes = if data_len == 0 {
         Vec::new()
     } else {
+        // SAFETY: `data` is non-null (checked above) and the caller guarantees
+        // `data_len` readable bytes.
         unsafe { std::slice::from_raw_parts(data, data_len) }.to_vec()
     };
 
@@ -126,13 +132,13 @@ pub unsafe extern "C" fn malbox_result_builder_push_bytes(
     data: *const u8,
     data_len: usize,
 ) -> i32 {
-    let b = match unsafe { builder_from_ptr(builder) } {
-        Some(b) => b,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `builder`.
+    let Some(b) = (unsafe { builder_from_ptr(builder) }) else {
+        return -1;
     };
-    let name = match unsafe { cstr_to_string(name, "name") } {
-        Some(n) => n,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `name`.
+    let Some(name) = (unsafe { cstr_to_string(name, "name") }) else {
+        return -1;
     };
     if data.is_null() && data_len > 0 {
         set_last_error("data must not be null when data_len > 0");
@@ -141,6 +147,8 @@ pub unsafe extern "C" fn malbox_result_builder_push_bytes(
     let bytes = if data_len == 0 {
         Vec::new()
     } else {
+        // SAFETY: `data` is non-null (checked above) and the caller guarantees
+        // `data_len` readable bytes.
         unsafe { std::slice::from_raw_parts(data, data_len) }.to_vec()
     };
 
@@ -170,17 +178,17 @@ pub unsafe extern "C" fn malbox_result_builder_push_file(
     name: *const c_char,
     path: *const c_char,
 ) -> i32 {
-    let b = match unsafe { builder_from_ptr(builder) } {
-        Some(b) => b,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `builder`.
+    let Some(b) = (unsafe { builder_from_ptr(builder) }) else {
+        return -1;
     };
-    let name = match unsafe { cstr_to_string(name, "name") } {
-        Some(n) => n,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `name`.
+    let Some(name) = (unsafe { cstr_to_string(name, "name") }) else {
+        return -1;
     };
-    let path_str = match unsafe { cstr_to_string(path, "path") } {
-        Some(p) => p,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `path`.
+    let Some(path_str) = (unsafe { cstr_to_string(path, "path") }) else {
+        return -1;
     };
 
     b.results.push(PluginResult::File {
@@ -197,7 +205,7 @@ mod tests {
     use std::ffi::CString;
 
     fn builder_ptr(b: &mut ResultBuilder) -> *mut MalboxResultBuilder {
-        (b as *mut ResultBuilder) as *mut MalboxResultBuilder
+        std::ptr::from_mut(b).cast::<MalboxResultBuilder>()
     }
 
     #[test]
@@ -205,6 +213,8 @@ mod tests {
         let mut b = ResultBuilder::new();
         let name = CString::new("my_json").unwrap();
         let payload = b"{\"x\":1}";
+        // SAFETY: builder, name and payload pointers borrow live locals;
+        // `payload.len()` matches the buffer.
         let rc = unsafe {
             malbox_result_builder_push_json(
                 builder_ptr(&mut b),
@@ -230,6 +240,8 @@ mod tests {
         let mut b = ResultBuilder::new();
         let name = CString::new("raw").unwrap();
         let payload: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
+        // SAFETY: builder, name and payload pointers borrow live locals;
+        // `payload.len()` matches the buffer.
         let rc = unsafe {
             malbox_result_builder_push_bytes(
                 builder_ptr(&mut b),
@@ -255,6 +267,7 @@ mod tests {
         let mut b = ResultBuilder::new();
         let name = CString::new("capture").unwrap();
         let path = CString::new("/tmp/out.pcap").unwrap();
+        // SAFETY: builder, name and path pointers borrow live locals.
         let rc = unsafe {
             malbox_result_builder_push_file(builder_ptr(&mut b), name.as_ptr(), path.as_ptr())
         };
@@ -278,6 +291,8 @@ mod tests {
         let name_f = CString::new("f").unwrap();
         let path = CString::new("/x").unwrap();
         let data: &[u8] = b"hi";
+        // SAFETY: builder, name, data and path pointers borrow live locals;
+        // `data.len()` matches the buffer.
         unsafe {
             malbox_result_builder_push_json(
                 builder_ptr(&mut b),
@@ -285,12 +300,18 @@ mod tests {
                 data.as_ptr(),
                 data.len(),
             );
+        }
+        // SAFETY: same live locals as the call above.
+        unsafe {
             malbox_result_builder_push_bytes(
                 builder_ptr(&mut b),
                 name_b.as_ptr(),
                 data.as_ptr(),
                 data.len(),
             );
+        }
+        // SAFETY: same live locals as the calls above.
+        unsafe {
             malbox_result_builder_push_file(builder_ptr(&mut b), name_f.as_ptr(), path.as_ptr());
         }
         let results = b.take();
@@ -304,6 +325,7 @@ mod tests {
     fn test_null_builder_returns_minus_one() {
         let name = CString::new("x").unwrap();
         let data: &[u8] = b"";
+        // SAFETY: a null builder is rejected before any other pointer is used.
         let rc = unsafe {
             malbox_result_builder_push_json(std::ptr::null_mut(), name.as_ptr(), data.as_ptr(), 0)
         };
@@ -314,6 +336,7 @@ mod tests {
     fn test_null_name_returns_minus_one() {
         let mut b = ResultBuilder::new();
         let data: &[u8] = b"";
+        // SAFETY: the builder pointer borrows a live local; a null name is rejected.
         let rc = unsafe {
             malbox_result_builder_push_json(builder_ptr(&mut b), std::ptr::null(), data.as_ptr(), 0)
         };
@@ -324,6 +347,8 @@ mod tests {
     fn test_empty_data_ok() {
         let mut b = ResultBuilder::new();
         let name = CString::new("empty").unwrap();
+        // SAFETY: builder and name pointers borrow live locals; null data with
+        // length 0 is accepted.
         let rc = unsafe {
             malbox_result_builder_push_bytes(
                 builder_ptr(&mut b),

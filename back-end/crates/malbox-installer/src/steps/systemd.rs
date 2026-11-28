@@ -5,11 +5,28 @@ use std::path::{Path, PathBuf};
 const DAEMON_UNIT: &str = "malbox.service";
 const POSTGRES_UNIT: &str = "malbox-postgres.service";
 
-fn daemon_unit(daemon_path: &Path, config_path: &Path, managed_postgres: bool) -> String {
+/// Whether the systemd step should install units or only report itself as skipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnitInstall {
+    /// Write, reload, and enable the user units.
+    Install,
+    /// Leave systemd untouched.
+    Skip,
+}
+
+impl From<bool> for UnitInstall {
+    fn from(enabled: bool) -> Self {
+        if enabled { Self::Install } else { Self::Skip }
+    }
+}
+
+/// Renders the daemon unit; `pgdata` is set when the installer manages `PostgreSQL`.
+fn daemon_unit(daemon_path: &Path, config_path: &Path, pgdata: Option<&Path>) -> String {
     // NOTE: a user unit cannot order against system units, so there is no
     // point referencing the distro's postgresql.service here. When the
     // installer manages its own instance we depend on that unit instead.
-    let (after, wants) = if managed_postgres {
+    let (after, wants) = if pgdata.is_some() {
         (
             format!("network.target {POSTGRES_UNIT}"),
             format!("Wants={POSTGRES_UNIT}\n"),
@@ -59,8 +76,17 @@ WantedBy=default.target
     )
 }
 
+/// Installs and enables the malbox (and, with `pgdata`, managed `PostgreSQL`) user units.
+///
+/// Returns the daemon unit name, or `None` when `mode` is [`UnitInstall::Skip`].
+///
+/// # Errors
+///
+/// Returns [`InstallError::Environment`] when the home directory is unknown,
+/// [`InstallError::Io`] when unit files cannot be written, and
+/// [`InstallError::StepFailed`] when a required binary or `systemctl` fails.
 pub async fn execute(
-    enabled: bool,
+    mode: UnitInstall,
     daemon_path: &Path,
     config_path: &Path,
     pgdata: Option<&Path>,
@@ -68,7 +94,7 @@ pub async fn execute(
 ) -> crate::Result<Option<String>> {
     observer.step_started("Configuring systemd user services");
 
-    if !enabled {
+    if mode == UnitInstall::Skip {
         observer.step_completed("Configuring systemd user services", "skipped");
         return Ok(None);
     }
@@ -96,7 +122,7 @@ pub async fn execute(
     }
 
     observer.build_output("Installing malbox.service");
-    let unit_content = daemon_unit(daemon_path, config_path, pgdata.is_some());
+    let unit_content = daemon_unit(daemon_path, config_path, pgdata);
     tokio::fs::write(unit_dir.join(DAEMON_UNIT), unit_content).await?;
 
     observer.build_output("Reloading systemd daemon");
@@ -109,10 +135,20 @@ pub async fn execute(
     Ok(Some(DAEMON_UNIT.to_string()))
 }
 
+/// Stops the given systemd user unit.
+///
+/// # Errors
+///
+/// Returns [`InstallError::StepFailed`] when `systemctl` cannot run or reports failure.
 pub async fn stop_service(unit: &str) -> crate::Result<()> {
     run_systemctl(&["--user", "stop", unit]).await
 }
 
+/// Starts the given systemd user unit.
+///
+/// # Errors
+///
+/// Returns [`InstallError::StepFailed`] when `systemctl` cannot run or reports failure.
 pub async fn start_service(unit: &str) -> crate::Result<()> {
     run_systemctl(&["--user", "start", unit]).await
 }

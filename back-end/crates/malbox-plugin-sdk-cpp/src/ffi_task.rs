@@ -32,12 +32,13 @@ pub(crate) fn clear_temp_storage() {
 }
 
 /// Store a `CString` in the thread-local and return its raw pointer.
+///
+/// The pointer targets the string's heap buffer, which does not move when
+/// the `CString` itself is moved into the thread-local vector.
 fn store_string(s: CString) -> *const c_char {
-    TEMP_STRINGS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        v.push(s);
-        v.last().unwrap().as_ptr()
-    })
+    let ptr = s.as_ptr();
+    TEMP_STRINGS.with(|cell| cell.borrow_mut().push(s));
+    ptr
 }
 
 /// Cast an opaque `MalboxContext*` back to a Rust `Context` reference.
@@ -51,7 +52,7 @@ unsafe fn ctx_from_ptr<'a>(ptr: *const MalboxContext) -> Option<&'a Context> {
     }
     // SAFETY: MalboxContext is an opaque stand-in for Context; the runtime always
     // passes the original *const Context cast to *const MalboxContext.
-    Some(unsafe { &*(ptr as *const Context) })
+    Some(unsafe { &*ptr.cast::<Context>() })
 }
 
 /// Return the numeric task ID.
@@ -64,6 +65,7 @@ unsafe fn ctx_from_ptr<'a>(ptr: *const MalboxContext) -> Option<&'a Context> {
 /// provided by the runtime to plugin callbacks.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_id(ctx: *const MalboxContext) -> i32 {
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
     match unsafe { ctx_from_ptr(ctx) } {
         Some(c) => {
             clear_last_error();
@@ -86,18 +88,15 @@ pub unsafe extern "C" fn malbox_task_get_id(ctx: *const MalboxContext) -> i32 {
 /// provided by the runtime to plugin callbacks.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_sample_path(ctx: *const MalboxContext) -> *const c_char {
-    let c = match unsafe { ctx_from_ptr(ctx) } {
-        Some(c) => c,
-        None => return std::ptr::null(),
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(c) = (unsafe { ctx_from_ptr(ctx) }) else {
+        return std::ptr::null();
     };
 
     let task_info = c.task();
-    let path_str = match task_info.sample_path().to_str() {
-        Some(s) => s,
-        None => {
-            set_last_error("sample path is not valid UTF-8");
-            return std::ptr::null();
-        }
+    let Some(path_str) = task_info.sample_path().to_str() else {
+        set_last_error("sample path is not valid UTF-8");
+        return std::ptr::null();
     };
 
     match CString::new(path_str) {
@@ -135,28 +134,26 @@ pub unsafe extern "C" fn malbox_task_get_sample_bytes(
         return -1;
     }
 
-    let c = match unsafe { ctx_from_ptr(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(c) = (unsafe { ctx_from_ptr(ctx) }) else {
+        return -1;
     };
 
-    let (rc, bytes_opt) = result_to_rc(c.task().sample_bytes());
-    if rc != 0 {
+    let (_, Some(bytes)) = result_to_rc(c.task().sample_bytes()) else {
         return -1;
-    }
+    };
 
-    let bytes = bytes_opt.unwrap();
     let len = bytes.len();
+    // The Vec's heap buffer does not move when the Vec is moved into the slot.
+    let ptr = bytes.as_ptr();
+    TEMP_BYTES.with(|cell| *cell.borrow_mut() = Some(bytes));
 
-    TEMP_BYTES.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        *slot = Some(bytes);
-        let ptr = slot.as_ref().unwrap().as_ptr();
-        unsafe {
-            *out_ptr = ptr;
-            *out_len = len;
-        }
-    });
+    // SAFETY: `out_ptr` is non-null (checked above) and the caller guarantees
+    // it is valid for writes.
+    unsafe { *out_ptr = ptr };
+    // SAFETY: `out_len` is non-null (checked above) and the caller guarantees
+    // it is valid for writes.
+    unsafe { *out_len = len };
 
     0
 }
@@ -170,6 +167,7 @@ pub unsafe extern "C" fn malbox_task_get_sample_bytes(
 /// `ctx` must be a valid `*const Context` cast to `*const MalboxContext`, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn malbox_task_get_config_count(ctx: *const MalboxContext) -> usize {
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
     match unsafe { ctx_from_ptr(ctx) } {
         Some(c) => {
             clear_last_error();
@@ -203,9 +201,9 @@ pub unsafe extern "C" fn malbox_task_get_config_entry(
         return -1;
     }
 
-    let c = match unsafe { ctx_from_ptr(ctx) } {
-        Some(c) => c,
-        None => return -1,
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(c) = (unsafe { ctx_from_ptr(ctx) }) else {
+        return -1;
     };
 
     let task_info = c.task();
@@ -234,15 +232,16 @@ pub unsafe extern "C" fn malbox_task_get_config_entry(
         }
     };
 
-    TEMP_CONFIG_ENTRIES.with(|cell| {
-        let mut entries = cell.borrow_mut();
-        entries.push((ck, cv));
-        let (ref rk, ref rv) = *entries.last().unwrap();
-        unsafe {
-            *out_key = rk.as_ptr();
-            *out_value = rv.as_ptr();
-        }
-    });
+    // The CStrings' heap buffers do not move when the pair is moved into storage.
+    let (key_ptr, value_ptr) = (ck.as_ptr(), cv.as_ptr());
+    TEMP_CONFIG_ENTRIES.with(|cell| cell.borrow_mut().push((ck, cv)));
+
+    // SAFETY: `out_key` is non-null (checked above) and the caller guarantees
+    // it is valid for writes.
+    unsafe { *out_key = key_ptr };
+    // SAFETY: `out_value` is non-null (checked above) and the caller guarantees
+    // it is valid for writes.
+    unsafe { *out_value = value_ptr };
 
     clear_last_error();
     0
@@ -264,9 +263,9 @@ pub unsafe extern "C" fn malbox_task_get_config_value(
     ctx: *const MalboxContext,
     key: *const c_char,
 ) -> *const c_char {
-    let c = match unsafe { ctx_from_ptr(ctx) } {
-        Some(c) => c,
-        None => return std::ptr::null(),
+    // SAFETY: forwarded from this function's caller contract on `ctx`.
+    let Some(c) = (unsafe { ctx_from_ptr(ctx) }) else {
+        return std::ptr::null();
     };
 
     if key.is_null() {
@@ -274,6 +273,7 @@ pub unsafe extern "C" fn malbox_task_get_config_value(
         return std::ptr::null();
     }
 
+    // SAFETY: `key` is non-null and the caller guarantees it is NUL-terminated.
     let key_str = match unsafe { std::ffi::CStr::from_ptr(key) }.to_str() {
         Ok(s) => s,
         Err(e) => {
@@ -323,18 +323,20 @@ mod tests {
     }
 
     fn ctx_ptr(ctx: &Context) -> *const MalboxContext {
-        (ctx as *const Context) as *const MalboxContext
+        std::ptr::from_ref(ctx).cast::<MalboxContext>()
     }
 
     #[test]
     fn test_get_id() {
         let ctx = make_ctx(42, HashMap::new(), "/tmp/sample.bin");
+        // SAFETY: the context pointer borrows a live local.
         let rc = unsafe { malbox_task_get_id(ctx_ptr(&ctx)) };
         assert_eq!(rc, 42);
     }
 
     #[test]
     fn test_get_id_null() {
+        // SAFETY: a null context is rejected before any dereference.
         let rc = unsafe { malbox_task_get_id(std::ptr::null()) };
         assert_eq!(rc, -1);
     }
@@ -342,8 +344,11 @@ mod tests {
     #[test]
     fn test_get_sample_path() {
         let ctx = make_ctx(1, HashMap::new(), "/tmp/my_sample.exe");
+        // SAFETY: the context pointer borrows a live local.
         let ptr = unsafe { malbox_task_get_sample_path(ctx_ptr(&ctx)) };
         assert!(!ptr.is_null());
+        // SAFETY: non-null result points into temp storage, alive until
+        // `clear_temp_storage` below.
         let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
         assert_eq!(s, "/tmp/my_sample.exe");
         clear_temp_storage();
@@ -351,6 +356,7 @@ mod tests {
 
     #[test]
     fn test_get_sample_path_null_ctx() {
+        // SAFETY: a null context is rejected before any dereference.
         let ptr = unsafe { malbox_task_get_sample_path(std::ptr::null()) };
         assert!(ptr.is_null());
     }
@@ -364,10 +370,15 @@ mod tests {
         let ctx = make_ctx(1, HashMap::new(), path.to_str().unwrap());
         let mut out_ptr: *const u8 = std::ptr::null();
         let mut out_len: usize = 0;
-        let rc = unsafe { malbox_task_get_sample_bytes(ctx_ptr(&ctx), &mut out_ptr, &mut out_len) };
+        // SAFETY: the context and both out-pointers borrow live locals.
+        let rc = unsafe {
+            malbox_task_get_sample_bytes(ctx_ptr(&ctx), &raw mut out_ptr, &raw mut out_len)
+        };
         assert_eq!(rc, 0);
         assert!(!out_ptr.is_null());
         assert_eq!(out_len, 5);
+        // SAFETY: on success `out_ptr`/`out_len` describe the temp byte buffer,
+        // alive until `clear_temp_storage` below.
         let slice = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
         assert_eq!(slice, b"HELLO");
         clear_temp_storage();
@@ -378,7 +389,10 @@ mod tests {
         let ctx = make_ctx(1, HashMap::new(), "/nonexistent/file.bin");
         let mut out_ptr: *const u8 = std::ptr::null();
         let mut out_len: usize = 0;
-        let rc = unsafe { malbox_task_get_sample_bytes(ctx_ptr(&ctx), &mut out_ptr, &mut out_len) };
+        // SAFETY: the context and both out-pointers borrow live locals.
+        let rc = unsafe {
+            malbox_task_get_sample_bytes(ctx_ptr(&ctx), &raw mut out_ptr, &raw mut out_len)
+        };
         assert_eq!(rc, -1);
     }
 
@@ -388,12 +402,14 @@ mod tests {
         cfg.insert("k1".into(), "v1".into());
         cfg.insert("k2".into(), "v2".into());
         let ctx = make_ctx(1, cfg, "/tmp/s.bin");
+        // SAFETY: the context pointer borrows a live local.
         let count = unsafe { malbox_task_get_config_count(ctx_ptr(&ctx)) };
         assert_eq!(count, 2);
     }
 
     #[test]
     fn test_get_config_count_null() {
+        // SAFETY: a null context is rejected before any dereference.
         let count = unsafe { malbox_task_get_config_count(std::ptr::null()) };
         assert_eq!(count, 0);
     }
@@ -406,12 +422,17 @@ mod tests {
 
         let mut out_key: *const c_char = std::ptr::null();
         let mut out_val: *const c_char = std::ptr::null();
-        let rc =
-            unsafe { malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &mut out_key, &mut out_val) };
+        // SAFETY: the context and both out-pointers borrow live locals.
+        let rc = unsafe {
+            malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &raw mut out_key, &raw mut out_val)
+        };
         assert_eq!(rc, 0);
         assert!(!out_key.is_null());
         assert!(!out_val.is_null());
+        // SAFETY: on success both pointers target temp CStrings, alive until
+        // `clear_temp_storage` below.
         let k = unsafe { CStr::from_ptr(out_key) }.to_str().unwrap();
+        // SAFETY: as for `out_key`.
         let v = unsafe { CStr::from_ptr(out_val) }.to_str().unwrap();
         assert_eq!(k, "alpha");
         assert_eq!(v, "one");
@@ -423,8 +444,10 @@ mod tests {
         let ctx = make_ctx(1, HashMap::new(), "/tmp/s.bin");
         let mut out_key: *const c_char = std::ptr::null();
         let mut out_val: *const c_char = std::ptr::null();
-        let rc =
-            unsafe { malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &mut out_key, &mut out_val) };
+        // SAFETY: the context and both out-pointers borrow live locals.
+        let rc = unsafe {
+            malbox_task_get_config_entry(ctx_ptr(&ctx), 0, &raw mut out_key, &raw mut out_val)
+        };
         assert_eq!(rc, -1);
     }
 
@@ -435,8 +458,11 @@ mod tests {
         let ctx = make_ctx(1, cfg, "/tmp/s.bin");
 
         let key = CString::new("timeout").unwrap();
+        // SAFETY: context and key pointers borrow live locals.
         let ptr = unsafe { malbox_task_get_config_value(ctx_ptr(&ctx), key.as_ptr()) };
         assert!(!ptr.is_null());
+        // SAFETY: non-null result points into temp storage, alive until
+        // `clear_temp_storage` below.
         let val = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
         assert_eq!(val, "30");
         clear_temp_storage();
@@ -446,6 +472,7 @@ mod tests {
     fn test_get_config_value_missing() {
         let ctx = make_ctx(1, HashMap::new(), "/tmp/s.bin");
         let key = CString::new("missing").unwrap();
+        // SAFETY: context and key pointers borrow live locals.
         let ptr = unsafe { malbox_task_get_config_value(ctx_ptr(&ctx), key.as_ptr()) };
         assert!(ptr.is_null());
     }
@@ -453,6 +480,7 @@ mod tests {
     #[test]
     fn test_get_config_value_null_ctx() {
         let key = CString::new("k").unwrap();
+        // SAFETY: a null context is rejected before any dereference.
         let ptr = unsafe { malbox_task_get_config_value(std::ptr::null(), key.as_ptr()) };
         assert!(ptr.is_null());
     }

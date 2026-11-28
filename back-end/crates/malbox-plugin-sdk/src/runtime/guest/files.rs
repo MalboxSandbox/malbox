@@ -15,11 +15,11 @@ pub(super) async fn push_file(
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| format!("failed to create parent dirs: {}", e))?;
+            .map_err(|e| format!("failed to create parent dirs: {e}"))?;
     }
     tokio::fs::write(&path, &data)
         .await
-        .map_err(|e| format!("failed to write file: {}", e))
+        .map_err(|e| format!("failed to write file: {e}"))
 }
 
 /// Read a file from the work directory.
@@ -30,7 +30,7 @@ pub(super) async fn pull_file(
     let path = resolve_path(work_dir, source)?;
     tokio::fs::read(&path)
         .await
-        .map_err(|e| format!("failed to read file: {}", e))
+        .map_err(|e| format!("failed to read file: {e}"))
 }
 
 /// Resolve a relative path against `work_dir`, rejecting traversal attempts.
@@ -42,7 +42,7 @@ pub(super) fn resolve_path(
     relative: &str,
 ) -> std::result::Result<PathBuf, String> {
     if Path::new(relative).is_absolute() {
-        return Err(format!("absolute paths not allowed: {}", relative));
+        return Err(format!("absolute paths not allowed: {relative}"));
     }
 
     let joined = work_dir.join(relative);
@@ -50,7 +50,7 @@ pub(super) fn resolve_path(
     let normalized_work_dir = normalize_path(work_dir);
 
     if !normalized.starts_with(&normalized_work_dir) {
-        return Err(format!("path escapes work directory: {}", relative));
+        return Err(format!("path escapes work directory: {relative}"));
     }
 
     Ok(normalized)

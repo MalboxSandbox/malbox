@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Which transport mechanism to use for guest communication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum TransportKind {
     /// Built-in gRPC transport over the network.
     Grpc,
@@ -37,6 +38,7 @@ impl From<TransportKind> for String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuestAccessConfig {
+    /// Which transport carries guest file transfer and command execution.
     pub transport: TransportKind,
 
     /// Transport-specific configuration passed through to the transport.

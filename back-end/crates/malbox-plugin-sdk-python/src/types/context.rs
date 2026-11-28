@@ -2,7 +2,7 @@ use malbox_plugin_sdk::context::Context;
 use malbox_plugin_sdk::result::PluginResult;
 use malbox_plugin_sdk::{ArtifactOpts, ArtifactRelation, ArtifactSource, SdkError};
 use pyo3::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -36,20 +36,29 @@ fn parse_relation(relation: &str) -> PyResult<ArtifactRelation> {
         })
 }
 
-/// Validate `ResultSink.push_artifact` arguments without a live context.
-#[pyfunction]
-#[pyo3(signature = (data, path, relation))]
-pub fn _validate_artifact_args(
-    data: Option<&[u8]>,
-    path: Option<PathBuf>,
-    relation: &str,
-) -> PyResult<()> {
+/// Check that exactly one artifact source is given and the relation label is valid.
+fn check_artifact_args(data: Option<&[u8]>, path: Option<&Path>, relation: &str) -> PyResult<()> {
     if data.is_some() == path.is_some() {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "exactly one of data or path is required",
         ));
     }
     parse_relation(relation).map(|_| ())
+}
+
+/// Validate `ResultSink.push_artifact` arguments without a live context.
+#[pyfunction]
+#[pyo3(name = "_validate_artifact_args", signature = (data, path, relation))]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "pyo3 extracts an owned PathBuf from the Python argument"
+)]
+pub(crate) fn validate_artifact_args(
+    data: Option<&[u8]>,
+    path: Option<PathBuf>,
+    relation: &str,
+) -> PyResult<()> {
+    check_artifact_args(data, path.as_deref(), relation)
 }
 
 fn ctx_from_ptr(ptr: *const (), valid: &AtomicBool) -> PyResult<&'static Context> {
@@ -60,18 +69,22 @@ fn ctx_from_ptr(ptr: *const (), valid: &AtomicBool) -> PyResult<&'static Context
     }
     // SAFETY: The pointer is valid for the duration of the handler call,
     // and we verified `valid` is still true above.
-    Ok(unsafe { &*(ptr as *const Context) })
+    Ok(unsafe { &*ptr.cast::<Context>() })
 }
 
 // ─── TaskInfo ──────────────────────────────────────────────────────────────
 
 #[pyclass(name = "TaskInfo", module = "malbox_plugin_sdk")]
-pub struct PyTaskInfo {
+#[derive(Debug)]
+pub(crate) struct PyTaskInfo {
     ptr: *const (),
     valid: Arc<AtomicBool>,
 }
 
+// SAFETY: `ptr` points to a `Context` (which is `Send + Sync`) and is only
+// dereferenced via `ctx_from_ptr` after `valid` confirms it is still alive.
 unsafe impl Send for PyTaskInfo {}
+// SAFETY: as for `Send`; all access through `ptr` is shared (`&Context`).
 unsafe impl Sync for PyTaskInfo {}
 
 #[pymethods]
@@ -179,17 +192,21 @@ impl PyTaskInfo {
 // ─── ResultSink ────────────────────────────────────────────────────────────
 
 #[pyclass(name = "ResultSink", module = "malbox_plugin_sdk")]
-pub struct PyResultSink {
+#[derive(Debug)]
+pub(crate) struct PyResultSink {
     ptr: *const (),
     valid: Arc<AtomicBool>,
 }
 
+// SAFETY: `ptr` points to a `Context` (which is `Send + Sync`) and is only
+// dereferenced via `ctx_from_ptr` after `valid` confirms it is still alive.
 unsafe impl Send for PyResultSink {}
+// SAFETY: as for `Send`; all access through `ptr` is shared (`&Context`).
 unsafe impl Sync for PyResultSink {}
 
 #[pymethods]
 impl PyResultSink {
-    fn push(&self, result: Bound<'_, PyPluginResult>) -> PyResult<()> {
+    fn push(&self, result: &Bound<'_, PyPluginResult>) -> PyResult<()> {
         let inner = std::mem::replace(
             &mut result.borrow_mut().inner,
             PluginResult::bytes("", vec![]),
@@ -214,6 +231,10 @@ impl PyResultSink {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "pyo3 extracts an owned PathBuf from the Python argument"
+    )]
     fn push_file(&self, name: &str, path: PathBuf) -> PyResult<()> {
         ctx_from_ptr(self.ptr, &self.valid)?
             .results()
@@ -233,6 +254,10 @@ impl PyResultSink {
     }
 
     #[pyo3(signature = (name, data=None, path=None, relation="extracted", analyze=None, allow_dynamic_recursion=false))]
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "mirrors the Python keyword argument `allow_dynamic_recursion`"
+    )]
     fn push_artifact(
         &self,
         name: &str,
@@ -242,7 +267,7 @@ impl PyResultSink {
         analyze: Option<bool>,
         allow_dynamic_recursion: bool,
     ) -> PyResult<()> {
-        _validate_artifact_args(data.as_deref(), path.clone(), relation)?;
+        check_artifact_args(data.as_deref(), path.as_deref(), relation)?;
         let mut opts = ArtifactOpts::new(parse_relation(relation)?)
             .allow_dynamic_recursion(allow_dynamic_recursion);
         if let Some(v) = analyze {
@@ -251,7 +276,7 @@ impl PyResultSink {
         let source = match (data, path) {
             (Some(bytes), None) => ArtifactSource::Bytes(bytes),
             (None, Some(p)) => ArtifactSource::File(p),
-            _ => unreachable!("validated by _validate_artifact_args"),
+            _ => unreachable!("validated by check_artifact_args"),
         };
         ctx_from_ptr(self.ptr, &self.valid)?
             .results()
@@ -266,12 +291,16 @@ impl PyResultSink {
 // ─── Context ───────────────────────────────────────────────────────────────
 
 #[pyclass(name = "Context", module = "malbox_plugin_sdk")]
-pub struct PyContext {
+#[derive(Debug)]
+pub(crate) struct PyContext {
     ptr: *const (),
     valid: Arc<AtomicBool>,
 }
 
+// SAFETY: `ptr` points to a `Context` (which is `Send + Sync`) and is only
+// dereferenced via `ctx_from_ptr` after `valid` confirms it is still alive.
 unsafe impl Send for PyContext {}
+// SAFETY: as for `Send`; all access through `ptr` is shared (`&Context`).
 unsafe impl Sync for PyContext {}
 
 impl PyContext {
@@ -282,12 +311,12 @@ impl PyContext {
     /// underlying `Context` is no longer valid.
     ///
     /// # Safety
-    /// The caller must ensure the Context outlives this PyContext
+    /// The caller must ensure the Context outlives this `PyContext`
     /// (i.e. `invalidate` is called before the Context is dropped).
     pub(crate) unsafe fn from_ref(ctx: &Context) -> (Self, Arc<AtomicBool>) {
         let valid = Arc::new(AtomicBool::new(true));
         let py_ctx = Self {
-            ptr: ctx as *const Context as *const (),
+            ptr: std::ptr::from_ref(ctx).cast::<()>(),
             valid: Arc::clone(&valid),
         };
         (py_ctx, valid)

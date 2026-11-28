@@ -19,6 +19,7 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::Notify;
 use tracing::{debug, error, info};
 
+/// Database row describing a pool machine.
 pub type DbMachine = machinery::Machine;
 
 /// Central machine pool that owns all lifecycle operations.
@@ -26,10 +27,11 @@ pub type DbMachine = machinery::Machine;
 /// All heavy work (provisioning, reverting) is spawned into background tokio
 /// tasks so that API calls return immediately.  The `machine_available`
 /// [`Notify`] is signalled whenever a machine transitions to `ready`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MachinePool {
     pub(crate) provider: Arc<ProviderHandle>,
     pub(crate) db: PgPool,
+    /// Signalled whenever a machine becomes `ready`; acquirers wait on it.
     pub machine_available: Arc<Notify>,
     /// Config-declared `provider_config` per machine name. The DB stores only
     /// its hash, so revert-by-reprovision reads the value from here.
@@ -38,6 +40,7 @@ pub struct MachinePool {
 }
 
 impl MachinePool {
+    /// Create a pool backed by `provider` and the machine tables in `db`.
     pub fn new(provider: Arc<ProviderHandle>, db: PgPool) -> Self {
         Self {
             provider,
@@ -50,10 +53,14 @@ impl MachinePool {
     /// Release a machine after task completion.
     ///
     /// Marks the machine as `reverting` and spawns an async revert.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine cannot be marked as released in the database.
     pub async fn release(&self, machine_id: i32) -> Result<()> {
         machinery::release_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let pool = self.clone();
         tokio::spawn(async move {
@@ -73,23 +80,35 @@ impl MachinePool {
     }
 
     /// Fetch a single machine by ID.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the database query fails.
     pub async fn get(&self, machine_id: i32) -> Result<Option<DbMachine>> {
         machinery::fetch_machine(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))
+            .map_err(ResourceError::Database)
     }
 
     /// List all machines.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the database query fails.
     pub async fn list(&self) -> Result<Vec<DbMachine>> {
         machinery::fetch_all_machines(&self.db)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))
+            .map_err(ResourceError::Database)
     }
 
     /// Delete a snapshot from both the provider and the database.
     ///
     /// Provider deletion is best-effort: if it fails the DB record is still
     /// removed so the system doesn't get stuck with an orphaned reference.
+    ///
+    /// # Errors
+    ///
+    /// Fails if deleting the snapshot's provision runs or its row fails.
     pub async fn delete_snapshot(
         &self,
         machine_id: i32,
@@ -112,11 +131,11 @@ impl MachinePool {
 
         provision_runs::delete_provision_runs_for_snapshot(&self.db, snapshot.id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         snapshots::delete_snapshot(&self.db, snapshot.id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         info!(
             machine_id,
@@ -130,12 +149,16 @@ impl MachinePool {
     ///
     /// Returns an empty list if there is no active snapshot or the snapshot
     /// has no guest plugins recorded.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the active snapshot cannot be fetched from the database.
     pub async fn get_active_snapshot_guest_plugins(&self, machine_id: i32) -> Result<Vec<String>> {
         use malbox_database::repositories::snapshots;
 
         let snap = snapshots::fetch_active_snapshot(&self.db, machine_id)
             .await
-            .map_err(|e| ResourceError::Database(e.into()))?;
+            .map_err(ResourceError::Database)?;
 
         let plugins = snap
             .and_then(|s| s.guest_plugins)
@@ -150,6 +173,11 @@ impl MachinePool {
     ///
     /// After a snapshot revert the VM is stopped. Workers must call this before
     /// attempting to connect to guest plugins.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the machine lacks a provider ID or valid IP, the provider
+    /// cannot start it, or the port is unreachable within two minutes.
     pub async fn start_and_wait(&self, db_machine: &DbMachine) -> Result<()> {
         let provider_id = db_machine
             .provider_id
@@ -161,7 +189,7 @@ impl MachinePool {
             .as_deref()
             .ok_or_else(|| ResourceError::Internal("Machine has no IP".into()))?
             .parse()
-            .map_err(|e| ResourceError::Internal(format!("Invalid IP: {}", e)))?;
+            .map_err(|e| ResourceError::Internal(format!("Invalid IP: {e}")))?;
 
         let platform = match db_machine.platform {
             MachinePlatform::Windows => Platform::Windows,
@@ -181,7 +209,7 @@ impl MachinePool {
         allocate
             .start(&runtime_machine)
             .await
-            .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {}", e)))?;
+            .map_err(|e| ResourceError::Provider(format!("Failed to start VM: {e}")))?;
 
         info!(
             machine_id = db_machine.id,
@@ -192,7 +220,7 @@ impl MachinePool {
         // Wait for the guest plugin gRPC port (50051) to become reachable.
         let addr = std::net::SocketAddr::new(ip, 50051);
         let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(120);
+        let timeout = std::time::Duration::from_mins(2);
         let connect_timeout = std::time::Duration::from_secs(5);
         let mut interval = std::time::Duration::from_millis(200);
         let max_interval = std::time::Duration::from_secs(10);

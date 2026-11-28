@@ -9,7 +9,7 @@ use super::super::AppState;
 use super::control_error;
 use crate::http::Result;
 
-pub fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/v1/tasks/{id}/cancel", post(cancel_task))
 }
 

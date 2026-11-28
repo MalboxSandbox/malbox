@@ -1,8 +1,8 @@
-pub mod artifacts;
-pub mod cancel;
-pub mod create;
-pub mod get;
-pub mod report;
+pub(crate) mod artifacts;
+pub(crate) mod cancel;
+pub(crate) mod create;
+pub(crate) mod get;
+pub(crate) mod report;
 
 use malbox_scheduler::ControlError;
 
