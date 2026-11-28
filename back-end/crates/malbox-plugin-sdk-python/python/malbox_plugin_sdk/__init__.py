@@ -22,7 +22,7 @@ from malbox_plugin_sdk._native import (
     GraphNode,
     GraphEdge,
     run,
-    _validate_artifact_args,
+    _validate_artifact_args as _validate_artifact_args,
     trace,
     debug,
     info,
