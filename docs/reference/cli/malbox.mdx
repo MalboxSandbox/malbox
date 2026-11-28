@@ -38,7 +38,7 @@ malbox task submit <file> [options]
 
 | Argument / Flag | Type | Required | Default | Description |
 |-----------------|------|----------|---------|-------------|
-| `file` | `string` | Yes | - | Path to the file to analyze |
+| `file` | `string` | Yes | - | Path to the file to analyse |
 | `--timeout` | `integer` | No | `300` | Detonation timeout in seconds, used when the submission names a platform, snapshot, or machine |
 | `--priority` | `integer` | No | `1` | Task priority (higher = more urgent) |
 | `--tags` | `string[]` | No | - | Tags for the task (accepts multiple values) |
@@ -57,7 +57,7 @@ malbox task submit <file> [options]
 | `--password` | `string` | No | - | Password to try on encrypted content (repeatable) |
 | `--param` | `plugin.key=value` | No | - | Plugin parameter override (repeatable). The value is parsed as JSON, or used as a plain string if it is not valid JSON. |
 
-If you pass `--platform`, `--snapshot-id`, or `--machine-id`, the sample is detonated on a matching machine. Otherwise, it is detonated only if a [detonation profile](/reference/configuration/orchestration#detonation-profiles) matches its type. Host plugins run on the sample and on every analyzed child artifact. See [Orchestration](/task-management/orchestration) for how artifacts and jobs work, and [Submission parameters](/task-management/orchestration#submission-parameters) for what the flags set.
+If you pass `--platform`, `--snapshot-id`, or `--machine-id`, the sample is detonated on a matching machine. Otherwise, it is detonated only if a [detonation profile](/reference/configuration/orchestration#detonation-profiles) matches its type. Host plugins run on the sample and on every analysed child artifact. See [Orchestration](/task-management/orchestration) for how artifacts and jobs work, and [Submission parameters](/task-management/orchestration#submission-parameters) for what the flags set.
 
 ```bash
 malbox task submit archive.zip --password infected --param host-archive-extractor.passwords='["x"]'
